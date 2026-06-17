@@ -30,12 +30,22 @@ SigmaFlow/
 
 ## Avvio del progetto Google
 
-1. Crea un nuovo Google Sheet che fara' da database.
+Segui la guida operativa in [`docs/google-workspace-setup.md`](docs/google-workspace-setup.md).
+
+In sintesi:
+
+1. Crea o importa il Google Sheet database.
 2. Apri `Extensions > Apps Script`.
 3. Copia i file in `apps-script/src` dentro il progetto Apps Script.
 4. Copia il contenuto di `apps-script/appsscript.json` nel manifest del progetto.
 5. Esegui `setupSigmaFlow()` una prima volta dall'editor Apps Script.
 6. Pubblica come Web App limitata agli utenti del dominio Workspace.
+
+Per generare il template `.xlsx` del database:
+
+```powershell
+& 'C:\Users\Marco\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' .\tools\build_database_template.mjs
+```
 
 ## Roadmap iniziale
 
