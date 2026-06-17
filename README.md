@@ -47,6 +47,13 @@ Per generare il template `.xlsx` del database:
 & 'C:\Users\Marco\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' .\tools\build_database_template.mjs
 ```
 
+Per usare `clasp` locale:
+
+```powershell
+.\tools\clasp.cmd --version
+.\tools\clasp.cmd login
+```
+
 ## Roadmap iniziale
 
 1. Database e CRUD backend.

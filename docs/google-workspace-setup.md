@@ -30,6 +30,30 @@ Opzione manuale:
 
 ## 2. Progetto Apps Script
 
+### Opzione automatica con clasp
+
+`clasp` e' installato localmente nella workspace e si lancia con:
+
+```powershell
+.\tools\clasp.cmd --version
+```
+
+Login:
+
+```powershell
+.\tools\clasp.cmd login
+```
+
+Dopo il login, crea o collega il progetto Apps Script e sincronizza i file:
+
+```powershell
+cd apps-script
+..\tools\clasp.cmd create --type sheets --title SigmaFlow --parentId 1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q --rootDir ./src
+..\tools\clasp.cmd push
+```
+
+### Opzione manuale
+
 1. Dal Google Sheet, apri `Extensions > Apps Script`.
 2. Copia `apps-script/appsscript.json` nel manifest del progetto.
 3. Crea i file `.gs`:
