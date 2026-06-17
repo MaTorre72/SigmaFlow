@@ -61,3 +61,7 @@ Per usare `clasp` locale:
 3. Modello dinamico M/M/1, M/G/1 e rework.
 4. Dashboard metriche.
 5. Flusso rework completo.
+
+## Test e sicurezza
+
+La strategia di verifica e' descritta in [`docs/testing-and-security.md`](docs/testing-and-security.md). I test Apps Script sono in `apps-script/src/Tests.gs` e richiedono uno Spreadsheet TEST configurato tramite Script Property `SIGMAFLOW_TEST_SPREADSHEET_ID`.
