@@ -11,6 +11,13 @@ Spreadsheet database creato e verificato:
 - URL: <https://docs.google.com/spreadsheets/d/1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q>
 - Timezone: `Europe/Rome`
 - Tab verificati: `jobs`, `cases`, `config`
+- Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
+- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbwHaOY08-hWERZ66PGTXCeXCBQGNV38kzkpPFCk7GBETzh2FadgDT1ogSK-e3YOMBFo/exec>
+- Deployment corrente: `AKfycbwHaOY08-hWERZ66PGTXCeXCBQGNV38kzkpPFCk7GBETzh2FadgDT1ogSK-e3YOMBFo` (`@2`)
+
+Nota: `clasp create --type sheets` ha creato un nuovo contenitore Google Sheets per il progetto Apps Script. Il codice SigmaFlow usa comunque il database canonico tramite `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`.
+
+Nota operativa: `clasp run setupSigmaFlow` puo' restituire un errore di permessi anche dopo il deploy se il progetto non e' eseguibile via Apps Script API per l'utente corrente. In quel caso eseguire `setupSigmaFlow` una volta dall'editor Apps Script e autorizzare gli scope Google.
 
 ## 1. Spreadsheet database
 
@@ -55,7 +62,7 @@ cd apps-script
 ### Opzione manuale
 
 1. Dal Google Sheet, apri `Extensions > Apps Script`.
-2. Copia `apps-script/appsscript.json` nel manifest del progetto.
+2. Copia `apps-script/src/appsscript.json` nel manifest del progetto.
 3. Crea i file `.gs`:
    - `Constants.gs`
    - `Schema.gs`

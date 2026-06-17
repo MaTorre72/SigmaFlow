@@ -4,6 +4,10 @@ function getSpreadsheet_() {
     return SpreadsheetApp.openById(id);
   }
 
+  if (SIGMAFLOW.DEFAULT_SPREADSHEET_ID) {
+    return SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
+  }
+
   var active = SpreadsheetApp.getActiveSpreadsheet();
   if (!active) {
     throw new Error('Nessuno spreadsheet configurato. Esegui setupSigmaFlow() da uno Spreadsheet collegato.');

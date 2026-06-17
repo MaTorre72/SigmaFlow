@@ -12,8 +12,8 @@ SigmaFlow e' un sistema Kanban leggero per team tecnico-ambientali, pensato per 
 ```text
 SigmaFlow/
   apps-script/
-    appsscript.json
     src/
+      appsscript.json
       Constants.gs
       Schema.gs
       Utils.gs
@@ -37,7 +37,7 @@ In sintesi:
 1. Crea o importa il Google Sheet database.
 2. Apri `Extensions > Apps Script`.
 3. Copia i file in `apps-script/src` dentro il progetto Apps Script.
-4. Copia il contenuto di `apps-script/appsscript.json` nel manifest del progetto.
+4. Copia il contenuto di `apps-script/src/appsscript.json` nel manifest del progetto.
 5. Esegui `setupSigmaFlow()` una prima volta dall'editor Apps Script.
 6. Pubblica come Web App limitata agli utenti del dominio Workspace.
 
