@@ -1,0 +1,36 @@
+<section class="toolbar">
+  <button id="add-job-button" class="primary-button">+ Aggiungi job</button>
+  <label>
+    Assegnatario
+    <input id="filter-assignee" type="search" placeholder="Tutti">
+  </label>
+  <label>
+    Tag
+    <input id="filter-tag" type="search" placeholder="Tutti">
+  </label>
+  <label>
+    Taglia
+    <select id="filter-size">
+      <option value="">Tutte</option>
+      <option>S</option>
+      <option>M</option>
+      <option>L</option>
+      <option>XL</option>
+    </select>
+  </label>
+</section>
+
+<form id="job-form" class="job-form" hidden>
+  <input name="title" required placeholder="Titolo job">
+  <input name="assignee" placeholder="Assegnatario">
+  <input name="tag" placeholder="Tag">
+  <select name="size_class">
+    <option>S</option>
+    <option selected>M</option>
+    <option>L</option>
+    <option>XL</option>
+  </select>
+  <button type="submit">Crea</button>
+</form>
+
+<section id="kanban-board" class="kanban-board" aria-live="polite"></section>

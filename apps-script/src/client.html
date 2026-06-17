@@ -1,0 +1,228 @@
+<script>
+  var state = {
+    board: null,
+    filters: {
+      assignee: '',
+      tag: '',
+      size: ''
+    }
+  };
+
+  var columns = [
+    ['backlog', 'Backlog'],
+    ['in_progress', 'In corso'],
+    ['in_review', 'In review'],
+    ['done', 'Fatto'],
+    ['blocked', 'Bloccato']
+  ];
+
+  document.addEventListener('DOMContentLoaded', function() {
+    bindNavigation();
+    bindFilters();
+    bindJobForm();
+    loadBoard();
+    loadMetrics();
+    window.setInterval(loadBoard, 60000);
+  });
+
+  function callApi(action, payload) {
+    return new Promise(function(resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (!response || response.success === false) {
+            reject(new Error((response && response.error) || 'Errore sconosciuto'));
+            return;
+          }
+          resolve(response.data);
+        })
+        .withFailureHandler(reject)
+        .api(action, payload || {});
+    });
+  }
+
+  function bindNavigation() {
+    document.querySelectorAll('.nav-button').forEach(function(button) {
+      button.addEventListener('click', function() {
+        document.querySelectorAll('.nav-button').forEach(function(item) {
+          item.classList.remove('active');
+        });
+        button.classList.add('active');
+        document.getElementById('view-board').hidden = button.dataset.view !== 'board';
+        document.getElementById('view-dashboard').hidden = button.dataset.view !== 'dashboard';
+        if (button.dataset.view === 'dashboard') {
+          loadMetrics();
+        }
+      });
+    });
+  }
+
+  function bindFilters() {
+    [
+      ['filter-assignee', 'assignee'],
+      ['filter-tag', 'tag'],
+      ['filter-size', 'size']
+    ].forEach(function(pair) {
+      document.getElementById(pair[0]).addEventListener('input', function(event) {
+        state.filters[pair[1]] = event.target.value.toLowerCase();
+        renderBoard();
+      });
+    });
+  }
+
+  function bindJobForm() {
+    var button = document.getElementById('add-job-button');
+    var form = document.getElementById('job-form');
+    button.addEventListener('click', function() {
+      form.hidden = !form.hidden;
+    });
+
+    form.addEventListener('submit', function(event) {
+      event.preventDefault();
+      var data = Object.fromEntries(new FormData(form).entries());
+      callApi('addJob', data).then(function() {
+        form.reset();
+        form.hidden = true;
+        loadBoard();
+      }).catch(showError);
+    });
+  }
+
+  function loadBoard() {
+    callApi('getBoard').then(function(data) {
+      state.board = data.columns;
+      renderBoard();
+    }).catch(showError);
+  }
+
+  function renderBoard() {
+    var root = document.getElementById('kanban-board');
+    root.innerHTML = '';
+
+    columns.forEach(function(column) {
+      var columnEl = document.createElement('section');
+      columnEl.className = 'column';
+      columnEl.dataset.status = column[0];
+      columnEl.innerHTML = '<h2>' + column[1] + '</h2>';
+      columnEl.addEventListener('dragover', function(event) {
+        event.preventDefault();
+      });
+      columnEl.addEventListener('drop', function(event) {
+        event.preventDefault();
+        moveJob(event.dataTransfer.getData('text/plain'), column[0]);
+      });
+
+      var jobs = ((state.board && state.board[column[0]]) || []).filter(matchesFilters);
+      jobs.forEach(function(job) {
+        columnEl.appendChild(renderCard(job));
+      });
+      root.appendChild(columnEl);
+    });
+  }
+
+  function renderCard(job) {
+    var card = document.createElement('article');
+    card.className = 'card';
+    card.draggable = true;
+    card.addEventListener('dragstart', function(event) {
+      event.dataTransfer.setData('text/plain', job.job_id);
+    });
+
+    var reworkBadge = Number(job.visit_number || 1) > 1
+      ? '<span class="badge rework">v' + job.visit_number + '</span>'
+      : '<span class="badge">v1</span>';
+
+    card.innerHTML = [
+      '<div class="card-title"></div>',
+      '<div class="badges">',
+      '<span class="badge">' + escapeHtml(job.tag || 'senza tag') + '</span>',
+      '<span class="badge">' + escapeHtml(job.assignee || 'non assegnato') + '</span>',
+      '<span class="badge">' + escapeHtml(job.size_class || 'M') + '</span>',
+      reworkBadge,
+      '</div>'
+    ].join('');
+    card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
+    return card;
+  }
+
+  function moveJob(jobId, status) {
+    if (!jobId) {
+      return;
+    }
+    callApi('moveJob', { job_id: jobId, status: status }).then(loadBoard).catch(showError);
+  }
+
+  function matchesFilters(job) {
+    var assignee = String(job.assignee || '').toLowerCase();
+    var tag = String(job.tag || '').toLowerCase();
+    var size = String(job.size_class || '').toLowerCase();
+    return (!state.filters.assignee || assignee.indexOf(state.filters.assignee) !== -1)
+      && (!state.filters.tag || tag.indexOf(state.filters.tag) !== -1)
+      && (!state.filters.size || size === state.filters.size);
+  }
+
+  function loadMetrics() {
+    callApi('getMetrics').then(renderMetrics).catch(showError);
+  }
+
+  function renderMetrics(metrics) {
+    var stability = metrics.stability || {};
+    var stateEl = document.getElementById('system-state');
+    stateEl.className = 'state-badge state-' + stability.system_state;
+    stateEl.textContent = stability.system_state || '-';
+    document.getElementById('rho-effective').textContent = 'rho effettivo: ' + valueOrDash(metrics.rework && metrics.rework.rho_effective);
+    document.getElementById('rho-marker').style.left = Math.min(100, Math.max(0, ((metrics.rework && metrics.rework.rho_effective) || 0) * 100)) + '%';
+
+    renderDl('empirical-metrics', {
+      'Finestra': metrics.window_days + ' giorni',
+      'Job osservati': metrics.n_jobs_observed,
+      'lambda': metrics.lambda,
+      'mu': metrics.mu,
+      'E[S]': metrics.E_S,
+      'Cs2': metrics.Cs2
+    });
+
+    renderDl('rework-metrics', {
+      'p1': metrics.rework && metrics.rework.p1,
+      'E[K]': metrics.rework && metrics.rework.E_K,
+      'lambda effettivo': metrics.rework && metrics.rework.lambda_effective,
+      'Wq rework': metrics.rework && metrics.rework.Wq
+    });
+
+    renderQueueTable(metrics);
+  }
+
+  function renderDl(id, values) {
+    var root = document.getElementById(id);
+    root.innerHTML = '';
+    Object.keys(values).forEach(function(label) {
+      root.insertAdjacentHTML('beforeend', '<dt>' + label + '</dt><dd>' + valueOrDash(values[label]) + '</dd>');
+    });
+  }
+
+  function renderQueueTable(metrics) {
+    var rows = [
+      ['M/M/1', metrics.MM1],
+      ['M/G/1', metrics.MG1],
+      ['Rework', { Wq: metrics.rework && metrics.rework.Wq, W: null, Lq: null, L: null }]
+    ];
+    var html = '<thead><tr><th>Modello</th><th>Wq</th><th>W</th><th>Lq</th><th>L</th></tr></thead><tbody>';
+    rows.forEach(function(row) {
+      html += '<tr><th>' + row[0] + '</th><td>' + valueOrDash(row[1].Wq) + '</td><td>' + valueOrDash(row[1].W) + '</td><td>' + valueOrDash(row[1].Lq) + '</td><td>' + valueOrDash(row[1].L) + '</td></tr>';
+    });
+    document.getElementById('queue-table').innerHTML = html + '</tbody>';
+  }
+
+  function valueOrDash(value) {
+    return value === null || value === undefined || value === '' ? '-' : value;
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function(char) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
+    });
+  }
+
+  function showError(error) {
+    alert(error.message || error);
+  }
+</script>

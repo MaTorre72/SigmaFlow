@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <?!= include('style'); ?>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>SigmaFlow</h1>
+        <p>Kanban operativo e modello dinamico del lavoro</p>
+      </div>
+      <nav>
+        <button class="nav-button active" data-view="board">Board</button>
+        <button class="nav-button" data-view="dashboard">Dashboard</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="view-board">
+        <?!= include('board'); ?>
+      </section>
+      <section id="view-dashboard" hidden>
+        <?!= include('dashboard'); ?>
+      </section>
+    </main>
+
+    <?!= include('client'); ?>
+  </body>
+</html>
