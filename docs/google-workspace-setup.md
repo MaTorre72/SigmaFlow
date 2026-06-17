@@ -2,6 +2,16 @@
 
 Questa guida porta SigmaFlow da repository locale a Web App Apps Script.
 
+## Stato ambiente
+
+Spreadsheet database creato e verificato:
+
+- Nome: `SigmaFlow Database`
+- ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
+- URL: <https://docs.google.com/spreadsheets/d/1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q>
+- Timezone: `Europe/Rome`
+- Tab verificati: `jobs`, `cases`, `config`
+
 ## 1. Spreadsheet database
 
 Opzione automatica:
