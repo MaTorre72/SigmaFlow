@@ -50,7 +50,7 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxdW7u8cjjgEe1eBMIYztVNPltPe5ZGwm0Uyz3tIRXcHRSrgv87ZVEX4YR-bjq6-xD3/exec?env=test>
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec?env=test>
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.

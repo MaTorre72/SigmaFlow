@@ -105,6 +105,26 @@
     flex-wrap: wrap;
   }
 
+  .job-form {
+    align-items: end;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+  }
+
+  .form-title {
+    font-weight: 700;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 8px;
+  }
+
   label {
     color: var(--muted);
     display: grid;
@@ -133,6 +153,12 @@
     border-radius: 8px;
     min-height: 420px;
     padding: 10px;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .column.drop-target {
+    background: #e5f4ef;
+    border-color: var(--accent);
   }
 
   .column h2 {
@@ -148,6 +174,12 @@
     padding: 10px;
     margin-bottom: 10px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+
+  .card.dragging {
+    opacity: 0.55;
+    transform: scale(0.98);
   }
 
   .card-title {
@@ -172,6 +204,17 @@
   .badge.rework {
     background: #fdecec;
     color: var(--danger);
+  }
+
+  .card-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+  }
+
+  .delete-card-button {
+    color: var(--danger);
+    min-height: 30px;
   }
 
   .metrics-grid {

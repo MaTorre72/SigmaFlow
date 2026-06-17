@@ -21,16 +21,32 @@
 </section>
 
 <form id="job-form" class="job-form" hidden>
-  <input name="title" required placeholder="Titolo job">
-  <input name="assignee" placeholder="Assegnatario">
-  <input name="tag" placeholder="Tag">
-  <select name="size_class">
-    <option>S</option>
-    <option selected>M</option>
-    <option>L</option>
-    <option>XL</option>
-  </select>
-  <button type="submit">Crea</button>
+  <div class="form-title">Nuovo job</div>
+  <label>
+    Titolo
+    <input name="title" required placeholder="Es. Sopralluogo Rossi">
+  </label>
+  <label>
+    Assegnatario
+    <input name="assignee" placeholder="Nome o email">
+  </label>
+  <label>
+    Tag
+    <input name="tag" placeholder="Es. urgente">
+  </label>
+  <label>
+    Taglia
+    <select name="size_class">
+      <option>S</option>
+      <option selected>M</option>
+      <option>L</option>
+      <option>XL</option>
+    </select>
+  </label>
+  <div class="form-actions">
+    <button type="submit" class="primary-button">Crea job</button>
+    <button type="button" id="cancel-job-button">Annulla</button>
+  </div>
 </form>
 
 <section id="kanban-board" class="kanban-board" aria-live="polite"></section>

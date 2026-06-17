@@ -85,9 +85,15 @@
 
   function bindJobForm() {
     var button = document.getElementById('add-job-button');
+    var cancel = document.getElementById('cancel-job-button');
     var form = document.getElementById('job-form');
     button.addEventListener('click', function() {
-      form.hidden = !form.hidden;
+      form.hidden = false;
+      form.elements.title.focus();
+    });
+    cancel.addEventListener('click', function() {
+      form.reset();
+      form.hidden = true;
     });
 
     form.addEventListener('submit', function(event) {
@@ -122,7 +128,16 @@
       });
       columnEl.addEventListener('drop', function(event) {
         event.preventDefault();
+        columnEl.classList.remove('drop-target');
         moveJob(event.dataTransfer.getData('text/plain'), column[0]);
+      });
+      columnEl.addEventListener('dragenter', function() {
+        columnEl.classList.add('drop-target');
+      });
+      columnEl.addEventListener('dragleave', function(event) {
+        if (!columnEl.contains(event.relatedTarget)) {
+          columnEl.classList.remove('drop-target');
+        }
       });
 
       var jobs = ((state.board && state.board[column[0]]) || []).filter(matchesFilters);
@@ -139,6 +154,10 @@
     card.draggable = true;
     card.addEventListener('dragstart', function(event) {
       event.dataTransfer.setData('text/plain', job.job_id);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', function() {
+      card.classList.remove('dragging');
     });
 
     var reworkBadge = Number(job.visit_number || 1) > 1
@@ -152,9 +171,15 @@
       '<span class="badge">' + escapeHtml(job.assignee || 'non assegnato') + '</span>',
       '<span class="badge">' + escapeHtml(job.size_class || 'M') + '</span>',
       reworkBadge,
+      '</div>',
+      '<div class="card-actions">',
+      '<button type="button" class="delete-card-button">Elimina</button>',
       '</div>'
     ].join('');
     card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
+    card.querySelector('.delete-card-button').addEventListener('click', function() {
+      deleteJob(job);
+    });
     return card;
   }
 
@@ -162,7 +187,64 @@
     if (!jobId) {
       return;
     }
-    callApi('moveJob', { job_id: jobId, status: status }).then(loadBoard).catch(showError);
+    var previousBoard = cloneBoard();
+    if (moveJobLocally(jobId, status)) {
+      renderBoard();
+    }
+    callApi('moveJob', { job_id: jobId, status: status }).then(loadBoard).catch(function(error) {
+      state.board = previousBoard;
+      renderBoard();
+      showError(error);
+    });
+  }
+
+  function deleteJob(job) {
+    if (!confirm('Eliminare "' + (job.title || job.job_id) + '"?')) {
+      return;
+    }
+
+    var previousBoard = cloneBoard();
+    removeJobLocally(job.job_id);
+    renderBoard();
+    callApi('deleteJob', { job_id: job.job_id }).then(loadBoard).catch(function(error) {
+      state.board = previousBoard;
+      renderBoard();
+      showError(error);
+    });
+  }
+
+  function cloneBoard() {
+    return JSON.parse(JSON.stringify(state.board || {}));
+  }
+
+  function moveJobLocally(jobId, status) {
+    var moved = null;
+    Object.keys(state.board || {}).forEach(function(column) {
+      state.board[column] = (state.board[column] || []).filter(function(job) {
+        if (job.job_id === jobId) {
+          moved = job;
+          return false;
+        }
+        return true;
+      });
+    });
+    if (!moved) {
+      return false;
+    }
+    moved.status = status;
+    if (!state.board[status]) {
+      state.board[status] = [];
+    }
+    state.board[status].push(moved);
+    return true;
+  }
+
+  function removeJobLocally(jobId) {
+    Object.keys(state.board || {}).forEach(function(column) {
+      state.board[column] = (state.board[column] || []).filter(function(job) {
+        return job.job_id !== jobId;
+      });
+    });
   }
 
   function matchesFilters(job) {

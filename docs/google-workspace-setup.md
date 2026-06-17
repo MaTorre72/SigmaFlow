@@ -12,10 +12,10 @@ Spreadsheet database creato e verificato:
 - Timezone: `Europe/Rome`
 - Tab verificati: `jobs`, `cases`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
-- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxdW7u8cjjgEe1eBMIYztVNPltPe5ZGwm0Uyz3tIRXcHRSrgv87ZVEX4YR-bjq6-xD3/exec>
-- Deployment corrente: `AKfycbxdW7u8cjjgEe1eBMIYztVNPltPe5ZGwm0Uyz3tIRXcHRSrgv87ZVEX4YR-bjq6-xD3` (`@4`)
-- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxdW7u8cjjgEe1eBMIYztVNPltPe5ZGwm0Uyz3tIRXcHRSrgv87ZVEX4YR-bjq6-xD3/exec?env=prod>
-- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxdW7u8cjjgEe1eBMIYztVNPltPe5ZGwm0Uyz3tIRXcHRSrgv87ZVEX4YR-bjq6-xD3/exec?env=test>
+- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec>
+- Deployment corrente: `AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J` (`@5`)
+- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec?env=prod>
+- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec?env=test>
 
 Nota: `clasp create --type sheets` ha creato un nuovo contenitore Google Sheets per il progetto Apps Script. Il codice SigmaFlow usa comunque il database canonico tramite `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`.
 
