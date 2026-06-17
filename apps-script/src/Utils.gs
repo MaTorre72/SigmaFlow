@@ -16,6 +16,43 @@ function getSpreadsheet_() {
   return active;
 }
 
+function getSpreadsheetForEnv_(env) {
+  if (env === 'test') {
+    var props = PropertiesService.getScriptProperties();
+    var testId = props.getProperty(SIGMAFLOW.PROP_TEST_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
+    if (!testId) {
+      throw new Error('Database TEST non configurato');
+    }
+    return SpreadsheetApp.openById(testId);
+  }
+
+  return getSpreadsheet_();
+}
+
+function normalizeEnv_(env) {
+  return env === 'test' ? 'test' : 'prod';
+}
+
+function withEnvironment_(env, callback) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  var props = PropertiesService.getScriptProperties();
+  var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  var ss = getSpreadsheetForEnv_(normalizeEnv_(env));
+
+  try {
+    props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+    return callback(ss);
+  } finally {
+    if (previousId) {
+      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);
+    } else {
+      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+    }
+    lock.releaseLock();
+  }
+}
+
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }

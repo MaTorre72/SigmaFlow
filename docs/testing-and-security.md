@@ -50,17 +50,18 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App.
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxdW7u8cjjgEe1eBMIYztVNPltPe5ZGwm0Uyz3tIRXcHRSrgv87ZVEX4YR-bjq6-xD3/exec?env=test>
 2. Verificare che la board carichi senza alert.
-3. Creare un job di prova in `backlog`.
-4. Trascinare il job in `in_progress`.
-5. Trascinare il job in `done`.
-6. Verificare nello Sheet TEST:
+3. Verificare che il badge ambiente mostri `TEST`.
+4. Creare un job di prova in `backlog`.
+5. Trascinare il job in `in_progress`.
+6. Trascinare il job in `done`.
+7. Verificare nello Sheet TEST:
    - `arrival_ts` valorizzato
    - `start_ts` valorizzato
    - `done_ts` valorizzato
    - `service_time_h`, `lead_time_h`, `wait_time_h` numerici
-7. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
+8. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
 
 ## Test backend
 

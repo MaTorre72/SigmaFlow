@@ -1,6 +1,7 @@
 function doGet(e) {
   var template = HtmlService.createTemplateFromFile('index');
   template.view = (e && e.parameter && e.parameter.view) || 'board';
+  template.env = normalizeEnv_(e && e.parameter && e.parameter.env);
   return template.evaluate()
     .setTitle('SigmaFlow')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -19,7 +20,13 @@ function api(action, payload) {
   try {
     payload = payload || {};
     payload.action = action;
-    return routeAction_(payload);
+    return withEnvironment_(payload.env, function() {
+      var response = routeAction_(payload);
+      if (response && response.success && response.data) {
+        response.data.env = normalizeEnv_(payload.env);
+      }
+      return response;
+    });
   } catch (err) {
     return fail_(err.message);
   }

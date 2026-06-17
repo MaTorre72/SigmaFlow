@@ -1,5 +1,6 @@
 <script>
   var state = {
+    env: window.SIGMAFLOW_ENV === 'test' ? 'test' : 'prod',
     board: null,
     filters: {
       assignee: '',
@@ -17,6 +18,7 @@
   ];
 
   document.addEventListener('DOMContentLoaded', function() {
+    bindEnvironmentBadge();
     bindNavigation();
     bindFilters();
     bindJobForm();
@@ -36,8 +38,20 @@
           resolve(response.data);
         })
         .withFailureHandler(reject)
-        .api(action, payload || {});
+        .api(action, Object.assign({}, payload || {}, { env: state.env }));
     });
+  }
+
+  function bindEnvironmentBadge() {
+    var badge = document.getElementById('environment-badge');
+    if (!badge) {
+      return;
+    }
+    badge.textContent = state.env === 'test' ? 'TEST' : 'PROD';
+    badge.className = 'environment-badge environment-' + state.env;
+    badge.title = state.env === 'test'
+      ? 'Ambiente TEST: scrive su SigmaFlow Database - TEST'
+      : 'Ambiente PROD: scrive sul database operativo';
   }
 
   function bindNavigation() {
