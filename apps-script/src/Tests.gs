@@ -1,4 +1,25 @@
 var SIGMAFLOW_TEST_PROP_SPREADSHEET_ID = 'SIGMAFLOW_TEST_SPREADSHEET_ID';
+var SIGMAFLOW_DEFAULT_TEST_SPREADSHEET_ID = '15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g';
+
+function configureTestEnvironment() {
+  PropertiesService.getScriptProperties().setProperty(
+    SIGMAFLOW_TEST_PROP_SPREADSHEET_ID,
+    SIGMAFLOW_DEFAULT_TEST_SPREADSHEET_ID
+  );
+
+  return {
+    success: true,
+    property: SIGMAFLOW_TEST_PROP_SPREADSHEET_ID,
+    spreadsheetId: SIGMAFLOW_DEFAULT_TEST_SPREADSHEET_ID,
+    spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + SIGMAFLOW_DEFAULT_TEST_SPREADSHEET_ID
+  };
+}
+
+function runAllTestsAndLog() {
+  var result = runAllTests();
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
 
 function runAllTests() {
   var results = [];

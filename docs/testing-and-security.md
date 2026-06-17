@@ -28,6 +28,24 @@ SIGMAFLOW_TEST_SPREADSHEET_ID = <id spreadsheet test>
 
 I test in `Tests.gs` usano solo questo ID. Se la property manca, i test devono fermarsi.
 
+Ambiente TEST corrente:
+
+- Spreadsheet: `SigmaFlow Database - TEST`
+- ID: `15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g`
+- URL: <https://docs.google.com/spreadsheets/d/15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g>
+
+Per configurare la Script Property dall'editor Apps Script, eseguire:
+
+```text
+configureTestEnvironment
+```
+
+Poi eseguire:
+
+```text
+runAllTests
+```
+
 ## Smoke test Web App
 
 Eseguire dopo ogni deploy:
