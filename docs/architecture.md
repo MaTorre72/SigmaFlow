@@ -18,17 +18,17 @@
 | `case_id` | Caso o iniziativa collegata |
 | `visit_number` | 1 per prima visita, maggiore di 1 per rework |
 | `title` | Titolo operativo |
-| `status` | `backlog`, `in_progress`, `in_review`, `done`, `blocked` |
+| `status` | `backlog`, `in_progress`, `stand_by`, `in_review`, `done` |
 | `assignee` | Nome o email |
 | `tag` | Etichetta libera |
-| `size_class` | `S`, `M`, `L`, `XL` |
-| `size_points` | Valore derivato dalla taglia |
+| `size_class` | `XS`, `S`, `M`, `L`, `XL` |
+| `size_points` | Valore derivato dalla taglia: `3`, `5`, `8`, `13`, `20` |
 | `arrival_ts` | Ingresso nel sistema |
 | `start_ts` | Inizio lavorazione |
 | `done_ts` | Completamento |
-| `service_time_h` | Ore di lavorazione |
-| `lead_time_h` | Ore da arrivo a completamento |
-| `wait_time_h` | Ore da arrivo a inizio |
+| `service_time_d` | Giorni di lavorazione |
+| `lead_time_d` | Giorni da arrivo a completamento |
+| `wait_time_d` | Giorni da arrivo a inizio |
 | `is_rework` | Booleano |
 | `rework_cause` | Causa del rientro |
 | `notes` | Note |
@@ -49,13 +49,18 @@
 
 | Chiave | Default |
 | --- | --- |
-| `capacity_hours_day` | `6` |
 | `team_size` | `4` |
 | `observation_window_days` | `30` |
-| `size_S_hours` | `2` |
-| `size_M_hours` | `6` |
-| `size_L_hours` | `16` |
-| `size_XL_hours` | `40` |
+| `size_XS_days` | `0.5` |
+| `size_S_days` | `1` |
+| `size_M_days` | `2` |
+| `size_L_days` | `4` |
+| `size_XL_days` | `8` |
+| `column_backlog` | `Backlog` |
+| `column_in_progress` | `In corso` |
+| `column_stand_by` | `Stand-by` |
+| `column_in_review` | `In review` |
+| `column_done` | `Fatto` |
 
 ## Backend
 
@@ -69,8 +74,11 @@ Azioni `doPost` previste:
 - `moveJob`
 - `updateJob`
 - `deleteJob`
+- `updateColumnLabel`
 - `markRework`
 - `getMetrics`
+
+Il rework automatico viene marcato quando un job gia' iniziato esce da `stand_by`: `visit_number` aumenta, `is_rework` diventa `TRUE` e `rework_cause` viene impostata a `stand_by_return` se non era gia' presente.
 
 ## Frontend
 

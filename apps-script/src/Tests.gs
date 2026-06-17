@@ -27,6 +27,7 @@ function runAllTests() {
     testAddJob,
     testMoveJobLifecycle,
     testMarkRework,
+    testAutomaticReworkFromStandBy,
     testMetrics,
     testMissingRequiredParam
   ];
@@ -74,7 +75,7 @@ function testAddJob() {
     var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
     assertEquals_(1, jobs.length, 'jobs dovrebbe contenere una riga');
     assertEquals_('backlog', jobs[0].status, 'status iniziale');
-    assertEquals_(1, Number(jobs[0].size_points), 'size_points S');
+    assertEquals_(5, Number(jobs[0].size_points), 'size_points S');
 
     var cases = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.CASES));
     assertEquals_(1, cases.length, 'cases dovrebbe contenere una riga');
@@ -101,8 +102,8 @@ function testMoveJobLifecycle() {
     var afterDone = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
     assertEquals_('done', afterDone.status, 'status done');
     assertTrue_(Boolean(afterDone.done_ts), 'done_ts valorizzato');
-    assertTrue_(Number(afterDone.lead_time_h) >= 0, 'lead_time_h numerico');
-    assertTrue_(Number(afterDone.wait_time_h) >= 0, 'wait_time_h numerico');
+    assertTrue_(Number(afterDone.lead_time_d) >= 0, 'lead_time_d numerico');
+    assertTrue_(Number(afterDone.wait_time_d) >= 0, 'wait_time_d numerico');
   });
 }
 
@@ -133,24 +134,43 @@ function testMarkRework() {
   });
 }
 
+function testAutomaticReworkFromStandBy() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Stand-by rework', size_class: 'M' }).data;
+
+    moveJob({ job_id: created.job_id, status: 'in_progress' });
+    moveJob({ job_id: created.job_id, status: 'stand_by' });
+    var returned = moveJob({ job_id: created.job_id, status: 'in_review' });
+
+    assertTrue_(returned.success, 'moveJob da stand_by dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    assertEquals_('in_review', job.status, 'status dopo ritorno da stand_by');
+    assertEquals_(2, Number(job.visit_number), 'visit_number automatico');
+    assertTrue_(coerceBoolean_(job.is_rework), 'is_rework automatico');
+    assertEquals_('stand_by_return', job.rework_cause, 'causa rework automatica');
+  });
+}
+
 function testMetrics() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     appendCompletedJob_(ss, {
       title: 'Metric S',
       size_class: 'S',
-      service_time_h: 2,
-      lead_time_h: 6,
-      wait_time_h: 4,
+      service_time_d: 2,
+      lead_time_d: 6,
+      wait_time_d: 4,
       visit_number: 1,
       is_rework: false
     });
     appendCompletedJob_(ss, {
       title: 'Metric rework',
       size_class: 'M',
-      service_time_h: 4,
-      lead_time_h: 10,
-      wait_time_h: 6,
+      service_time_d: 4,
+      lead_time_d: 10,
+      wait_time_d: 6,
       visit_number: 2,
       is_rework: true,
       rework_cause: 'internal_review'
@@ -240,9 +260,9 @@ function clearDataRows_(sheet, headers) {
 function appendCompletedJob_(ss, data) {
   var now = nowIso_();
   var arrival = new Date();
-  arrival.setHours(arrival.getHours() - Number(data.lead_time_h || 1));
+  arrival.setDate(arrival.getDate() - Number(data.lead_time_d || 1));
   var start = new Date();
-  start.setHours(start.getHours() - Number(data.service_time_h || 1));
+  start.setDate(start.getDate() - Number(data.service_time_d || 1));
   var arrivalIso = Utilities.formatDate(arrival, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
   var startIso = Utilities.formatDate(start, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
 
@@ -272,9 +292,9 @@ function appendCompletedJob_(ss, data) {
     arrivalIso,
     startIso,
     now,
-    data.service_time_h,
-    data.lead_time_h,
-    data.wait_time_h,
+    data.service_time_d,
+    data.lead_time_d,
+    data.wait_time_d,
     Boolean(data.is_rework),
     data.rework_cause || '',
     ''

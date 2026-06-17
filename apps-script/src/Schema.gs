@@ -11,9 +11,9 @@ var JOB_HEADERS = [
   'arrival_ts',
   'start_ts',
   'done_ts',
-  'service_time_h',
-  'lead_time_h',
-  'wait_time_h',
+  'service_time_d',
+  'lead_time_d',
+  'wait_time_d',
   'is_rework',
   'rework_cause',
   'notes'
@@ -70,13 +70,18 @@ function seedDefaultConfig_(sheet) {
   });
 
   var descriptions = {
-    capacity_hours_day: 'Ore/giorno effettive per persona',
     team_size: 'Numero di persone attive',
     observation_window_days: 'Finestra temporale metriche',
-    size_S_hours: 'Ore medie attese per taglia S',
-    size_M_hours: 'Ore medie attese per taglia M',
-    size_L_hours: 'Ore medie attese per taglia L',
-    size_XL_hours: 'Ore medie attese per taglia XL'
+    size_XS_days: 'Giorni medi attesi per taglia XS',
+    size_S_days: 'Giorni medi attesi per taglia S',
+    size_M_days: 'Giorni medi attesi per taglia M',
+    size_L_days: 'Giorni medi attesi per taglia L',
+    size_XL_days: 'Giorni medi attesi per taglia XL',
+    column_backlog: 'Etichetta colonna backlog',
+    column_in_progress: 'Etichetta colonna in lavorazione',
+    column_stand_by: 'Etichetta colonna stand-by',
+    column_in_review: 'Etichetta colonna revisione',
+    column_done: 'Etichetta colonna completati'
   };
 
   Object.keys(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(key) {

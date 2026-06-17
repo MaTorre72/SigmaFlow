@@ -10,7 +10,7 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 
 - Spreadsheet: `SigmaFlow Database`
 - ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
-- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbwHaOY08-hWERZ66PGTXCeXCBQGNV38kzkpPFCk7GBETzh2FadgDT1ogSK-e3YOMBFo/exec>
+- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=prod>
 
 ### Test
 
@@ -50,18 +50,25 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec?env=test>
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=test>
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
 5. Trascinare il job in `in_progress`.
-6. Trascinare il job in `done`.
-7. Verificare nello Sheet TEST:
+6. Trascinare il job in `stand_by`, poi di nuovo in `in_review` o `in_progress`.
+7. Verificare nello Sheet TEST che il job sia marcato come rework automatico:
+   - `visit_number` maggiore di `1`
+   - `is_rework` `TRUE`
+   - `rework_cause` `stand_by_return`
+8. Trascinare il job in `done`.
+9. Verificare nello Sheet TEST:
    - `arrival_ts` valorizzato
    - `start_ts` valorizzato
    - `done_ts` valorizzato
-   - `service_time_h`, `lead_time_h`, `wait_time_h` numerici
-8. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
+   - `service_time_d`, `lead_time_d`, `wait_time_d` numerici
+10. Verificare che ogni colonna mostri conteggio job e somma punti.
+11. Rinomina una colonna, ricarica la pagina e verifica che il nome resti salvato.
+12. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
 
 ## Test backend
 
@@ -71,6 +78,7 @@ I primi test automatici coprono:
 - `addJob`
 - `moveJob` verso `in_progress`
 - `moveJob` verso `done`
+- rework automatico su ritorno da `stand_by`
 - `markRework`
 - `getMetrics`
 - validazione errori per parametri mancanti

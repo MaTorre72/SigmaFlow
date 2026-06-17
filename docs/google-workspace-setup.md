@@ -12,10 +12,10 @@ Spreadsheet database creato e verificato:
 - Timezone: `Europe/Rome`
 - Tab verificati: `jobs`, `cases`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
-- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec>
-- Deployment corrente: `AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J` (`@5`)
-- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec?env=prod>
-- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxsN5tFeqLMJy94UHm0YbjYXCBqV0VI1vxE2h8GwuKLhPOuRUHW0XzphabKj3_hjJ7J/exec?env=test>
+- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec>
+- Deployment corrente: `AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW` (`@6`)
+- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=prod>
+- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=test>
 
 Nota: `clasp create --type sheets` ha creato un nuovo contenitore Google Sheets per il progetto Apps Script. Il codice SigmaFlow usa comunque il database canonico tramite `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`.
 
@@ -97,8 +97,11 @@ cd apps-script
 ## 5. Smoke test
 
 1. Apri la Web App URL.
-2. Verifica che la board mostri le colonne: Backlog, In corso, In review, Fatto, Bloccato.
+2. Verifica che la board mostri le colonne: Backlog, In corso, Stand-by, In review, Fatto.
 3. Crea un job di prova.
-4. Trascinalo in `In corso`, poi in `Fatto`.
-5. Verifica nello Sheet che `start_ts`, `done_ts`, `service_time_h`, `lead_time_h`, `wait_time_h` siano valorizzati.
-6. Apri la tab Dashboard e verifica che le metriche vengano renderizzate senza errori.
+4. Trascinalo in `In corso`, poi in `Stand-by`, poi di nuovo in una colonna di lavoro.
+5. Verifica nello Sheet che il ritorno da `Stand-by` abbia impostato `is_rework`, `visit_number` e `rework_cause`.
+6. Trascinalo in `Fatto`.
+7. Verifica nello Sheet che `start_ts`, `done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d` siano valorizzati.
+8. Verifica che le colonne mostrino conteggio job e somma punti, e prova a rinominare una colonna.
+9. Apri la tab Dashboard e verifica che le metriche vengano renderizzate senza errori.

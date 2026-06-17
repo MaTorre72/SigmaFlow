@@ -9,20 +9,36 @@ var SIGMAFLOW = {
     CASES: 'cases',
     CONFIG: 'config'
   },
-  STATUSES: ['backlog', 'in_progress', 'in_review', 'done', 'blocked'],
+  STATUSES: ['backlog', 'in_progress', 'stand_by', 'in_review', 'done'],
+  STATUS_ALIASES: {
+    blocked: 'stand_by'
+  },
+  DEFAULT_COLUMN_LABELS: {
+    backlog: 'Backlog',
+    in_progress: 'In corso',
+    stand_by: 'Stand-by',
+    in_review: 'In review',
+    done: 'Fatto'
+  },
   SIZE_POINTS: {
-    S: 1,
-    M: 3,
-    L: 8,
+    XS: 3,
+    S: 5,
+    M: 8,
+    L: 13,
     XL: 20
   },
   DEFAULT_CONFIG: {
-    capacity_hours_day: 6,
     team_size: 4,
     observation_window_days: 30,
-    size_S_hours: 2,
-    size_M_hours: 6,
-    size_L_hours: 16,
-    size_XL_hours: 40
+    size_XS_days: 0.5,
+    size_S_days: 1,
+    size_M_days: 2,
+    size_L_days: 4,
+    size_XL_days: 8,
+    column_backlog: 'Backlog',
+    column_in_progress: 'In corso',
+    column_stand_by: 'Stand-by',
+    column_in_review: 'In review',
+    column_done: 'Fatto'
   }
 };

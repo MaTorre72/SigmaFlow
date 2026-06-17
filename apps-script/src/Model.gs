@@ -11,18 +11,17 @@ function calculateMetrics_(jobs, config, now) {
     return job.arrival_ts && new Date(job.arrival_ts) >= since;
   });
   var completed = observed.filter(function(job) {
-    return job.status === 'done' && Number(job.service_time_h) > 0;
+    return normalizeStatus_(job.status) === 'done' && numberJobField_(job, 'service_time_d', ['service_time_h']) > 0;
   });
 
   var serviceTimes = completed.map(function(job) {
-    return Number(job.service_time_h);
+    return numberJobField_(job, 'service_time_d', ['service_time_h']);
   });
 
   var lambda = observed.length / windowDays;
   var stats = sampleStats_(serviceTimes);
-  var capacityHoursDay = Number(config.capacity_hours_day || 6);
   var teamSize = Number(config.team_size || 1);
-  var mu = stats.mean > 0 ? capacityHoursDay / stats.mean : 0;
+  var mu = stats.mean > 0 ? 1 / stats.mean : 0;
   var rho = mu > 0 ? lambda / (teamSize * mu) : 0;
 
   var mm1 = queueMM1_(lambda, mu, rho, stats.mean);
@@ -70,13 +69,13 @@ function sampleStats_(values) {
   return { mean: mean, secondMoment: secondMoment, variance: variance, cs2: cs2 };
 }
 
-function queueMM1_(lambda, mu, rho, meanServiceHours) {
+function queueMM1_(lambda, mu, rho, meanServiceDays) {
   if (mu <= 0 || rho >= 1) {
     return unstableQueue_();
   }
 
   var wq = rho / (mu * (1 - rho));
-  var w = wq + meanServiceHours;
+  var w = wq + meanServiceDays;
   return {
     Wq: round_(wq),
     W: round_(w),
@@ -85,13 +84,13 @@ function queueMM1_(lambda, mu, rho, meanServiceHours) {
   };
 }
 
-function queueMG1_(lambda, rho, meanServiceHours, secondMoment) {
+function queueMG1_(lambda, rho, meanServiceDays, secondMoment) {
   if (rho >= 1) {
     return unstableQueue_();
   }
 
   var wq = lambda * secondMoment / (2 * (1 - rho));
-  var w = wq + meanServiceHours;
+  var w = wq + meanServiceDays;
   return {
     Wq: round_(wq),
     W: round_(w),
@@ -144,7 +143,7 @@ function stabilityMetrics_(rho, rhoEffective, cs2) {
 
 function leadTimeBySize_(jobs) {
   var groups = {};
-  ['S', 'M', 'L', 'XL'].forEach(function(size) {
+  ['XS', 'S', 'M', 'L', 'XL'].forEach(function(size) {
     groups[size] = [];
   });
 
@@ -153,8 +152,9 @@ function leadTimeBySize_(jobs) {
     if (!groups[size]) {
       groups[size] = [];
     }
-    if (Number(job.lead_time_h) > 0) {
-      groups[size].push(Number(job.lead_time_h));
+    var leadTimeDays = numberJobField_(job, 'lead_time_d', ['lead_time_h']);
+    if (leadTimeDays > 0) {
+      groups[size].push(leadTimeDays);
     }
   });
 
@@ -176,6 +176,24 @@ function countBy_(rows, field) {
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
+}
+
+function numberJobField_(job, primary, aliases) {
+  if (job[primary] !== undefined && job[primary] !== '') {
+    return Number(job[primary]) || 0;
+  }
+
+  aliases = aliases || [];
+  for (var i = 0; i < aliases.length; i++) {
+    if (job[aliases[i]] !== undefined && job[aliases[i]] !== '') {
+      if (aliases[i].slice(-2) === '_h' && primary.slice(-2) === '_d') {
+        return (Number(job[aliases[i]]) || 0) / 24;
+      }
+      return Number(job[aliases[i]]) || 0;
+    }
+  }
+
+  return 0;
 }
 
 function unstableQueue_() {

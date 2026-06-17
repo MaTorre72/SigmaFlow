@@ -2,6 +2,7 @@
   var state = {
     env: window.SIGMAFLOW_ENV === 'test' ? 'test' : 'prod',
     board: null,
+    columnMeta: null,
     filters: {
       assignee: '',
       tag: '',
@@ -9,12 +10,12 @@
     }
   };
 
-  var columns = [
-    ['backlog', 'Backlog'],
-    ['in_progress', 'In corso'],
-    ['in_review', 'In review'],
-    ['done', 'Fatto'],
-    ['blocked', 'Bloccato']
+  var defaultColumns = [
+    { status: 'backlog', label: 'Backlog', count: 0, points: 0 },
+    { status: 'in_progress', label: 'In corso', count: 0, points: 0 },
+    { status: 'stand_by', label: 'Stand-by', count: 0, points: 0 },
+    { status: 'in_review', label: 'In review', count: 0, points: 0 },
+    { status: 'done', label: 'Fatto', count: 0, points: 0 }
   ];
 
   document.addEventListener('DOMContentLoaded', function() {
@@ -110,6 +111,7 @@
   function loadBoard() {
     callApi('getBoard').then(function(data) {
       state.board = data.columns;
+      state.columnMeta = data.column_meta;
       renderBoard();
     }).catch(showError);
   }
@@ -118,18 +120,35 @@
     var root = document.getElementById('kanban-board');
     root.innerHTML = '';
 
-    columns.forEach(function(column) {
+    getColumns().forEach(function(column) {
+      var jobs = ((state.board && state.board[column.status]) || []).filter(matchesFilters);
+      var points = jobs.reduce(function(sum, job) {
+        return sum + Number(job.size_points || 0);
+      }, 0);
       var columnEl = document.createElement('section');
       columnEl.className = 'column';
-      columnEl.dataset.status = column[0];
-      columnEl.innerHTML = '<h2>' + column[1] + '</h2>';
+      columnEl.dataset.status = column.status;
+      columnEl.innerHTML = [
+        '<div class="column-header">',
+        '<div>',
+        '<h2 class="column-title"></h2>',
+        '<div class="column-stats"></div>',
+        '</div>',
+        '<button type="button" class="rename-column-button" title="Rinomina colonna">Rinomina</button>',
+        '</div>'
+      ].join('');
+      columnEl.querySelector('.column-title').textContent = column.label;
+      columnEl.querySelector('.column-stats').textContent = jobs.length + ' job · ' + points + ' pt';
+      columnEl.querySelector('.rename-column-button').addEventListener('click', function() {
+        renameColumn(column);
+      });
       columnEl.addEventListener('dragover', function(event) {
         event.preventDefault();
       });
       columnEl.addEventListener('drop', function(event) {
         event.preventDefault();
         columnEl.classList.remove('drop-target');
-        moveJob(event.dataTransfer.getData('text/plain'), column[0]);
+        moveJob(event.dataTransfer.getData('text/plain'), column.status);
       });
       columnEl.addEventListener('dragenter', function() {
         columnEl.classList.add('drop-target');
@@ -140,7 +159,6 @@
         }
       });
 
-      var jobs = ((state.board && state.board[column[0]]) || []).filter(matchesFilters);
       jobs.forEach(function(job) {
         columnEl.appendChild(renderCard(job));
       });
@@ -169,7 +187,7 @@
       '<div class="badges">',
       '<span class="badge">' + escapeHtml(job.tag || 'senza tag') + '</span>',
       '<span class="badge">' + escapeHtml(job.assignee || 'non assegnato') + '</span>',
-      '<span class="badge">' + escapeHtml(job.size_class || 'M') + '</span>',
+      '<span class="badge">' + escapeHtml((job.size_class || 'M') + ' · ' + (job.size_points || 8) + ' pt') + '</span>',
       reworkBadge,
       '</div>',
       '<div class="card-actions">',
@@ -198,6 +216,20 @@
     });
   }
 
+  function renameColumn(column) {
+    var next = prompt('Nuovo nome colonna', column.label);
+    if (next === null) {
+      return;
+    }
+    next = next.trim();
+    if (!next) {
+      showError(new Error('Nome colonna vuoto'));
+      return;
+    }
+
+    callApi('updateColumnLabel', { status: column.status, label: next }).then(loadBoard).catch(showError);
+  }
+
   function deleteJob(job) {
     if (!confirm('Eliminare "' + (job.title || job.job_id) + '"?')) {
       return;
@@ -215,6 +247,10 @@
 
   function cloneBoard() {
     return JSON.parse(JSON.stringify(state.board || {}));
+  }
+
+  function getColumns() {
+    return state.columnMeta && state.columnMeta.length ? state.columnMeta : defaultColumns;
   }
 
   function moveJobLocally(jobId, status) {
@@ -271,17 +307,17 @@
     renderDl('empirical-metrics', {
       'Finestra': metrics.window_days + ' giorni',
       'Job osservati': metrics.n_jobs_observed,
-      'lambda': metrics.lambda,
-      'mu': metrics.mu,
-      'E[S]': metrics.E_S,
+      'lambda / giorno': metrics.lambda,
+      'mu / giorno': metrics.mu,
+      'E[S] giorni': metrics.E_S,
       'Cs2': metrics.Cs2
     });
 
     renderDl('rework-metrics', {
       'p1': metrics.rework && metrics.rework.p1,
       'E[K]': metrics.rework && metrics.rework.E_K,
-      'lambda effettivo': metrics.rework && metrics.rework.lambda_effective,
-      'Wq rework': metrics.rework && metrics.rework.Wq
+      'lambda eff. / giorno': metrics.rework && metrics.rework.lambda_effective,
+      'Wq rework giorni': metrics.rework && metrics.rework.Wq
     });
 
     renderQueueTable(metrics);
@@ -301,7 +337,7 @@
       ['M/G/1', metrics.MG1],
       ['Rework', { Wq: metrics.rework && metrics.rework.Wq, W: null, Lq: null, L: null }]
     ];
-    var html = '<thead><tr><th>Modello</th><th>Wq</th><th>W</th><th>Lq</th><th>L</th></tr></thead><tbody>';
+    var html = '<thead><tr><th>Modello</th><th>Wq giorni</th><th>W giorni</th><th>Lq</th><th>L</th></tr></thead><tbody>';
     rows.forEach(function(row) {
       html += '<tr><th>' + row[0] + '</th><td>' + valueOrDash(row[1].Wq) + '</td><td>' + valueOrDash(row[1].W) + '</td><td>' + valueOrDash(row[1].Lq) + '</td><td>' + valueOrDash(row[1].L) + '</td></tr>';
     });

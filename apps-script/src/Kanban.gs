@@ -55,6 +55,7 @@ function routeAction_(params) {
     moveJob: moveJob,
     updateJob: updateJob,
     deleteJob: deleteJob,
+    updateColumnLabel: updateColumnLabel,
     markRework: markRework,
     getMetrics: getMetrics
   };
@@ -68,20 +69,35 @@ function routeAction_(params) {
 
 function getBoard() {
   var jobs = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+  var labels = readColumnLabels_();
   var board = {};
+  var columnMeta = [];
   SIGMAFLOW.STATUSES.forEach(function(status) {
     board[status] = [];
   });
 
   jobs.forEach(function(job) {
-    var status = job.status || 'backlog';
+    var status = normalizeStatus_(job.status);
+    job.status = status;
     if (!board[status]) {
       board[status] = [];
     }
     board[status].push(job);
   });
 
-  return ok_({ columns: board, jobs: jobs });
+  SIGMAFLOW.STATUSES.forEach(function(status) {
+    var points = board[status].reduce(function(sum, job) {
+      return sum + Number(job.size_points || 0);
+    }, 0);
+    columnMeta.push({
+      status: status,
+      label: labels[status],
+      count: board[status].length,
+      points: points
+    });
+  });
+
+  return ok_({ columns: board, column_meta: columnMeta, jobs: jobs });
 }
 
 function addCase(params) {
@@ -107,6 +123,10 @@ function addJob(params) {
   var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var caseId = params.case_id || createImplicitCase_(ss, params.title, params.client);
   var sizeClass = params.size_class || 'M';
+  var status = normalizeStatus_(params.status || 'backlog');
+  if (SIGMAFLOW.STATUSES.indexOf(status) === -1) {
+    throw new Error('Status non valido: ' + status);
+  }
   var now = nowIso_();
   var jobId = generateId_('J');
 
@@ -115,7 +135,7 @@ function addJob(params) {
     caseId,
     Number(params.visit_number || 1),
     requireParam_(params, 'title'),
-    params.status || 'backlog',
+    status,
     params.assignee || '',
     params.tag || '',
     sizeClass,
@@ -142,17 +162,25 @@ function moveJob(params) {
     throw new Error('Job non trovato: ' + params.job_id);
   }
 
-  var status = requireParam_(params, 'status');
+  var status = normalizeStatus_(requireParam_(params, 'status'));
   if (SIGMAFLOW.STATUSES.indexOf(status) === -1) {
     throw new Error('Status non valido: ' + status);
   }
 
   var headers = getHeaderMap_(sheet);
   var now = nowIso_();
+  var previousStatus = normalizeStatus_(sheet.getRange(row, headers.status).getValue());
+  var wasAlreadyWorked = Boolean(sheet.getRange(row, headers.start_ts).getValue())
+    || Boolean(sheet.getRange(row, headers.done_ts).getValue())
+    || Number(sheet.getRange(row, headers.visit_number).getValue() || 1) > 1;
   sheet.getRange(row, headers.status).setValue(status);
 
   if (status === 'in_progress' && !sheet.getRange(row, headers.start_ts).getValue()) {
     sheet.getRange(row, headers.start_ts).setValue(now);
+  }
+
+  if (previousStatus === 'stand_by' && status !== 'stand_by' && wasAlreadyWorked) {
+    markRowAsRework_(sheet, row, headers, 'stand_by_return');
   }
 
   if (status === 'done') {
@@ -198,6 +226,21 @@ function deleteJob(params) {
   sheet.deleteRow(row);
   refreshCaseVisitCount_(ss, caseId);
   return ok_({ job_id: params.job_id });
+}
+
+function updateColumnLabel(params) {
+  var status = normalizeStatus_(requireParam_(params, 'status'));
+  if (SIGMAFLOW.STATUSES.indexOf(status) === -1) {
+    throw new Error('Status non valido: ' + status);
+  }
+
+  var label = String(requireParam_(params, 'label')).trim();
+  if (!label) {
+    throw new Error('Etichetta colonna vuota');
+  }
+
+  writeConfigValue_('column_' + status, label);
+  return ok_({ status: status, label: label });
 }
 
 function markRework(params) {
@@ -255,7 +298,7 @@ function refreshCaseVisitCount_(ss, caseId) {
   casesSheet.getRange(row, headers.total_visits).setValue(caseJobs.length);
 
   var open = caseJobs.some(function(job) {
-    return job.status !== 'done';
+    return normalizeStatus_(job.status) !== 'done';
   });
   casesSheet.getRange(row, headers.is_open).setValue(open);
   if (!open && caseJobs.length > 0) {
@@ -273,7 +316,16 @@ function recalculateJobTimes_(sheet, row, headers) {
     sheet.getRange(row, headers.start_ts).setValue(start);
   }
 
-  sheet.getRange(row, headers.service_time_h).setValue(hoursBetween_(start, done));
-  sheet.getRange(row, headers.lead_time_h).setValue(hoursBetween_(arrival, done));
-  sheet.getRange(row, headers.wait_time_h).setValue(hoursBetween_(arrival, start));
+  setCellByHeader_(sheet, row, headers, 'service_time_d', ['service_time_h'], daysBetween_(start, done));
+  setCellByHeader_(sheet, row, headers, 'lead_time_d', ['lead_time_h'], daysBetween_(arrival, done));
+  setCellByHeader_(sheet, row, headers, 'wait_time_d', ['wait_time_h'], daysBetween_(arrival, start));
+}
+
+function markRowAsRework_(sheet, row, headers, cause) {
+  var visits = Math.max(1, Number(sheet.getRange(row, headers.visit_number).getValue() || 1));
+  sheet.getRange(row, headers.visit_number).setValue(visits + 1);
+  sheet.getRange(row, headers.is_rework).setValue(true);
+  if (!sheet.getRange(row, headers.rework_cause).getValue()) {
+    sheet.getRange(row, headers.rework_cause).setValue(cause);
+  }
 }

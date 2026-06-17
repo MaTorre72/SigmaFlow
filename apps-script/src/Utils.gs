@@ -124,6 +124,38 @@ function getHeaderMap_(sheet) {
   return map;
 }
 
+function getHeaderCol_(headers, primary, aliases) {
+  if (headers[primary]) {
+    return headers[primary];
+  }
+
+  aliases = aliases || [];
+  for (var i = 0; i < aliases.length; i++) {
+    if (headers[aliases[i]]) {
+      return headers[aliases[i]];
+    }
+  }
+
+  return null;
+}
+
+function getCellByHeader_(sheet, row, headers, primary, aliases) {
+  var col = getHeaderCol_(headers, primary, aliases);
+  return col ? sheet.getRange(row, col).getValue() : '';
+}
+
+function setCellByHeader_(sheet, row, headers, primary, aliases, value) {
+  var col = getHeaderCol_(headers, primary, aliases);
+  if (col) {
+    sheet.getRange(row, col).setValue(value);
+  }
+}
+
+function normalizeStatus_(status) {
+  var value = status || 'backlog';
+  return SIGMAFLOW.STATUS_ALIASES[value] || value;
+}
+
 function findRowById_(sheet, idColumn, id) {
   var headers = getHeaderMap_(sheet);
   var col = headers[idColumn];
@@ -145,13 +177,13 @@ function findRowById_(sheet, idColumn, id) {
   return -1;
 }
 
-function hoursBetween_(startIso, endIso) {
+function daysBetween_(startIso, endIso) {
   if (!startIso || !endIso) {
     return '';
   }
   var start = new Date(startIso);
   var end = new Date(endIso);
-  return Math.max(0, (end.getTime() - start.getTime()) / 36e5);
+  return Math.max(0, (end.getTime() - start.getTime()) / 864e5);
 }
 
 function coerceBoolean_(value) {
@@ -171,4 +203,26 @@ function readConfig_() {
   });
 
   return config;
+}
+
+function readColumnLabels_() {
+  var config = readConfig_();
+  var labels = {};
+  SIGMAFLOW.STATUSES.forEach(function(status) {
+    labels[status] = config['column_' + status] || SIGMAFLOW.DEFAULT_COLUMN_LABELS[status] || status;
+  });
+  return labels;
+}
+
+function writeConfigValue_(key, value) {
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
+  var rows = readTable_(sheet);
+  var headers = getHeaderMap_(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key === key) {
+      sheet.getRange(i + 2, headers.value).setValue(value);
+      return;
+    }
+  }
+  sheet.appendRow([key, value, '']);
 }

@@ -161,10 +161,30 @@
     border-color: var(--accent);
   }
 
+  .column-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
   .column h2 {
     color: var(--muted);
     text-transform: uppercase;
     font-size: 12px;
+    margin-bottom: 2px;
+  }
+
+  .column-stats {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .rename-column-button {
+    font-size: 12px;
+    min-height: 28px;
+    padding: 0 8px;
   }
 
   .card {
