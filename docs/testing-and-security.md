@@ -10,7 +10,7 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 
 - Spreadsheet: `SigmaFlow Database`
 - ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
-- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=prod>
+- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH/exec?env=prod>
 
 ### Test
 
@@ -50,7 +50,7 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=test>
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH/exec?env=test>
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
@@ -67,8 +67,11 @@ Eseguire dopo ogni deploy:
    - `done_ts` valorizzato
    - `service_time_d`, `lead_time_d`, `wait_time_d` numerici
 10. Verificare che ogni colonna mostri conteggio job e somma punti.
-11. Rinomina una colonna, ricarica la pagina e verifica che il nome resti salvato.
-12. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
+11. Crea una nuova colonna con ruolo `stand_by`.
+12. Sposta la nuova colonna a sinistra/destra e verifica che l'ordine resti salvato dopo reload.
+13. Rinomina una colonna, ricarica la pagina e verifica che il nome resti salvato.
+14. Cambia il ruolo di una colonna a `WIP` o `Concluso` e verifica che la dashboard continui a renderizzare.
+15. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
 
 ## Test backend
 
@@ -79,6 +82,7 @@ I primi test automatici coprono:
 - `moveJob` verso `in_progress`
 - `moveJob` verso `done`
 - rework automatico su ritorno da `stand_by`
+- colonne dinamiche, ruoli e opzioni dropdown
 - `markRework`
 - `getMetrics`
 - validazione errori per parametri mancanti

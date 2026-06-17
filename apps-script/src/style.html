@@ -26,11 +26,16 @@
   .topbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 24px;
     padding: 18px 24px;
     background: var(--surface);
     border-bottom: 1px solid var(--line);
+  }
+
+  .main-nav {
+    display: flex;
+    gap: 8px;
   }
 
   h1,
@@ -54,6 +59,7 @@
   }
 
   .environment-badge {
+    margin-left: auto;
     border-radius: 999px;
     font-size: 12px;
     font-weight: 700;
@@ -97,7 +103,7 @@
   }
 
   .toolbar,
-  .job-form {
+  .quick-card-form {
     display: flex;
     align-items: end;
     gap: 12px;
@@ -105,12 +111,19 @@
     flex-wrap: wrap;
   }
 
-  .job-form {
+  .quick-card-form {
     align-items: end;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 8px;
-    padding: 12px;
+    padding: 8px;
+  }
+
+  .quick-card-form {
+    align-items: stretch;
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
   }
 
   .form-title {
@@ -140,8 +153,7 @@
   }
 
   .kanban-board {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(220px, 1fr));
+    display: flex;
     gap: 14px;
     overflow-x: auto;
     padding-bottom: 10px;
@@ -151,6 +163,7 @@
     background: #eef2f6;
     border: 1px solid var(--line);
     border-radius: 8px;
+    flex: 0 0 290px;
     min-height: 420px;
     padding: 10px;
     transition: border-color 120ms ease, background 120ms ease;
@@ -161,12 +174,31 @@
     border-color: var(--accent);
   }
 
+  .role-wip {
+    border-top: 3px solid #146c5f;
+  }
+
+  .role-stand_by {
+    border-top: 3px solid var(--warn);
+  }
+
+  .role-done {
+    border-top: 3px solid var(--ok);
+  }
+
   .column-header {
     align-items: flex-start;
     display: flex;
     gap: 8px;
     justify-content: space-between;
     margin-bottom: 12px;
+  }
+
+  .column-title-row {
+    align-items: center;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
   }
 
   .column h2 {
@@ -176,15 +208,49 @@
     margin-bottom: 2px;
   }
 
+  .role-pill {
+    background: #dbe5ef;
+    border-radius: 999px;
+    color: #344154;
+    font-size: 11px;
+    padding: 2px 7px;
+  }
+
   .column-stats {
     color: var(--muted);
     font-size: 12px;
   }
 
+  .column-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .column-actions button,
   .rename-column-button {
     font-size: 12px;
     min-height: 28px;
     padding: 0 8px;
+  }
+
+  .role-control {
+    margin-bottom: 10px;
+  }
+
+  .cards {
+    min-height: 220px;
+  }
+
+  .open-composer-button {
+    color: var(--muted);
+    justify-content: flex-start;
+    margin-top: 4px;
+    width: 100%;
+  }
+
+  .composer-grid {
+    display: grid;
+    gap: 8px;
   }
 
   .card {
@@ -326,8 +392,12 @@
       flex-direction: column;
     }
 
+    .environment-badge {
+      margin-left: 0;
+    }
+
     .kanban-board {
-      grid-template-columns: repeat(5, 260px);
+      flex-wrap: nowrap;
     }
 
     .metrics-grid {

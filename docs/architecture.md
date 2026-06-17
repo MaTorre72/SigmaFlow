@@ -18,7 +18,7 @@
 | `case_id` | Caso o iniziativa collegata |
 | `visit_number` | 1 per prima visita, maggiore di 1 per rework |
 | `title` | Titolo operativo |
-| `status` | `backlog`, `in_progress`, `stand_by`, `in_review`, `done` |
+| `status` | ID della colonna board in cui si trova il job |
 | `assignee` | Nome o email |
 | `tag` | Etichetta libera |
 | `size_class` | `XS`, `S`, `M`, `L`, `XL` |
@@ -61,6 +61,17 @@
 | `column_stand_by` | `Stand-by` |
 | `column_in_review` | `In review` |
 | `column_done` | `Fatto` |
+| `columns_json` | Configurazione dinamica colonne: `id`, `label`, `role`, `order` |
+| `assignees_json` | Assegnatari suggeriti per dropdown |
+| `tags_json` | Tag suggeriti per dropdown |
+
+Le colonne sono configurabili dalla Web App. Il campo `role` determina il comportamento modellistico:
+
+- `backlog`: ingresso del flusso;
+- `wip`: lavoro attivo;
+- `stand_by`: attesa, anche multipla;
+- `done`: completamento;
+- `neutral`: colonna senza ruolo modellistico speciale.
 
 ## Backend
 
@@ -75,10 +86,13 @@ Azioni `doPost` previste:
 - `updateJob`
 - `deleteJob`
 - `updateColumnLabel`
+- `addColumn`
+- `updateColumn`
+- `moveColumn`
 - `markRework`
 - `getMetrics`
 
-Il rework automatico viene marcato quando un job gia' iniziato esce da `stand_by`: `visit_number` aumenta, `is_rework` diventa `TRUE` e `rework_cause` viene impostata a `stand_by_return` se non era gia' presente.
+Il rework automatico viene marcato quando un job gia' iniziato esce da una colonna con ruolo `stand_by`: `visit_number` aumenta, `is_rework` diventa `TRUE` e `rework_cause` viene impostata a `stand_by_return` se non era gia' presente.
 
 ## Frontend
 

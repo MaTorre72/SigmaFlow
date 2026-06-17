@@ -11,7 +11,7 @@ function calculateMetrics_(jobs, config, now) {
     return job.arrival_ts && new Date(job.arrival_ts) >= since;
   });
   var completed = observed.filter(function(job) {
-    return normalizeStatus_(job.status) === 'done' && numberJobField_(job, 'service_time_d', ['service_time_h']) > 0;
+    return isDoneStatus_(job.status) && numberJobField_(job, 'service_time_d', ['service_time_h']) > 0;
   });
 
   var serviceTimes = completed.map(function(job) {

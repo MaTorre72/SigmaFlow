@@ -56,6 +56,9 @@ function routeAction_(params) {
     updateJob: updateJob,
     deleteJob: deleteJob,
     updateColumnLabel: updateColumnLabel,
+    addColumn: addColumn,
+    updateColumn: updateColumn,
+    moveColumn: moveColumn,
     markRework: markRework,
     getMetrics: getMetrics
   };
@@ -69,11 +72,11 @@ function routeAction_(params) {
 
 function getBoard() {
   var jobs = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-  var labels = readColumnLabels_();
+  var columns = readColumns_();
   var board = {};
   var columnMeta = [];
-  SIGMAFLOW.STATUSES.forEach(function(status) {
-    board[status] = [];
+  columns.forEach(function(column) {
+    board[column.id] = [];
   });
 
   jobs.forEach(function(job) {
@@ -85,19 +88,27 @@ function getBoard() {
     board[status].push(job);
   });
 
-  SIGMAFLOW.STATUSES.forEach(function(status) {
-    var points = board[status].reduce(function(sum, job) {
+  columns.forEach(function(column) {
+    var points = (board[column.id] || []).reduce(function(sum, job) {
       return sum + Number(job.size_points || 0);
     }, 0);
     columnMeta.push({
-      status: status,
-      label: labels[status],
-      count: board[status].length,
+      id: column.id,
+      status: column.id,
+      label: column.label,
+      role: column.role,
+      order: column.order,
+      count: (board[column.id] || []).length,
       points: points
     });
   });
 
-  return ok_({ columns: board, column_meta: columnMeta, jobs: jobs });
+  return ok_({
+    columns: board,
+    column_meta: columnMeta,
+    jobs: jobs,
+    options: boardOptions_(jobs)
+  });
 }
 
 function addCase(params) {
@@ -123,10 +134,7 @@ function addJob(params) {
   var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var caseId = params.case_id || createImplicitCase_(ss, params.title, params.client);
   var sizeClass = params.size_class || 'M';
-  var status = normalizeStatus_(params.status || 'backlog');
-  if (SIGMAFLOW.STATUSES.indexOf(status) === -1) {
-    throw new Error('Status non valido: ' + status);
-  }
+  var status = validateColumnId_(params.status || firstColumnIdByRole_('backlog'));
   var now = nowIso_();
   var jobId = generateId_('J');
 
@@ -162,10 +170,7 @@ function moveJob(params) {
     throw new Error('Job non trovato: ' + params.job_id);
   }
 
-  var status = normalizeStatus_(requireParam_(params, 'status'));
-  if (SIGMAFLOW.STATUSES.indexOf(status) === -1) {
-    throw new Error('Status non valido: ' + status);
-  }
+  var status = validateColumnId_(requireParam_(params, 'status'));
 
   var headers = getHeaderMap_(sheet);
   var now = nowIso_();
@@ -175,15 +180,15 @@ function moveJob(params) {
     || Number(sheet.getRange(row, headers.visit_number).getValue() || 1) > 1;
   sheet.getRange(row, headers.status).setValue(status);
 
-  if (status === 'in_progress' && !sheet.getRange(row, headers.start_ts).getValue()) {
+  if (!isStandByStatus_(status) && !isDoneStatus_(status) && !sheet.getRange(row, headers.start_ts).getValue()) {
     sheet.getRange(row, headers.start_ts).setValue(now);
   }
 
-  if (previousStatus === 'stand_by' && status !== 'stand_by' && wasAlreadyWorked) {
+  if (isStandByStatus_(previousStatus) && !isStandByStatus_(status) && wasAlreadyWorked) {
     markRowAsRework_(sheet, row, headers, 'stand_by_return');
   }
 
-  if (status === 'done') {
+  if (isDoneStatus_(status)) {
     sheet.getRange(row, headers.done_ts).setValue(now);
     recalculateJobTimes_(sheet, row, headers);
     refreshCaseVisitCount_(getSpreadsheet_(), sheet.getRange(row, headers.case_id).getValue());
@@ -229,18 +234,65 @@ function deleteJob(params) {
 }
 
 function updateColumnLabel(params) {
-  var status = normalizeStatus_(requireParam_(params, 'status'));
-  if (SIGMAFLOW.STATUSES.indexOf(status) === -1) {
-    throw new Error('Status non valido: ' + status);
-  }
+  return updateColumn(params);
+}
 
+function addColumn(params) {
   var label = String(requireParam_(params, 'label')).trim();
-  if (!label) {
-    throw new Error('Etichetta colonna vuota');
-  }
+  var role = normalizeColumnRole_(params.role || 'neutral');
+  var columns = readColumns_();
+  var seen = {};
+  columns.forEach(function(column) {
+    seen[column.id] = true;
+  });
+  var id = uniqueColumnId_(slugify_(params.id || label), seen);
+  columns.push({
+    id: id,
+    label: label,
+    role: role,
+    order: (columns.length + 1) * 10
+  });
+  columns = writeColumns_(columns);
+  return ok_({ column: findColumn_(columns, id), columns: columns });
+}
 
-  writeConfigValue_('column_' + status, label);
-  return ok_({ status: status, label: label });
+function updateColumn(params) {
+  var id = validateColumnId_(requireParam_(params, 'status'));
+  var columns = readColumns_();
+  var column = findColumn_(columns, id);
+  if (params.label !== undefined) {
+    var label = String(params.label).trim();
+    if (!label) {
+      throw new Error('Etichetta colonna vuota');
+    }
+    column.label = label;
+  }
+  if (params.role !== undefined) {
+    column.role = normalizeColumnRole_(params.role);
+  }
+  columns = writeColumns_(columns);
+  return ok_({ column: findColumn_(columns, id), columns: columns });
+}
+
+function moveColumn(params) {
+  var id = validateColumnId_(requireParam_(params, 'status'));
+  var direction = requireParam_(params, 'direction');
+  var columns = readColumns_();
+  var index = -1;
+  columns.forEach(function(column, i) {
+    if (column.id === id) {
+      index = i;
+    }
+  });
+  var target = direction === 'left' ? index - 1 : index + 1;
+  if (index < 0 || target < 0 || target >= columns.length) {
+    return ok_({ columns: columns });
+  }
+  var current = columns[index];
+  columns[index] = columns[target];
+  columns[target] = current;
+  columns = writeColumns_(columns);
+  return ok_({ columns: columns });
 }
 
 function markRework(params) {
@@ -298,7 +350,7 @@ function refreshCaseVisitCount_(ss, caseId) {
   casesSheet.getRange(row, headers.total_visits).setValue(caseJobs.length);
 
   var open = caseJobs.some(function(job) {
-    return normalizeStatus_(job.status) !== 'done';
+    return !isDoneStatus_(job.status);
   });
   casesSheet.getRange(row, headers.is_open).setValue(open);
   if (!open && caseJobs.length > 0) {
@@ -328,4 +380,21 @@ function markRowAsRework_(sheet, row, headers, cause) {
   if (!sheet.getRange(row, headers.rework_cause).getValue()) {
     sheet.getRange(row, headers.rework_cause).setValue(cause);
   }
+}
+
+function boardOptions_(jobs) {
+  var config = readConfig_();
+  var assignees = parseJsonArray_(config.assignees_json);
+  var tags = parseJsonArray_(config.tags_json);
+
+  jobs.forEach(function(job) {
+    assignees.push(job.assignee);
+    tags.push(job.tag);
+  });
+
+  return {
+    assignees: uniqueSortedValues_(assignees),
+    tags: uniqueSortedValues_(tags),
+    sizes: Object.keys(SIGMAFLOW.SIZE_POINTS)
+  };
 }

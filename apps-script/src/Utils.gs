@@ -156,6 +156,11 @@ function normalizeStatus_(status) {
   return SIGMAFLOW.STATUS_ALIASES[value] || value;
 }
 
+function normalizeColumnRole_(role) {
+  var value = role || 'neutral';
+  return SIGMAFLOW.COLUMN_ROLES.indexOf(value) === -1 ? 'neutral' : value;
+}
+
 function findRowById_(sheet, idColumn, id) {
   var headers = getHeaderMap_(sheet);
   var col = headers[idColumn];
@@ -206,12 +211,162 @@ function readConfig_() {
 }
 
 function readColumnLabels_() {
-  var config = readConfig_();
   var labels = {};
-  SIGMAFLOW.STATUSES.forEach(function(status) {
-    labels[status] = config['column_' + status] || SIGMAFLOW.DEFAULT_COLUMN_LABELS[status] || status;
+  readColumns_().forEach(function(column) {
+    labels[column.id] = column.label;
   });
   return labels;
+}
+
+function readColumns_() {
+  var config = readConfig_();
+  var columns = [];
+
+  if (config.columns_json) {
+    try {
+      columns = JSON.parse(config.columns_json);
+    } catch (err) {
+      columns = [];
+    }
+  }
+
+  if (!columns || !columns.length) {
+    columns = SIGMAFLOW.DEFAULT_COLUMNS.map(function(column) {
+      return {
+        id: column.id,
+        label: config['column_' + column.id] || column.label,
+        role: column.role,
+        order: column.order
+      };
+    });
+  }
+
+  var seen = {};
+  columns = columns.map(function(column, index) {
+    var id = normalizeStatus_(column.id || column.status || '');
+    if (!id || seen[id]) {
+      id = uniqueColumnId_(slugify_(column.label || 'colonna'), seen);
+    }
+    seen[id] = true;
+    return {
+      id: id,
+      status: id,
+      label: String(column.label || id),
+      role: normalizeColumnRole_(column.role),
+      order: Number(column.order || ((index + 1) * 10))
+    };
+  }).sort(function(a, b) {
+    return a.order - b.order;
+  });
+
+  return ensureRequiredColumnRoles_(columns);
+}
+
+function writeColumns_(columns) {
+  columns = ensureRequiredColumnRoles_(columns).map(function(column, index) {
+    return {
+      id: column.id,
+      label: column.label,
+      role: normalizeColumnRole_(column.role),
+      order: (index + 1) * 10
+    };
+  });
+  writeConfigValue_('columns_json', JSON.stringify(columns));
+  return columns;
+}
+
+function ensureRequiredColumnRoles_(columns) {
+  var hasBacklog = columns.some(function(column) {
+    return column.role === 'backlog';
+  });
+  var hasDone = columns.some(function(column) {
+    return column.role === 'done';
+  });
+
+  if (!hasBacklog) {
+    columns.unshift({ id: 'backlog', label: 'Backlog', role: 'backlog', order: 0 });
+  }
+  if (!hasDone) {
+    columns.push({ id: 'done', label: 'Fatto', role: 'done', order: 999 });
+  }
+
+  return columns;
+}
+
+function findColumn_(columns, id) {
+  id = normalizeStatus_(id);
+  return columns.filter(function(column) {
+    return column.id === id;
+  })[0] || null;
+}
+
+function validateColumnId_(id) {
+  var columns = readColumns_();
+  var status = normalizeStatus_(id);
+  if (!findColumn_(columns, status)) {
+    throw new Error('Colonna non valida: ' + status);
+  }
+  return status;
+}
+
+function isDoneStatus_(status) {
+  var column = findColumn_(readColumns_(), status);
+  return column && column.role === 'done';
+}
+
+function isStandByStatus_(status) {
+  var column = findColumn_(readColumns_(), status);
+  return column && column.role === 'stand_by';
+}
+
+function firstColumnIdByRole_(role) {
+  var columns = readColumns_();
+  var column = columns.filter(function(item) {
+    return item.role === role;
+  })[0] || columns[0];
+  return column.id;
+}
+
+function slugify_(value) {
+  return String(value || 'colonna')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32) || 'colonna';
+}
+
+function uniqueColumnId_(base, seen) {
+  var id = base;
+  var index = 2;
+  while (seen[id]) {
+    id = base + '_' + index;
+    index++;
+  }
+  return id;
+}
+
+function parseJsonArray_(value) {
+  if (!value) {
+    return [];
+  }
+  try {
+    var parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function uniqueSortedValues_(values) {
+  var seen = {};
+  return values.filter(function(value) {
+    value = String(value || '').trim();
+    if (!value || seen[value]) {
+      return false;
+    }
+    seen[value] = true;
+    return true;
+  }).sort();
 }
 
 function writeConfigValue_(key, value) {

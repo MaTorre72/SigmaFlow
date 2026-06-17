@@ -1,12 +1,15 @@
 <section class="toolbar">
-  <button id="add-job-button" class="primary-button">+ Aggiungi job</button>
   <label>
     Assegnatario
-    <input id="filter-assignee" type="search" placeholder="Tutti">
+    <select id="filter-assignee">
+      <option value="">Tutti</option>
+    </select>
   </label>
   <label>
     Tag
-    <input id="filter-tag" type="search" placeholder="Tutti">
+    <select id="filter-tag">
+      <option value="">Tutti</option>
+    </select>
   </label>
   <label>
     Taglia
@@ -19,36 +22,10 @@
       <option value="XL">XL (20)</option>
     </select>
   </label>
+  <button id="add-column-button" type="button">+ Colonna</button>
 </section>
 
-<form id="job-form" class="job-form" hidden>
-  <div class="form-title">Nuovo job</div>
-  <label>
-    Titolo
-    <input name="title" required placeholder="Es. Sopralluogo Rossi">
-  </label>
-  <label>
-    Assegnatario
-    <input name="assignee" placeholder="Nome o email">
-  </label>
-  <label>
-    Tag
-    <input name="tag" placeholder="Es. urgente">
-  </label>
-  <label>
-    Taglia
-    <select name="size_class">
-      <option value="XS">XS (3)</option>
-      <option value="S">S (5)</option>
-      <option value="M" selected>M (8)</option>
-      <option value="L">L (13)</option>
-      <option value="XL">XL (20)</option>
-    </select>
-  </label>
-  <div class="form-actions">
-    <button type="submit" class="primary-button">Crea job</button>
-    <button type="button" id="cancel-job-button">Annulla</button>
-  </div>
-</form>
+<datalist id="assignee-options"></datalist>
+<datalist id="tag-options"></datalist>
 
 <section id="kanban-board" class="kanban-board" aria-live="polite"></section>

@@ -13,13 +13,14 @@ var SIGMAFLOW = {
   STATUS_ALIASES: {
     blocked: 'stand_by'
   },
-  DEFAULT_COLUMN_LABELS: {
-    backlog: 'Backlog',
-    in_progress: 'In corso',
-    stand_by: 'Stand-by',
-    in_review: 'In review',
-    done: 'Fatto'
-  },
+  COLUMN_ROLES: ['backlog', 'wip', 'stand_by', 'done', 'neutral'],
+  DEFAULT_COLUMNS: [
+    { id: 'backlog', label: 'Backlog', role: 'backlog', order: 10 },
+    { id: 'in_progress', label: 'In corso', role: 'wip', order: 20 },
+    { id: 'stand_by', label: 'Stand-by', role: 'stand_by', order: 30 },
+    { id: 'in_review', label: 'In review', role: 'wip', order: 40 },
+    { id: 'done', label: 'Fatto', role: 'done', order: 50 }
+  ],
   SIZE_POINTS: {
     XS: 3,
     S: 5,
@@ -35,6 +36,9 @@ var SIGMAFLOW = {
     size_M_days: 2,
     size_L_days: 4,
     size_XL_days: 8,
+    columns_json: '',
+    assignees_json: '[]',
+    tags_json: '[]',
     column_backlog: 'Backlog',
     column_in_progress: 'In corso',
     column_stand_by: 'Stand-by',

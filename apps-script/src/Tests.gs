@@ -28,6 +28,7 @@ function runAllTests() {
     testMoveJobLifecycle,
     testMarkRework,
     testAutomaticReworkFromStandBy,
+    testDynamicColumnsAndOptions,
     testMetrics,
     testMissingRequiredParam
   ];
@@ -150,6 +151,44 @@ function testAutomaticReworkFromStandBy() {
     assertEquals_(2, Number(job.visit_number), 'visit_number automatico');
     assertTrue_(coerceBoolean_(job.is_rework), 'is_rework automatico');
     assertEquals_('stand_by_return', job.rework_cause, 'causa rework automatica');
+  });
+}
+
+function testDynamicColumnsAndOptions() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+
+    var added = addColumn({ label: 'Attesa cliente', role: 'stand_by' });
+    assertTrue_(added.success, 'addColumn dovrebbe riuscire');
+    assertEquals_('stand_by', added.data.column.role, 'ruolo nuova colonna');
+
+    var moved = moveColumn({ status: added.data.column.id, direction: 'left' });
+    assertTrue_(moved.success, 'moveColumn dovrebbe riuscire');
+
+    var renamed = updateColumn({
+      status: added.data.column.id,
+      label: 'Attesa esterna',
+      role: 'stand_by'
+    });
+    assertTrue_(renamed.success, 'updateColumn dovrebbe riuscire');
+
+    var created = addJob({
+      title: 'Dropdown job',
+      status: added.data.column.id,
+      assignee: 'anna@sigmapiu.it',
+      tag: 'permessi',
+      size_class: 'XS'
+    }).data;
+    assertTrue_(created.job_id.indexOf('J-') === 0, 'job creato nella nuova colonna');
+
+    var board = getBoard();
+    var column = board.data.column_meta.filter(function(item) {
+      return item.status === added.data.column.id;
+    })[0];
+    assertEquals_('Attesa esterna', column.label, 'nome colonna aggiornato');
+    assertEquals_(3, Number(column.points), 'somma punti colonna');
+    assertTrue_(board.data.options.assignees.indexOf('anna@sigmapiu.it') !== -1, 'assegnatario in dropdown');
+    assertTrue_(board.data.options.tags.indexOf('permessi') !== -1, 'tag in dropdown');
   });
 }
 

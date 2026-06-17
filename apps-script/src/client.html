@@ -3,6 +3,11 @@
     env: window.SIGMAFLOW_ENV === 'test' ? 'test' : 'prod',
     board: null,
     columnMeta: null,
+    options: {
+      assignees: [],
+      tags: [],
+      sizes: ['XS', 'S', 'M', 'L', 'XL']
+    },
     filters: {
       assignee: '',
       tag: '',
@@ -11,18 +16,34 @@
   };
 
   var defaultColumns = [
-    { status: 'backlog', label: 'Backlog', count: 0, points: 0 },
-    { status: 'in_progress', label: 'In corso', count: 0, points: 0 },
-    { status: 'stand_by', label: 'Stand-by', count: 0, points: 0 },
-    { status: 'in_review', label: 'In review', count: 0, points: 0 },
-    { status: 'done', label: 'Fatto', count: 0, points: 0 }
+    { id: 'backlog', status: 'backlog', label: 'Backlog', role: 'backlog', count: 0, points: 0 },
+    { id: 'in_progress', status: 'in_progress', label: 'In corso', role: 'wip', count: 0, points: 0 },
+    { id: 'stand_by', status: 'stand_by', label: 'Stand-by', role: 'stand_by', count: 0, points: 0 },
+    { id: 'in_review', status: 'in_review', label: 'In review', role: 'wip', count: 0, points: 0 },
+    { id: 'done', status: 'done', label: 'Fatto', role: 'done', count: 0, points: 0 }
   ];
+
+  var roleLabels = {
+    backlog: 'Ingresso',
+    wip: 'WIP',
+    stand_by: 'Stand-by',
+    done: 'Concluso',
+    neutral: 'Neutra'
+  };
+
+  var sizePoints = {
+    XS: 3,
+    S: 5,
+    M: 8,
+    L: 13,
+    XL: 20
+  };
 
   document.addEventListener('DOMContentLoaded', function() {
     bindEnvironmentBadge();
     bindNavigation();
     bindFilters();
-    bindJobForm();
+    bindColumnActions();
     loadBoard();
     loadMetrics();
     window.setInterval(loadBoard, 60000);
@@ -77,34 +98,28 @@
       ['filter-tag', 'tag'],
       ['filter-size', 'size']
     ].forEach(function(pair) {
-      document.getElementById(pair[0]).addEventListener('input', function(event) {
+      document.getElementById(pair[0]).addEventListener('change', function(event) {
         state.filters[pair[1]] = event.target.value.toLowerCase();
         renderBoard();
       });
     });
   }
 
-  function bindJobForm() {
-    var button = document.getElementById('add-job-button');
-    var cancel = document.getElementById('cancel-job-button');
-    var form = document.getElementById('job-form');
-    button.addEventListener('click', function() {
-      form.hidden = false;
-      form.elements.title.focus();
-    });
-    cancel.addEventListener('click', function() {
-      form.reset();
-      form.hidden = true;
-    });
+  function bindColumnActions() {
+    document.getElementById('add-column-button').addEventListener('click', function() {
+      var label = prompt('Nome nuova colonna');
+      if (label === null) {
+        return;
+      }
+      label = label.trim();
+      if (!label) {
+        showError(new Error('Nome colonna vuoto'));
+        return;
+      }
 
-    form.addEventListener('submit', function(event) {
-      event.preventDefault();
-      var data = Object.fromEntries(new FormData(form).entries());
-      callApi('addJob', data).then(function() {
-        form.reset();
-        form.hidden = true;
-        loadBoard();
-      }).catch(showError);
+      var role = prompt('Ruolo: backlog, wip, stand_by, done, neutral', 'neutral');
+      role = role === null ? 'neutral' : role.trim();
+      callApi('addColumn', { label: label, role: role || 'neutral' }).then(loadBoard).catch(showError);
     });
   }
 
@@ -112,57 +127,176 @@
     callApi('getBoard').then(function(data) {
       state.board = data.columns;
       state.columnMeta = data.column_meta;
+      state.options = data.options || state.options;
+      renderFilters();
       renderBoard();
     }).catch(showError);
+  }
+
+  function renderFilters() {
+    fillSelect('filter-assignee', state.options.assignees || [], 'Tutti');
+    fillSelect('filter-tag', state.options.tags || [], 'Tutti');
+    fillDatalist('assignee-options', state.options.assignees || []);
+    fillDatalist('tag-options', state.options.tags || []);
+  }
+
+  function fillSelect(id, values, emptyLabel) {
+    var select = document.getElementById(id);
+    var previous = select.value;
+    select.innerHTML = '<option value="">' + emptyLabel + '</option>';
+    values.forEach(function(value) {
+      var option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
+    select.value = previous;
+  }
+
+  function fillDatalist(id, values) {
+    var root = document.getElementById(id);
+    root.innerHTML = '';
+    values.forEach(function(value) {
+      var option = document.createElement('option');
+      option.value = value;
+      root.appendChild(option);
+    });
   }
 
   function renderBoard() {
     var root = document.getElementById('kanban-board');
     root.innerHTML = '';
 
-    getColumns().forEach(function(column) {
+    getColumns().forEach(function(column, index) {
       var jobs = ((state.board && state.board[column.status]) || []).filter(matchesFilters);
       var points = jobs.reduce(function(sum, job) {
         return sum + Number(job.size_points || 0);
       }, 0);
       var columnEl = document.createElement('section');
-      columnEl.className = 'column';
+      columnEl.className = 'column role-' + (column.role || 'neutral');
       columnEl.dataset.status = column.status;
       columnEl.innerHTML = [
         '<div class="column-header">',
         '<div>',
+        '<div class="column-title-row">',
         '<h2 class="column-title"></h2>',
+        '<span class="role-pill"></span>',
+        '</div>',
         '<div class="column-stats"></div>',
         '</div>',
-        '<button type="button" class="rename-column-button" title="Rinomina colonna">Rinomina</button>',
-        '</div>'
+        '<div class="column-actions">',
+        '<button type="button" class="move-left-button" title="Sposta a sinistra">&lt;</button>',
+        '<button type="button" class="move-right-button" title="Sposta a destra">&gt;</button>',
+        '<button type="button" class="rename-column-button" title="Rinomina colonna">Nome</button>',
+        '</div>',
+        '</div>',
+        '<label class="role-control">Ruolo<select class="role-select"></select></label>',
+        '<div class="cards"></div>',
+        '<button type="button" class="open-composer-button">+ Scheda</button>',
+        '<form class="quick-card-form" hidden></form>'
       ].join('');
+
       columnEl.querySelector('.column-title').textContent = column.label;
-      columnEl.querySelector('.column-stats').textContent = jobs.length + ' job · ' + points + ' pt';
+      columnEl.querySelector('.role-pill').textContent = roleLabels[column.role] || roleLabels.neutral;
+      columnEl.querySelector('.column-stats').textContent = jobs.length + ' job - ' + points + ' pt';
+      renderRoleSelect(columnEl.querySelector('.role-select'), column.role);
+
+      columnEl.querySelector('.move-left-button').disabled = index === 0;
+      columnEl.querySelector('.move-right-button').disabled = index === getColumns().length - 1;
+      columnEl.querySelector('.move-left-button').addEventListener('click', function() {
+        moveColumn(column, 'left');
+      });
+      columnEl.querySelector('.move-right-button').addEventListener('click', function() {
+        moveColumn(column, 'right');
+      });
       columnEl.querySelector('.rename-column-button').addEventListener('click', function() {
         renameColumn(column);
       });
-      columnEl.addEventListener('dragover', function(event) {
-        event.preventDefault();
-      });
-      columnEl.addEventListener('drop', function(event) {
-        event.preventDefault();
-        columnEl.classList.remove('drop-target');
-        moveJob(event.dataTransfer.getData('text/plain'), column.status);
-      });
-      columnEl.addEventListener('dragenter', function() {
-        columnEl.classList.add('drop-target');
-      });
-      columnEl.addEventListener('dragleave', function(event) {
-        if (!columnEl.contains(event.relatedTarget)) {
-          columnEl.classList.remove('drop-target');
-        }
+      columnEl.querySelector('.role-select').addEventListener('change', function(event) {
+        updateColumnRole(column, event.target.value);
       });
 
+      bindDropTarget(columnEl, column.status);
+
       jobs.forEach(function(job) {
-        columnEl.appendChild(renderCard(job));
+        columnEl.querySelector('.cards').appendChild(renderCard(job));
       });
+      renderComposer(columnEl, column);
       root.appendChild(columnEl);
+    });
+  }
+
+  function renderRoleSelect(select, role) {
+    Object.keys(roleLabels).forEach(function(key) {
+      var option = document.createElement('option');
+      option.value = key;
+      option.textContent = roleLabels[key];
+      select.appendChild(option);
+    });
+    select.value = role || 'neutral';
+  }
+
+  function bindDropTarget(columnEl, status) {
+    columnEl.addEventListener('dragover', function(event) {
+      event.preventDefault();
+    });
+    columnEl.addEventListener('drop', function(event) {
+      event.preventDefault();
+      columnEl.classList.remove('drop-target');
+      moveJob(event.dataTransfer.getData('text/plain'), status);
+    });
+    columnEl.addEventListener('dragenter', function() {
+      columnEl.classList.add('drop-target');
+    });
+    columnEl.addEventListener('dragleave', function(event) {
+      if (!columnEl.contains(event.relatedTarget)) {
+        columnEl.classList.remove('drop-target');
+      }
+    });
+  }
+
+  function renderComposer(columnEl, column) {
+    var button = columnEl.querySelector('.open-composer-button');
+    var form = columnEl.querySelector('.quick-card-form');
+    form.innerHTML = [
+      '<input name="title" required placeholder="Titolo job">',
+      '<div class="composer-grid">',
+      '<input name="assignee" list="assignee-options" placeholder="Assegnatario">',
+      '<input name="tag" list="tag-options" placeholder="Tag">',
+      '<select name="size_class">',
+      '<option value="XS">XS (3)</option>',
+      '<option value="S">S (5)</option>',
+      '<option value="M" selected>M (8)</option>',
+      '<option value="L">L (13)</option>',
+      '<option value="XL">XL (20)</option>',
+      '</select>',
+      '</div>',
+      '<div class="form-actions">',
+      '<button type="submit" class="primary-button">Crea</button>',
+      '<button type="button" class="cancel-composer-button">Annulla</button>',
+      '</div>'
+    ].join('');
+
+    button.addEventListener('click', function() {
+      button.hidden = true;
+      form.hidden = false;
+      form.elements.title.focus();
+    });
+    form.querySelector('.cancel-composer-button').addEventListener('click', function() {
+      form.reset();
+      form.hidden = true;
+      button.hidden = false;
+    });
+    form.addEventListener('submit', function(event) {
+      event.preventDefault();
+      var data = Object.fromEntries(new FormData(form).entries());
+      data.status = column.status;
+      callApi('addJob', data).then(function() {
+        form.reset();
+        form.hidden = true;
+        button.hidden = false;
+        loadBoard();
+      }).catch(showError);
     });
   }
 
@@ -187,7 +321,7 @@
       '<div class="badges">',
       '<span class="badge">' + escapeHtml(job.tag || 'senza tag') + '</span>',
       '<span class="badge">' + escapeHtml(job.assignee || 'non assegnato') + '</span>',
-      '<span class="badge">' + escapeHtml((job.size_class || 'M') + ' · ' + (job.size_points || 8) + ' pt') + '</span>',
+      '<span class="badge">' + escapeHtml((job.size_class || 'M') + ' - ' + (job.size_points || sizePoints[job.size_class] || 8) + ' pt') + '</span>',
       reworkBadge,
       '</div>',
       '<div class="card-actions">',
@@ -227,7 +361,15 @@
       return;
     }
 
-    callApi('updateColumnLabel', { status: column.status, label: next }).then(loadBoard).catch(showError);
+    callApi('updateColumn', { status: column.status, label: next }).then(loadBoard).catch(showError);
+  }
+
+  function updateColumnRole(column, role) {
+    callApi('updateColumn', { status: column.status, role: role }).then(loadBoard).catch(showError);
+  }
+
+  function moveColumn(column, direction) {
+    callApi('moveColumn', { status: column.status, direction: direction }).then(loadBoard).catch(showError);
   }
 
   function deleteJob(job) {
@@ -287,8 +429,8 @@
     var assignee = String(job.assignee || '').toLowerCase();
     var tag = String(job.tag || '').toLowerCase();
     var size = String(job.size_class || '').toLowerCase();
-    return (!state.filters.assignee || assignee.indexOf(state.filters.assignee) !== -1)
-      && (!state.filters.tag || tag.indexOf(state.filters.tag) !== -1)
+    return (!state.filters.assignee || assignee === state.filters.assignee)
+      && (!state.filters.tag || tag === state.filters.tag)
       && (!state.filters.size || size === state.filters.size);
   }
 

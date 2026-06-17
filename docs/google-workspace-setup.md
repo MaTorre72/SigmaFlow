@@ -12,10 +12,10 @@ Spreadsheet database creato e verificato:
 - Timezone: `Europe/Rome`
 - Tab verificati: `jobs`, `cases`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
-- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec>
-- Deployment corrente: `AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW` (`@6`)
-- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=prod>
-- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbziWt5xWmvuDyrIduk5QRqFMxAmz8c0c_NgL3GX9J6w6-MnZLBEXuZKBlVHFNAnsUuW/exec?env=test>
+- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH/exec>
+- Deployment corrente: `AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH` (`@7`)
+- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH/exec?env=prod>
+- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH/exec?env=test>
 
 Nota: `clasp create --type sheets` ha creato un nuovo contenitore Google Sheets per il progetto Apps Script. Il codice SigmaFlow usa comunque il database canonico tramite `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`.
 
@@ -103,5 +103,6 @@ cd apps-script
 5. Verifica nello Sheet che il ritorno da `Stand-by` abbia impostato `is_rework`, `visit_number` e `rework_cause`.
 6. Trascinalo in `Fatto`.
 7. Verifica nello Sheet che `start_ts`, `done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d` siano valorizzati.
-8. Verifica che le colonne mostrino conteggio job e somma punti, e prova a rinominare una colonna.
-9. Apri la tab Dashboard e verifica che le metriche vengano renderizzate senza errori.
+8. Verifica che le colonne mostrino conteggio job e somma punti.
+9. Crea una nuova colonna, assegnale un ruolo, spostala a sinistra/destra e prova a rinominarla.
+10. Apri la tab Dashboard e verifica che le metriche vengano renderizzate senza errori.
