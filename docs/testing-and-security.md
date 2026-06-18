@@ -10,7 +10,7 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 
 - Spreadsheet: `SigmaFlow Database`
 - ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
-- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH/exec?env=prod>
+- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxW2x86fYrKK7Tat98zkFPf55oIc5wc7RiAMXDU-opW67N_NlZDC71l0RyTF6v-0avn/exec?env=prod>
 
 ### Test
 
@@ -50,7 +50,7 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyOiv8OmZgQXG7g39jWtaSNuu1fHs7ZeLMU2TSPY0f6hrNa1VY3p37LliAD4mpSXfhH/exec?env=test>
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxW2x86fYrKK7Tat98zkFPf55oIc5wc7RiAMXDU-opW67N_NlZDC71l0RyTF6v-0avn/exec?env=test>
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
