@@ -58,13 +58,69 @@ function include(filename) {
 }
 
 function nowIso_() {
-  return Utilities.formatDate(new Date(), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  return nowRome();
 }
 
 function generateId_(prefix) {
+  if (prefix === 'J') {
+    return generateJobId();
+  }
+  if (prefix === 'C') {
+    return generateCaseId();
+  }
   var stamp = Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd-HHmmss');
   var suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
   return prefix + '-' + stamp + '-' + suffix;
+}
+
+function nowRome() {
+  return Utilities.formatDate(new Date(), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
+function generateJobId() {
+  return 'JOB-' + Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd') + '-' + randomSuffix_();
+}
+
+function generateCaseId() {
+  return 'CASE-' + Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd') + '-' + randomSuffix_();
+}
+
+function randomSuffix_() {
+  return Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+function calcPriorityScore(impact, manageability) {
+  var i = Number(impact);
+  var m = Number(manageability);
+  if (!i || !m || i < 1 || m < 1) {
+    return 0;
+  }
+  return Math.round(Math.sqrt(i * m) * 100) / 100;
+}
+
+function suggestPriorityClass(score) {
+  var value = Number(score) || 0;
+  var classes = SIGMAFLOW.PRIORITY_CLASSES;
+  if (value < classes.p4_assess.score_max) {
+    return 'p4_assess';
+  }
+  if (value < classes.p1_plan.score_max) {
+    return 'p1_plan';
+  }
+  if (value < classes.p2_urgent.score_max) {
+    return 'p2_urgent';
+  }
+  return 'p3_critical';
+}
+
+function diffDays(tsStart, tsEnd) {
+  if (!tsStart || !tsEnd) {
+    return '';
+  }
+  var start = new Date(tsStart);
+  var end = new Date(tsEnd);
+  var days = Math.max(0, (end.getTime() - start.getTime()) / 864e5);
+  return Math.round(days * 100) / 100;
 }
 
 function json_(payload) {
@@ -183,12 +239,7 @@ function findRowById_(sheet, idColumn, id) {
 }
 
 function daysBetween_(startIso, endIso) {
-  if (!startIso || !endIso) {
-    return '';
-  }
-  var start = new Date(startIso);
-  var end = new Date(endIso);
-  return Math.max(0, (end.getTime() - start.getTime()) / 864e5);
+  return diffDays(startIso, endIso);
 }
 
 function coerceBoolean_(value) {
@@ -253,7 +304,8 @@ function readColumns_() {
       status: id,
       label: String(column.label || id),
       role: normalizeColumnRole_(column.role),
-      order: Number(column.order || ((index + 1) * 10))
+      order: Number(column.order || ((index + 1) * 10)),
+      color: column.color || '#E8E8E8'
     };
   }).sort(function(a, b) {
     return a.order - b.order;
@@ -268,7 +320,8 @@ function writeColumns_(columns) {
       id: column.id,
       label: column.label,
       role: normalizeColumnRole_(column.role),
-      order: (index + 1) * 10
+      order: (index + 1) * 10,
+      color: column.color || '#E8E8E8'
     };
   });
   writeConfigValue_('columns_json', JSON.stringify(columns));
@@ -325,6 +378,10 @@ function firstColumnIdByRole_(role) {
     return item.role === role;
   })[0] || columns[0];
   return column.id;
+}
+
+function firstWorkColumnId_() {
+  return firstColumnIdByRole_('wip');
 }
 
 function slugify_(value) {

@@ -3,14 +3,22 @@ var JOB_HEADERS = [
   'case_id',
   'visit_number',
   'title',
+  'client',
   'status',
   'assignee',
   'tag',
   'size_class',
   'size_points',
+  'priority_class',
+  'priority_class_manual',
+  'impact',
+  'manageability',
+  'priority_score',
+  'description',
   'arrival_ts',
   'start_ts',
   'done_ts',
+  'invoiced',
   'service_time_d',
   'lead_time_d',
   'wait_time_d',
@@ -49,17 +57,44 @@ function ensureSheet_(ss, name, headers) {
     return sheet;
   }
 
-  var existing = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getValues()[0];
-  var needsHeader = headers.some(function(header, index) {
-    return existing[index] !== header;
-  });
-
-  if (needsHeader) {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.setFrozenRows(1);
-  }
+  alignSheetHeaders_(sheet, headers);
 
   return sheet;
+}
+
+function alignSheetHeaders_(sheet, headers) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  var existing = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var sameOrder = headers.every(function(header, index) {
+    return existing[index] === header;
+  });
+
+  if (sameOrder && lastCol === headers.length) {
+    sheet.setFrozenRows(1);
+    return;
+  }
+
+  var oldIndex = {};
+  existing.forEach(function(header, index) {
+    if (header) {
+      oldIndex[header] = index;
+    }
+  });
+
+  var data = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
+  var aligned = data.map(function(row) {
+    return headers.map(function(header) {
+      return oldIndex[header] !== undefined ? row[oldIndex[header]] : '';
+    });
+  });
+
+  sheet.clear();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (aligned.length) {
+    sheet.getRange(2, 1, aligned.length, headers.length).setValues(aligned);
+  }
+  sheet.setFrozenRows(1);
 }
 
 function seedDefaultConfig_(sheet) {
@@ -88,8 +123,29 @@ function seedDefaultConfig_(sheet) {
   };
 
   Object.keys(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(key) {
+    var value = defaultConfigValue_(key);
     if (!existing[key]) {
-      sheet.appendRow([key, SIGMAFLOW.DEFAULT_CONFIG[key], descriptions[key] || '']);
+      sheet.appendRow([key, value, descriptions[key] || '']);
+    } else if (key === 'columns_json') {
+      ensureConfigValue_(sheet, key, value);
     }
   });
+}
+
+function defaultConfigValue_(key) {
+  if (key === 'columns_json') {
+    return JSON.stringify(SIGMAFLOW.DEFAULT_COLUMNS);
+  }
+  return SIGMAFLOW.DEFAULT_CONFIG[key];
+}
+
+function ensureConfigValue_(sheet, key, value) {
+  var rows = readTable_(sheet);
+  var headers = getHeaderMap_(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key === key && rows[i].value !== value) {
+      sheet.getRange(i + 2, headers.value).setValue(value);
+      return;
+    }
+  }
 }

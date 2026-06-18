@@ -16,11 +16,14 @@
   };
 
   var defaultColumns = [
-    { id: 'backlog', status: 'backlog', label: 'Backlog', role: 'backlog', count: 0, points: 0 },
-    { id: 'in_progress', status: 'in_progress', label: 'In corso', role: 'wip', count: 0, points: 0 },
-    { id: 'stand_by', status: 'stand_by', label: 'Stand-by', role: 'stand_by', count: 0, points: 0 },
-    { id: 'in_review', status: 'in_review', label: 'In review', role: 'wip', count: 0, points: 0 },
-    { id: 'done', status: 'done', label: 'Fatto', role: 'done', count: 0, points: 0 }
+    { id: 'notes', status: 'notes', label: 'NOTE', role: 'neutral', color: '#E8E8E8', count: 0, points: 0 },
+    { id: 'backlog', status: 'backlog', label: 'BACKLOG', role: 'backlog', color: '#C8D8E8', count: 0, points: 0 },
+    { id: 'todo', status: 'todo', label: 'TO DO', role: 'wip', color: '#A8C4E0', count: 0, points: 0 },
+    { id: 'wip', status: 'wip', label: 'WIP', role: 'wip', color: '#5B9BD5', count: 0, points: 0 },
+    { id: 'wait_client', status: 'wait_client', label: 'ATTESA CLIENTE', role: 'stand_by', color: '#FFD966', count: 0, points: 0 },
+    { id: 'wait_authority', status: 'wait_authority', label: 'ATTESA ENTI', role: 'stand_by', color: '#F4B942', count: 0, points: 0 },
+    { id: 'wait_internal', status: 'wait_internal', label: 'ATTESA MT/GC', role: 'stand_by', color: '#E8A020', count: 0, points: 0 },
+    { id: 'done', status: 'done', label: 'DA INVIARE / DA FATTURARE', role: 'done', color: '#70AD47', count: 0, points: 0 }
   ];
 
   var roleLabels = {
@@ -174,6 +177,7 @@
       }, 0);
       var columnEl = document.createElement('section');
       columnEl.className = 'column role-' + (column.role || 'neutral');
+      columnEl.style.borderTopColor = column.color || '#E8E8E8';
       columnEl.dataset.status = column.status;
       columnEl.innerHTML = [
         '<div class="column-header">',
@@ -261,6 +265,7 @@
     form.innerHTML = [
       '<input name="title" required placeholder="Titolo job">',
       '<div class="composer-grid">',
+      '<input name="client" placeholder="Cliente">',
       '<input name="assignee" list="assignee-options" placeholder="Assegnatario">',
       '<input name="tag" list="tag-options" placeholder="Tag">',
       '<select name="size_class">',

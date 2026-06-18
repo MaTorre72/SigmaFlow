@@ -54,12 +54,12 @@ Eseguire dopo ogni deploy:
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
-5. Trascinare il job in `in_progress`.
-6. Trascinare il job in `stand_by`, poi di nuovo in `in_review` o `in_progress`.
+5. Trascinare il job in `wip`.
+6. Trascinare il job in `wait_client`, poi di nuovo in `todo` o `wip`.
 7. Verificare nello Sheet TEST che il job sia marcato come rework automatico:
    - `visit_number` maggiore di `1`
    - `is_rework` `TRUE`
-   - `rework_cause` `stand_by_return`
+   - `rework_cause` `wait_client`
 8. Trascinare il job in `done`.
 9. Verificare nello Sheet TEST:
    - `arrival_ts` valorizzato
@@ -79,9 +79,9 @@ I primi test automatici coprono:
 
 - setup schema test
 - `addJob`
-- `moveJob` verso `in_progress`
+- `moveJob` verso `wip`
 - `moveJob` verso `done`
-- rework automatico su ritorno da `stand_by`
+- rework automatico da `wait_client` verso una colonna `wip`
 - colonne dinamiche, ruoli e opzioni dropdown
 - `markRework`
 - `getMetrics`

@@ -9,18 +9,30 @@ var SIGMAFLOW = {
     CASES: 'cases',
     CONFIG: 'config'
   },
-  STATUSES: ['backlog', 'in_progress', 'stand_by', 'in_review', 'done'],
+  STATUSES: ['notes', 'backlog', 'todo', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done'],
   STATUS_ALIASES: {
-    blocked: 'stand_by'
+    blocked: 'wait_internal',
+    in_progress: 'wip',
+    stand_by: 'wait_internal',
+    in_review: 'todo'
   },
   COLUMN_ROLES: ['backlog', 'wip', 'stand_by', 'done', 'neutral'],
   DEFAULT_COLUMNS: [
-    { id: 'backlog', label: 'Backlog', role: 'backlog', order: 10 },
-    { id: 'in_progress', label: 'In corso', role: 'wip', order: 20 },
-    { id: 'stand_by', label: 'Stand-by', role: 'stand_by', order: 30 },
-    { id: 'in_review', label: 'In review', role: 'wip', order: 40 },
-    { id: 'done', label: 'Fatto', role: 'done', order: 50 }
+    { id: 'notes', label: 'NOTE', role: 'neutral', order: 1, color: '#E8E8E8' },
+    { id: 'backlog', label: 'BACKLOG', role: 'backlog', order: 2, color: '#C8D8E8' },
+    { id: 'todo', label: 'TO DO', role: 'wip', order: 3, color: '#A8C4E0' },
+    { id: 'wip', label: 'WIP', role: 'wip', order: 4, color: '#5B9BD5' },
+    { id: 'wait_client', label: 'ATTESA CLIENTE', role: 'stand_by', order: 5, color: '#FFD966' },
+    { id: 'wait_authority', label: 'ATTESA ENTI', role: 'stand_by', order: 6, color: '#F4B942' },
+    { id: 'wait_internal', label: 'ATTESA MT/GC', role: 'stand_by', order: 7, color: '#E8A020' },
+    { id: 'done', label: 'DA INVIARE / DA FATTURARE', role: 'done', order: 8, color: '#70AD47' }
   ],
+  PRIORITY_CLASSES: {
+    p4_assess: { label: 'Da valutare', color: '#CCCCCC', score_max: 1.5 },
+    p1_plan: { label: 'Da pianificare', color: '#FFD966', score_max: 2.5 },
+    p2_urgent: { label: 'Urgente con margine', color: '#F4A020', score_max: 3.5 },
+    p3_critical: { label: 'Urgente critico', color: '#E02020', score_max: 99 }
+  },
   SIZE_POINTS: {
     XS: 3,
     S: 5,
@@ -28,6 +40,7 @@ var SIGMAFLOW = {
     L: 13,
     XL: 20
   },
+  REWORK_CAUSES: ['wait_client', 'wait_authority', 'wait_internal', 'manual'],
   DEFAULT_CONFIG: {
     team_size: 4,
     observation_window_days: 30,
@@ -38,7 +51,7 @@ var SIGMAFLOW = {
     size_XL_days: 8,
     columns_json: '',
     assignees_json: '[]',
-    tags_json: '[]',
+    tags_json: '["AIA","ADR","VIA","rifiuti","acque","aria","suolo","rumore"]',
     column_backlog: 'Backlog',
     column_in_progress: 'In corso',
     column_stand_by: 'Stand-by',

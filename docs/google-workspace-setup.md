@@ -97,11 +97,11 @@ cd apps-script
 ## 5. Smoke test
 
 1. Apri la Web App URL.
-2. Verifica che la board mostri le colonne: Backlog, In corso, Stand-by, In review, Fatto.
+2. Verifica che la board mostri le colonne: NOTE, BACKLOG, TO DO, WIP, ATTESA CLIENTE, ATTESA ENTI, ATTESA MT/GC, DA INVIARE / DA FATTURARE.
 3. Crea un job di prova.
-4. Trascinalo in `In corso`, poi in `Stand-by`, poi di nuovo in una colonna di lavoro.
-5. Verifica nello Sheet che il ritorno da `Stand-by` abbia impostato `is_rework`, `visit_number` e `rework_cause`.
-6. Trascinalo in `Fatto`.
+4. Trascinalo in `WIP`, poi in `ATTESA CLIENTE`, poi in `TO DO` o `WIP`.
+5. Verifica nello Sheet TEST che il ritorno da `ATTESA CLIENTE` abbia impostato `is_rework`, `visit_number` e `rework_cause = wait_client`.
+6. Trascinalo in `DA INVIARE / DA FATTURARE`.
 7. Verifica nello Sheet che `start_ts`, `done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d` siano valorizzati.
 8. Verifica che le colonne mostrino conteggio job e somma punti.
 9. Crea una nuova colonna, assegnale un ruolo, spostala a sinistra/destra e prova a rinominarla.

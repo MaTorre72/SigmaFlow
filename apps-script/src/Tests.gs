@@ -28,6 +28,7 @@ function runAllTests() {
     testMoveJobLifecycle,
     testMarkRework,
     testAutomaticReworkFromStandBy,
+    testPriorityHelpers,
     testDynamicColumnsAndOptions,
     testMetrics,
     testMissingRequiredParam
@@ -70,13 +71,14 @@ function testAddJob() {
     });
 
     assertTrue_(response.success, 'addJob dovrebbe riuscire');
-    assertTrue_(response.data.job_id.indexOf('J-') === 0, 'job_id dovrebbe iniziare con J-');
-    assertTrue_(response.data.case_id.indexOf('C-') === 0, 'case_id dovrebbe iniziare con C-');
+    assertTrue_(response.data.job_id.indexOf('JOB-') === 0, 'job_id dovrebbe iniziare con JOB-');
+    assertTrue_(response.data.case_id.indexOf('CASE-') === 0, 'case_id dovrebbe iniziare con CASE-');
 
     var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
     assertEquals_(1, jobs.length, 'jobs dovrebbe contenere una riga');
     assertEquals_('backlog', jobs[0].status, 'status iniziale');
     assertEquals_(5, Number(jobs[0].size_points), 'size_points S');
+    assertEquals_('p4_assess', jobs[0].priority_class, 'priority_class default');
 
     var cases = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.CASES));
     assertEquals_(1, cases.length, 'cases dovrebbe contenere una riga');
@@ -89,11 +91,11 @@ function testMoveJobLifecycle() {
     resetTestDatabase_(ss);
     var created = addJob({ title: 'Lifecycle job', size_class: 'M' }).data;
 
-    var progress = moveJob({ job_id: created.job_id, status: 'in_progress' });
-    assertTrue_(progress.success, 'moveJob in_progress dovrebbe riuscire');
+    var progress = moveJob({ job_id: created.job_id, status: 'wip' });
+    assertTrue_(progress.success, 'moveJob wip dovrebbe riuscire');
 
     var afterProgress = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
-    assertEquals_('in_progress', afterProgress.status, 'status in_progress');
+    assertEquals_('wip', afterProgress.status, 'status wip');
     assertTrue_(Boolean(afterProgress.start_ts), 'start_ts valorizzato');
 
     Utilities.sleep(1000);
@@ -140,18 +142,26 @@ function testAutomaticReworkFromStandBy() {
     resetTestDatabase_(ss);
     var created = addJob({ title: 'Stand-by rework', size_class: 'M' }).data;
 
-    moveJob({ job_id: created.job_id, status: 'in_progress' });
-    moveJob({ job_id: created.job_id, status: 'stand_by' });
-    var returned = moveJob({ job_id: created.job_id, status: 'in_review' });
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    var returned = moveJob({ job_id: created.job_id, status: 'todo' });
 
     assertTrue_(returned.success, 'moveJob da stand_by dovrebbe riuscire');
 
     var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
-    assertEquals_('in_review', job.status, 'status dopo ritorno da stand_by');
+    assertEquals_('todo', job.status, 'status dopo ritorno da stand_by');
     assertEquals_(2, Number(job.visit_number), 'visit_number automatico');
     assertTrue_(coerceBoolean_(job.is_rework), 'is_rework automatico');
-    assertEquals_('stand_by_return', job.rework_cause, 'causa rework automatica');
+    assertEquals_('wait_client', job.rework_cause, 'causa rework automatica');
   });
+}
+
+function testPriorityHelpers() {
+  assertEquals_(3, calcPriorityScore(3, 3), 'score 3x3');
+  assertEquals_('p4_assess', suggestPriorityClass(1.49), 'classe p4');
+  assertEquals_('p1_plan', suggestPriorityClass(2), 'classe p1');
+  assertEquals_('p2_urgent', suggestPriorityClass(3), 'classe p2');
+  assertEquals_('p3_critical', suggestPriorityClass(4), 'classe p3');
 }
 
 function testDynamicColumnsAndOptions() {
@@ -179,7 +189,7 @@ function testDynamicColumnsAndOptions() {
       tag: 'permessi',
       size_class: 'XS'
     }).data;
-    assertTrue_(created.job_id.indexOf('J-') === 0, 'job creato nella nuova colonna');
+    assertTrue_(created.job_id.indexOf('JOB-') === 0, 'job creato nella nuova colonna');
 
     var board = getBoard();
     var column = board.data.column_meta.filter(function(item) {
@@ -323,14 +333,22 @@ function appendCompletedJob_(ss, data) {
     caseId,
     data.visit_number || 1,
     data.title,
+    data.client || 'Cliente test',
     'done',
     'tester@sigmapiu.it',
     'test',
     data.size_class || 'M',
     SIGMAFLOW.SIZE_POINTS[data.size_class || 'M'],
+    data.priority_class || 'p1_plan',
+    false,
+    data.impact || 2,
+    data.manageability || 2,
+    data.priority_score || 2,
+    data.description || '',
     arrivalIso,
     startIso,
     now,
+    Boolean(data.invoiced),
     data.service_time_d,
     data.lead_time_d,
     data.wait_time_d,

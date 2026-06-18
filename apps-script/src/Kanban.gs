@@ -98,6 +98,7 @@ function getBoard() {
       label: column.label,
       role: column.role,
       order: column.order,
+      color: column.color,
       count: (board[column.id] || []).length,
       points: points
     });
@@ -107,7 +108,8 @@ function getBoard() {
     columns: board,
     column_meta: columnMeta,
     jobs: jobs,
-    options: boardOptions_(jobs)
+    options: boardOptions_(jobs),
+    priority_classes: SIGMAFLOW.PRIORITY_CLASSES
   });
 }
 
@@ -132,35 +134,46 @@ function addCase(params) {
 function addJob(params) {
   var ss = getSpreadsheet_();
   var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
-  var caseId = params.case_id || createImplicitCase_(ss, params.title, params.client);
+  var title = requireParam_(params, 'title');
+  var caseId = params.case_id || createImplicitCase_(ss, title, params.client);
   var sizeClass = params.size_class || 'M';
   var status = validateColumnId_(params.status || firstColumnIdByRole_('backlog'));
   var now = nowIso_();
-  var jobId = generateId_('J');
+  var targetColumn = findColumn_(readColumns_(), status);
+  var priority = priorityFields_(params);
+  var job = {
+    job_id: generateJobId(),
+    case_id: caseId,
+    visit_number: Number(params.visit_number || 1),
+    title: title,
+    client: params.client || '',
+    status: status,
+    assignee: params.assignee || '',
+    tag: params.tag || '',
+    size_class: sizeClass,
+    size_points: SIGMAFLOW.SIZE_POINTS[sizeClass] || SIGMAFLOW.SIZE_POINTS.M,
+    priority_class: priority.priority_class,
+    priority_class_manual: priority.priority_class_manual,
+    impact: priority.impact,
+    manageability: priority.manageability,
+    priority_score: priority.priority_score,
+    description: params.description || '',
+    arrival_ts: targetColumn.role === 'backlog' ? now : '',
+    start_ts: targetColumn.role === 'wip' ? now : '',
+    done_ts: '',
+    invoiced: coerceBoolean_(params.invoiced),
+    service_time_d: '',
+    lead_time_d: '',
+    wait_time_d: '',
+    is_rework: Number(params.visit_number || 1) > 1,
+    rework_cause: params.rework_cause || '',
+    notes: params.notes || ''
+  };
 
-  sheet.appendRow([
-    jobId,
-    caseId,
-    Number(params.visit_number || 1),
-    requireParam_(params, 'title'),
-    status,
-    params.assignee || '',
-    params.tag || '',
-    sizeClass,
-    SIGMAFLOW.SIZE_POINTS[sizeClass] || SIGMAFLOW.SIZE_POINTS.M,
-    now,
-    '',
-    '',
-    '',
-    '',
-    '',
-    Number(params.visit_number || 1) > 1,
-    params.rework_cause || '',
-    params.notes || ''
-  ]);
+  sheet.appendRow(jobToRow_(job));
 
   refreshCaseVisitCount_(ss, caseId);
-  return ok_({ job_id: jobId, case_id: caseId });
+  return ok_({ job_id: job.job_id, case_id: caseId, job: job });
 }
 
 function moveJob(params) {
@@ -171,30 +184,42 @@ function moveJob(params) {
   }
 
   var status = validateColumnId_(requireParam_(params, 'status'));
-
   var headers = getHeaderMap_(sheet);
   var now = nowIso_();
-  var previousStatus = normalizeStatus_(sheet.getRange(row, headers.status).getValue());
-  var wasAlreadyWorked = Boolean(sheet.getRange(row, headers.start_ts).getValue())
-    || Boolean(sheet.getRange(row, headers.done_ts).getValue())
-    || Number(sheet.getRange(row, headers.visit_number).getValue() || 1) > 1;
-  sheet.getRange(row, headers.status).setValue(status);
+  var job = readJobFromRow_(sheet, row, headers);
+  var columns = readColumns_();
+  var sourceColumn = findColumn_(columns, job.status) || { id: job.status, role: 'neutral' };
+  var targetColumn = findColumn_(columns, status);
 
-  if (!isStandByStatus_(status) && !isDoneStatus_(status) && !sheet.getRange(row, headers.start_ts).getValue()) {
-    sheet.getRange(row, headers.start_ts).setValue(now);
+  if (sourceColumn.role === 'stand_by' && (targetColumn.role === 'wip' || targetColumn.role === 'backlog')) {
+    job.visit_number = Number(job.visit_number || 1) + 1;
+    job.is_rework = true;
+    job.rework_cause = sourceColumn.id;
+    job.start_ts = now;
   }
 
-  if (isStandByStatus_(previousStatus) && !isStandByStatus_(status) && wasAlreadyWorked) {
-    markRowAsRework_(sheet, row, headers, 'stand_by_return');
+  if (targetColumn.role === 'wip' && !job.start_ts) {
+    job.start_ts = now;
   }
 
-  if (isDoneStatus_(status)) {
-    sheet.getRange(row, headers.done_ts).setValue(now);
-    recalculateJobTimes_(sheet, row, headers);
-    refreshCaseVisitCount_(getSpreadsheet_(), sheet.getRange(row, headers.case_id).getValue());
+  if (targetColumn.role === 'backlog' && !job.arrival_ts) {
+    job.arrival_ts = now;
   }
 
-  return ok_({ job_id: params.job_id, status: status });
+  if (targetColumn.role === 'done') {
+    job.done_ts = now;
+    if (job.start_ts && job.arrival_ts) {
+      job.service_time_d = diffDays(job.start_ts, job.done_ts);
+      job.lead_time_d = diffDays(job.arrival_ts, job.done_ts);
+      job.wait_time_d = diffDays(job.arrival_ts, job.start_ts);
+    }
+  }
+
+  job.status = status;
+  writeJobToRow_(sheet, row, headers, job);
+  refreshCaseVisitCount_(getSpreadsheet_(), job.case_id);
+
+  return ok_({ job_id: params.job_id, status: status, job: job });
 }
 
 function updateJob(params) {
@@ -205,17 +230,48 @@ function updateJob(params) {
   }
 
   var headers = getHeaderMap_(sheet);
-  ['title', 'assignee', 'tag', 'size_class', 'notes'].forEach(function(field) {
+  var job = readJobFromRow_(sheet, row, headers);
+  ['title', 'client', 'assignee', 'tag', 'size_class', 'description', 'notes'].forEach(function(field) {
     if (params[field] !== undefined && headers[field]) {
-      sheet.getRange(row, headers[field]).setValue(params[field]);
+      job[field] = params[field];
     }
   });
 
-  if (params.size_class && headers.size_points) {
-    sheet.getRange(row, headers.size_points).setValue(SIGMAFLOW.SIZE_POINTS[params.size_class] || SIGMAFLOW.SIZE_POINTS.M);
+  if (params.size_class) {
+    job.size_points = SIGMAFLOW.SIZE_POINTS[params.size_class] || SIGMAFLOW.SIZE_POINTS.M;
   }
 
-  return ok_({ job_id: params.job_id });
+  if (params.invoiced !== undefined) {
+    job.invoiced = coerceBoolean_(params.invoiced);
+  }
+
+  var priorityChanged = params.impact !== undefined || params.manageability !== undefined || params.priority_class !== undefined;
+  if (params.impact !== undefined) {
+    job.impact = params.impact;
+  }
+  if (params.manageability !== undefined) {
+    job.manageability = params.manageability;
+  }
+  if (params.priority_class !== undefined) {
+    job.priority_class = params.priority_class;
+    job.priority_class_manual = Boolean(params.priority_class);
+  }
+  if (priorityChanged) {
+    var priority = priorityFields_({
+      impact: job.impact,
+      manageability: job.manageability,
+      priority_class: coerceBoolean_(job.priority_class_manual) ? job.priority_class : ''
+    });
+    job.impact = priority.impact;
+    job.manageability = priority.manageability;
+    job.priority_score = priority.priority_score;
+    if (!coerceBoolean_(job.priority_class_manual)) {
+      job.priority_class = priority.priority_class;
+    }
+  }
+
+  writeJobToRow_(sheet, row, headers, job);
+  return ok_({ job_id: params.job_id, job: job });
 }
 
 function deleteJob(params) {
@@ -315,12 +371,17 @@ function markRework(params) {
 
   return addJob({
     title: params.title || source.title,
+    client: params.client || source.client,
     case_id: source.case_id,
     visit_number: nextVisit,
     assignee: params.assignee || source.assignee,
     tag: params.tag || source.tag,
     size_class: params.size_class || source.size_class || 'M',
-    rework_cause: requireParam_(params, 'rework_cause'),
+    priority_class: params.priority_class || source.priority_class,
+    impact: params.impact || source.impact,
+    manageability: params.manageability || source.manageability,
+    description: params.description || source.description || '',
+    rework_cause: params.rework_cause || 'manual',
     notes: params.notes || ''
   });
 }
@@ -358,21 +419,6 @@ function refreshCaseVisitCount_(ss, caseId) {
   }
 }
 
-function recalculateJobTimes_(sheet, row, headers) {
-  var arrival = sheet.getRange(row, headers.arrival_ts).getValue();
-  var start = sheet.getRange(row, headers.start_ts).getValue();
-  var done = sheet.getRange(row, headers.done_ts).getValue();
-
-  if (!start) {
-    start = done;
-    sheet.getRange(row, headers.start_ts).setValue(start);
-  }
-
-  setCellByHeader_(sheet, row, headers, 'service_time_d', ['service_time_h'], daysBetween_(start, done));
-  setCellByHeader_(sheet, row, headers, 'lead_time_d', ['lead_time_h'], daysBetween_(arrival, done));
-  setCellByHeader_(sheet, row, headers, 'wait_time_d', ['wait_time_h'], daysBetween_(arrival, start));
-}
-
 function markRowAsRework_(sheet, row, headers, cause) {
   var visits = Math.max(1, Number(sheet.getRange(row, headers.visit_number).getValue() || 1));
   sheet.getRange(row, headers.visit_number).setValue(visits + 1);
@@ -380,6 +426,44 @@ function markRowAsRework_(sheet, row, headers, cause) {
   if (!sheet.getRange(row, headers.rework_cause).getValue()) {
     sheet.getRange(row, headers.rework_cause).setValue(cause);
   }
+}
+
+function readJobFromRow_(sheet, row, headers) {
+  var values = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var job = {};
+  Object.keys(headers).forEach(function(header) {
+    job[header] = normalizeCell_(values[headers[header] - 1]);
+  });
+  return job;
+}
+
+function writeJobToRow_(sheet, row, headers, job) {
+  JOB_HEADERS.forEach(function(header) {
+    if (headers[header]) {
+      sheet.getRange(row, headers[header]).setValue(job[header] === undefined ? '' : job[header]);
+    }
+  });
+}
+
+function jobToRow_(job) {
+  return JOB_HEADERS.map(function(header) {
+    return job[header] === undefined ? '' : job[header];
+  });
+}
+
+function priorityFields_(params) {
+  var impact = params.impact === undefined || params.impact === '' ? '' : Number(params.impact);
+  var manageability = params.manageability === undefined || params.manageability === '' ? '' : Number(params.manageability);
+  var score = calcPriorityScore(impact, manageability);
+  var manual = Boolean(params.priority_class);
+  var priorityClass = manual ? params.priority_class : suggestPriorityClass(score);
+  return {
+    impact: impact,
+    manageability: manageability,
+    priority_score: score,
+    priority_class: priorityClass,
+    priority_class_manual: manual
+  };
 }
 
 function boardOptions_(jobs) {
