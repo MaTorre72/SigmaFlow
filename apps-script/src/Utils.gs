@@ -305,7 +305,8 @@ function readColumns_() {
       label: String(column.label || id),
       role: normalizeColumnRole_(column.role),
       order: Number(column.order || ((index + 1) * 10)),
-      color: column.color || '#E8E8E8'
+      color: column.color || '#E8E8E8',
+      hidden: coerceBoolean_(column.hidden)
     };
   }).sort(function(a, b) {
     return a.order - b.order;
@@ -321,7 +322,8 @@ function writeColumns_(columns) {
       label: column.label,
       role: normalizeColumnRole_(column.role),
       order: (index + 1) * 10,
-      color: column.color || '#E8E8E8'
+      color: column.color || '#E8E8E8',
+      hidden: coerceBoolean_(column.hidden)
     };
   });
   writeConfigValue_('columns_json', JSON.stringify(columns));

@@ -1,31 +1,90 @@
-<section class="toolbar">
-  <label>
-    Assegnatario
-    <select id="filter-assignee">
-      <option value="">Tutti</option>
-    </select>
-  </label>
-  <label>
-    Tag
-    <select id="filter-tag">
-      <option value="">Tutti</option>
-    </select>
-  </label>
-  <label>
-    Taglia
-    <select id="filter-size">
+<section class="board-toolbar">
+  <div class="toolbar-group">
+    <span class="toolbar-label">Team</span>
+    <div id="assignee-filter-pills" class="pill-row"></div>
+  </div>
+  <div class="toolbar-group">
+    <span class="toolbar-label">Tag</span>
+    <div id="tag-filter-pills" class="pill-row"></div>
+  </div>
+  <div class="toolbar-group">
+    <span class="toolbar-label">Taglia</span>
+    <div id="size-filter-pills" class="pill-row">
+      <button type="button" class="filter-pill" data-filter="size" data-value="XS">XS</button>
+      <button type="button" class="filter-pill" data-filter="size" data-value="S">S</button>
+      <button type="button" class="filter-pill" data-filter="size" data-value="M">M</button>
+      <button type="button" class="filter-pill" data-filter="size" data-value="L">L</button>
+      <button type="button" class="filter-pill" data-filter="size" data-value="XL">XL</button>
+    </div>
+  </div>
+  <label class="toolbar-select">
+    Priorita'
+    <select id="filter-priority">
       <option value="">Tutte</option>
-      <option value="XS">XS (3)</option>
-      <option value="S">S (5)</option>
-      <option value="M">M (8)</option>
-      <option value="L">L (13)</option>
-      <option value="XL">XL (20)</option>
     </select>
   </label>
+  <button id="reset-filters-button" type="button">Reset filtri</button>
   <button id="add-column-button" type="button">+ Colonna</button>
+  <span id="last-updated" class="last-updated">-</span>
 </section>
 
 <datalist id="assignee-options"></datalist>
 <datalist id="tag-options"></datalist>
 
 <section id="kanban-board" class="kanban-board" aria-live="polite"></section>
+
+<dialog id="card-modal" class="card-modal">
+  <form method="dialog" class="modal-shell">
+    <button type="button" id="modal-close-button" class="modal-close" aria-label="Chiudi">x</button>
+    <section class="modal-main">
+      <input id="modal-title" class="modal-title-input" name="title" placeholder="Titolo job">
+      <input id="modal-client" name="client" placeholder="Cliente">
+      <textarea id="modal-description" name="description" rows="8" placeholder="Aggiungi descrizione o note operative..."></textarea>
+      <section class="activity-panel">
+        <h3>Attivita'</h3>
+        <p>Checklist e cronologia saranno aggiunte nella fase successiva.</p>
+      </section>
+    </section>
+    <aside class="modal-sidebar">
+      <label>Assegnatario
+        <select id="modal-assignee" name="assignee"></select>
+      </label>
+      <label>Tag
+        <select id="modal-tag" name="tag"></select>
+      </label>
+      <label>Taglia
+        <select id="modal-size" name="size_class">
+          <option value="XS">XS - 3 pt</option>
+          <option value="S">S - 5 pt</option>
+          <option value="M">M - 8 pt</option>
+          <option value="L">L - 13 pt</option>
+          <option value="XL">XL - 20 pt</option>
+        </select>
+      </label>
+      <div class="priority-editor">
+        <div class="priority-heading">
+          <span>Priorita'</span>
+          <span id="modal-priority-badge" class="priority-badge">-</span>
+        </div>
+        <label>Impatto
+          <input id="modal-impact" name="impact" type="range" min="1" max="5" step="0.5">
+        </label>
+        <label>Gestibilita'
+          <input id="modal-manageability" name="manageability" type="range" min="1" max="5" step="0.5">
+        </label>
+        <label>Classe
+          <select id="modal-priority-class" name="priority_class"></select>
+        </label>
+      </div>
+      <label>Scadenza
+        <input id="modal-due-date" name="due_date" type="date">
+      </label>
+      <label class="checkbox-line">
+        <input id="modal-invoiced" name="invoiced" type="checkbox">
+        Fatturato
+      </label>
+      <section id="modal-rework-history" class="rework-history" hidden></section>
+      <button type="button" class="archive-button" disabled>Archivia</button>
+    </aside>
+  </form>
+</dialog>

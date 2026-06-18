@@ -99,6 +99,7 @@ function getBoard() {
       role: column.role,
       order: column.order,
       color: column.color,
+      hidden: coerceBoolean_(column.hidden),
       count: (board[column.id] || []).length,
       points: points
     });
@@ -158,6 +159,7 @@ function addJob(params) {
     manageability: priority.manageability,
     priority_score: priority.priority_score,
     description: params.description || '',
+    due_date: params.due_date || '',
     arrival_ts: targetColumn.role === 'backlog' ? now : '',
     start_ts: targetColumn.role === 'wip' ? now : '',
     done_ts: '',
@@ -231,7 +233,7 @@ function updateJob(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
-  ['title', 'client', 'assignee', 'tag', 'size_class', 'description', 'notes'].forEach(function(field) {
+  ['title', 'client', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'notes'].forEach(function(field) {
     if (params[field] !== undefined && headers[field]) {
       job[field] = params[field];
     }
@@ -325,6 +327,12 @@ function updateColumn(params) {
   }
   if (params.role !== undefined) {
     column.role = normalizeColumnRole_(params.role);
+  }
+  if (params.color !== undefined) {
+    column.color = String(params.color || '#E8E8E8');
+  }
+  if (params.hidden !== undefined) {
+    column.hidden = coerceBoolean_(params.hidden);
   }
   columns = writeColumns_(columns);
   return ok_({ column: findColumn_(columns, id), columns: columns });

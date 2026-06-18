@@ -345,6 +345,7 @@ function appendCompletedJob_(ss, data) {
     data.manageability || 2,
     data.priority_score || 2,
     data.description || '',
+    data.due_date || '',
     arrivalIso,
     startIso,
     now,

@@ -10,7 +10,7 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 
 - Spreadsheet: `SigmaFlow Database`
 - ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
-- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxW2x86fYrKK7Tat98zkFPf55oIc5wc7RiAMXDU-opW67N_NlZDC71l0RyTF6v-0avn/exec?env=prod>
+- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p/exec?env=prod>
 
 ### Test
 
@@ -50,7 +50,7 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxW2x86fYrKK7Tat98zkFPf55oIc5wc7RiAMXDU-opW67N_NlZDC71l0RyTF6v-0avn/exec?env=test>
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p/exec?env=test>
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
@@ -72,6 +72,8 @@ Eseguire dopo ogni deploy:
 13. Rinomina una colonna, ricarica la pagina e verifica che il nome resti salvato.
 14. Cambia il ruolo di una colonna a `WIP` o `Concluso` e verifica che la dashboard continui a renderizzare.
 15. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
+16. Aprire una card e verificare che titolo, cliente, descrizione, assegnatario, tag, taglia, priorita', scadenza e fatturato salvino automaticamente.
+17. Verificare che i filtri rendano opache le card non corrispondenti senza rimuoverle dalla board.
 
 ## Test backend
 

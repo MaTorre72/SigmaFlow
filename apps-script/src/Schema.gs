@@ -15,6 +15,7 @@ var JOB_HEADERS = [
   'manageability',
   'priority_score',
   'description',
+  'due_date',
   'arrival_ts',
   'start_ts',
   'done_ts',

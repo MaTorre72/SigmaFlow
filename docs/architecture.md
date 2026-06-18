@@ -30,6 +30,7 @@
 | `manageability` | Gestibilita' 1.0-5.0 |
 | `priority_score` | `sqrt(impact * manageability)`, arrotondato a 2 decimali |
 | `description` | Descrizione operativa |
+| `due_date` | Scadenza operativa in formato `yyyy-mm-dd` |
 | `arrival_ts` | Ingresso nel sistema |
 | `start_ts` | Inizio lavorazione |
 | `done_ts` | Completamento |

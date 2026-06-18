@@ -1,18 +1,15 @@
 <script>
   var state = {
     env: window.SIGMAFLOW_ENV === 'test' ? 'test' : 'prod',
-    board: null,
-    columnMeta: null,
-    options: {
-      assignees: [],
-      tags: [],
-      sizes: ['XS', 'S', 'M', 'L', 'XL']
-    },
-    filters: {
-      assignee: '',
-      tag: '',
-      size: ''
-    }
+    board: {},
+    jobs: [],
+    columnMeta: [],
+    priorityClasses: {},
+    options: { assignees: [], tags: [], sizes: ['XS', 'S', 'M', 'L', 'XL'] },
+    filters: { assignees: {}, tags: {}, sizes: {}, priority: '' },
+    activeJob: null,
+    touchJobId: null,
+    touchGhost: null
   };
 
   var defaultColumns = [
@@ -34,22 +31,16 @@
     neutral: 'Neutra'
   };
 
-  var sizePoints = {
-    XS: 3,
-    S: 5,
-    M: 8,
-    L: 13,
-    XL: 20
-  };
+  var sizePoints = { XS: 3, S: 5, M: 8, L: 13, XL: 20 };
 
   document.addEventListener('DOMContentLoaded', function() {
     bindEnvironmentBadge();
     bindNavigation();
-    bindFilters();
-    bindColumnActions();
+    bindToolbar();
+    bindModal();
     loadBoard();
     loadMetrics();
-    window.setInterval(loadBoard, 60000);
+    window.setInterval(loadBoard, 45000);
   });
 
   function callApi(action, payload) {
@@ -95,20 +86,7 @@
     });
   }
 
-  function bindFilters() {
-    [
-      ['filter-assignee', 'assignee'],
-      ['filter-tag', 'tag'],
-      ['filter-size', 'size']
-    ].forEach(function(pair) {
-      document.getElementById(pair[0]).addEventListener('change', function(event) {
-        state.filters[pair[1]] = event.target.value.toLowerCase();
-        renderBoard();
-      });
-    });
-  }
-
-  function bindColumnActions() {
+  function bindToolbar() {
     document.getElementById('add-column-button').addEventListener('click', function() {
       var label = prompt('Nome nuova colonna');
       if (label === null) {
@@ -119,41 +97,114 @@
         showError(new Error('Nome colonna vuoto'));
         return;
       }
-
       var role = prompt('Ruolo: backlog, wip, stand_by, done, neutral', 'neutral');
-      role = role === null ? 'neutral' : role.trim();
       callApi('addColumn', { label: label, role: role || 'neutral' }).then(loadBoard).catch(showError);
+    });
+
+    document.getElementById('reset-filters-button').addEventListener('click', function() {
+      state.filters = { assignees: {}, tags: {}, sizes: {}, priority: '' };
+      document.getElementById('filter-priority').value = '';
+      renderToolbarFilters();
+      renderBoard();
+    });
+
+    document.getElementById('filter-priority').addEventListener('change', function(event) {
+      state.filters.priority = event.target.value;
+      renderBoard();
+    });
+  }
+
+  function bindModal() {
+    var modal = document.getElementById('card-modal');
+    document.getElementById('modal-close-button').addEventListener('click', function() {
+      modal.close();
+      state.activeJob = null;
+    });
+
+    ['modal-title', 'modal-client', 'modal-description'].forEach(function(id) {
+      document.getElementById(id).addEventListener('blur', saveModalField);
+    });
+
+    [
+      'modal-assignee',
+      'modal-tag',
+      'modal-size',
+      'modal-priority-class',
+      'modal-due-date',
+      'modal-invoiced'
+    ].forEach(function(id) {
+      document.getElementById(id).addEventListener('change', saveModalField);
+    });
+
+    ['modal-impact', 'modal-manageability'].forEach(function(id) {
+      document.getElementById(id).addEventListener('input', updateLivePriorityBadge);
+      document.getElementById(id).addEventListener('change', saveModalField);
     });
   }
 
   function loadBoard() {
     callApi('getBoard').then(function(data) {
-      state.board = data.columns;
-      state.columnMeta = data.column_meta;
+      state.board = data.columns || {};
+      state.jobs = data.jobs || [];
+      state.columnMeta = data.column_meta || defaultColumns;
+      state.priorityClasses = data.priority_classes || {};
       state.options = data.options || state.options;
-      renderFilters();
+      renderToolbarFilters();
       renderBoard();
+      updateLastUpdated();
     }).catch(showError);
   }
 
-  function renderFilters() {
-    fillSelect('filter-assignee', state.options.assignees || [], 'Tutti');
-    fillSelect('filter-tag', state.options.tags || [], 'Tutti');
+  function updateLastUpdated() {
+    var el = document.getElementById('last-updated');
+    var now = new Date();
+    el.textContent = 'Aggiornato alle ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  }
+
+  function renderToolbarFilters() {
+    renderFilterPills('assignee-filter-pills', state.options.assignees || [], 'assignees', initialsFor);
+    renderFilterPills('tag-filter-pills', state.options.tags || [], 'tags', function(value) { return value; });
+    renderSizePills();
+    renderPrioritySelect(document.getElementById('filter-priority'), true);
     fillDatalist('assignee-options', state.options.assignees || []);
     fillDatalist('tag-options', state.options.tags || []);
   }
 
-  function fillSelect(id, values, emptyLabel) {
-    var select = document.getElementById(id);
-    var previous = select.value;
-    select.innerHTML = '<option value="">' + emptyLabel + '</option>';
+  function renderFilterPills(id, values, filterKey, labelFn) {
+    var root = document.getElementById(id);
+    root.innerHTML = '';
     values.forEach(function(value) {
-      var option = document.createElement('option');
-      option.value = value;
-      option.textContent = value;
-      select.appendChild(option);
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'filter-pill' + (state.filters[filterKey][value.toLowerCase()] ? ' active' : '');
+      button.textContent = labelFn(value);
+      button.title = value;
+      button.addEventListener('click', function() {
+        toggleFilter(filterKey, value);
+      });
+      root.appendChild(button);
     });
-    select.value = previous;
+  }
+
+  function renderSizePills() {
+    document.querySelectorAll('#size-filter-pills .filter-pill').forEach(function(button) {
+      var value = button.dataset.value.toLowerCase();
+      button.classList.toggle('active', Boolean(state.filters.sizes[value]));
+      button.onclick = function() {
+        toggleFilter('sizes', button.dataset.value);
+      };
+    });
+  }
+
+  function toggleFilter(filterKey, value) {
+    var normalized = String(value || '').toLowerCase();
+    if (state.filters[filterKey][normalized]) {
+      delete state.filters[filterKey][normalized];
+    } else {
+      state.filters[filterKey][normalized] = true;
+    }
+    renderToolbarFilters();
+    renderBoard();
   }
 
   function fillDatalist(id, values) {
@@ -170,93 +221,115 @@
     var root = document.getElementById('kanban-board');
     root.innerHTML = '';
 
-    getColumns().forEach(function(column, index) {
-      var jobs = ((state.board && state.board[column.status]) || []).filter(matchesFilters);
-      var points = jobs.reduce(function(sum, job) {
-        return sum + Number(job.size_points || 0);
-      }, 0);
+    getColumns().filter(function(column) {
+      return !column.hidden;
+    }).forEach(function(column, index, visibleColumns) {
+      var jobs = (state.board[column.status] || []);
+      var staleCount = jobs.filter(function(job) {
+        return column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
+      }).length;
       var columnEl = document.createElement('section');
       columnEl.className = 'column role-' + (column.role || 'neutral');
-      columnEl.style.borderTopColor = column.color || '#E8E8E8';
+      columnEl.style.setProperty('--column-color', column.color || '#E8E8E8');
       columnEl.dataset.status = column.status;
       columnEl.innerHTML = [
+        '<div class="column-color-bar"></div>',
         '<div class="column-header">',
         '<div>',
-        '<div class="column-title-row">',
         '<h2 class="column-title"></h2>',
-        '<span class="role-pill"></span>',
-        '</div>',
-        '<div class="column-stats"></div>',
-        '</div>',
-        '<div class="column-actions">',
-        '<button type="button" class="move-left-button" title="Sposta a sinistra">&lt;</button>',
-        '<button type="button" class="move-right-button" title="Sposta a destra">&gt;</button>',
-        '<button type="button" class="rename-column-button" title="Rinomina colonna">Nome</button>',
+        '<div class="column-badges">',
+        '<span class="column-badge count-badge"></span>',
+        '<span class="column-badge points-badge"></span>',
+        '<span class="column-badge stale-badge" hidden></span>',
         '</div>',
         '</div>',
-        '<label class="role-control">Ruolo<select class="role-select"></select></label>',
+        '<button type="button" class="column-menu-button" title="Menu colonna">...</button>',
+        '</div>',
         '<div class="cards"></div>',
-        '<button type="button" class="open-composer-button">+ Scheda</button>',
+        '<button type="button" class="open-composer-button">+ Aggiungi job</button>',
         '<form class="quick-card-form" hidden></form>'
       ].join('');
 
       columnEl.querySelector('.column-title').textContent = column.label;
-      columnEl.querySelector('.role-pill').textContent = roleLabels[column.role] || roleLabels.neutral;
-      columnEl.querySelector('.column-stats').textContent = jobs.length + ' job - ' + points + ' pt';
-      renderRoleSelect(columnEl.querySelector('.role-select'), column.role);
-
-      columnEl.querySelector('.move-left-button').disabled = index === 0;
-      columnEl.querySelector('.move-right-button').disabled = index === getColumns().length - 1;
-      columnEl.querySelector('.move-left-button').addEventListener('click', function() {
-        moveColumn(column, 'left');
-      });
-      columnEl.querySelector('.move-right-button').addEventListener('click', function() {
-        moveColumn(column, 'right');
-      });
-      columnEl.querySelector('.rename-column-button').addEventListener('click', function() {
-        renameColumn(column);
-      });
-      columnEl.querySelector('.role-select').addEventListener('change', function(event) {
-        updateColumnRole(column, event.target.value);
+      columnEl.querySelector('.count-badge').textContent = jobs.length + ' card';
+      columnEl.querySelector('.points-badge').textContent = sumPoints(jobs) + ' pt';
+      if (staleCount > 0) {
+        var staleBadge = columnEl.querySelector('.stale-badge');
+        staleBadge.hidden = false;
+        staleBadge.textContent = staleCount + ' >5g';
+      }
+      columnEl.querySelector('.column-menu-button').addEventListener('click', function() {
+        openColumnMenu(column);
       });
 
       bindDropTarget(columnEl, column.status);
-
       jobs.forEach(function(job) {
-        columnEl.querySelector('.cards').appendChild(renderCard(job));
+        columnEl.querySelector('.cards').appendChild(renderCard(job, column));
       });
       renderComposer(columnEl, column);
       root.appendChild(columnEl);
     });
   }
 
-  function renderRoleSelect(select, role) {
-    Object.keys(roleLabels).forEach(function(key) {
-      var option = document.createElement('option');
-      option.value = key;
-      option.textContent = roleLabels[key];
-      select.appendChild(option);
+  function renderCard(job, column) {
+    var card = document.createElement('article');
+    var matches = matchesFilters(job);
+    var isLate = job.due_date && new Date(job.due_date + 'T23:59:59') < new Date();
+    var isStale = column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
+    card.className = 'card' + (matches ? '' : ' filtered-out') + (isStale ? ' stale-card' : '');
+    card.draggable = true;
+    card.dataset.jobId = job.job_id;
+    card.innerHTML = [
+      '<div class="card-title"></div>',
+      '<div class="card-client"></div>',
+      '<div class="badges">',
+      priorityBadgeHtml(job.priority_class),
+      '<span class="badge">' + escapeHtml((job.size_class || 'M') + ' - ' + (job.size_points || sizePoints[job.size_class] || 8) + ' pt') + '</span>',
+      '<span class="badge">' + escapeHtml(job.tag || 'senza tag') + '</span>',
+      '</div>',
+      '<div class="card-footer">',
+      '<span class="avatar" title="' + escapeHtml(job.assignee || 'non assegnato') + '">' + escapeHtml(initialsFor(job.assignee || '?')) + '</span>',
+      '<span class="due-date' + (isLate ? ' late' : '') + '">' + escapeHtml(job.due_date || '') + '</span>',
+      Number(job.visit_number || 1) > 1 ? '<span class="badge rework">v' + escapeHtml(job.visit_number) + '</span>' : '',
+      job.description ? '<span class="description-icon" title="Descrizione presente">note</span>' : '',
+      '</div>',
+      '<div class="card-actions">',
+      '<button type="button" class="delete-card-button">Elimina</button>',
+      '</div>'
+    ].join('');
+    card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
+    card.querySelector('.card-client').textContent = job.client || '';
+    card.title = isStale ? 'Fermo da ' + daysSince(job.start_ts || job.arrival_ts) + ' giorni' : '';
+
+    card.addEventListener('dragstart', function(event) {
+      event.dataTransfer.setData('text/plain', job.job_id);
+      card.classList.add('dragging');
     });
-    select.value = role || 'neutral';
+    card.addEventListener('dragend', function() {
+      card.classList.remove('dragging');
+    });
+    card.addEventListener('touchstart', function(event) {
+      startTouchDrag(event, job, card);
+    }, { passive: true });
+    card.addEventListener('touchmove', moveTouchDrag, { passive: false });
+    card.addEventListener('touchend', endTouchDrag);
+    card.addEventListener('click', function(event) {
+      if (event.target.closest('button')) {
+        return;
+      }
+      openCardModal(job);
+    });
+    card.querySelector('.delete-card-button').addEventListener('click', function(event) {
+      event.stopPropagation();
+      deleteJob(job);
+    });
+    return card;
   }
 
-  function bindDropTarget(columnEl, status) {
-    columnEl.addEventListener('dragover', function(event) {
-      event.preventDefault();
-    });
-    columnEl.addEventListener('drop', function(event) {
-      event.preventDefault();
-      columnEl.classList.remove('drop-target');
-      moveJob(event.dataTransfer.getData('text/plain'), status);
-    });
-    columnEl.addEventListener('dragenter', function() {
-      columnEl.classList.add('drop-target');
-    });
-    columnEl.addEventListener('dragleave', function(event) {
-      if (!columnEl.contains(event.relatedTarget)) {
-        columnEl.classList.remove('drop-target');
-      }
-    });
+  function priorityBadgeHtml(priorityClass) {
+    var key = priorityClass || 'p4_assess';
+    var meta = state.priorityClasses[key] || { label: key || 'Priorita', color: '#CCCCCC' };
+    return '<span class="priority-badge" style="background:' + escapeHtml(meta.color || '#CCCCCC') + '">' + escapeHtml(meta.label || key) + '</span>';
   }
 
   function renderComposer(columnEl, column) {
@@ -264,23 +337,23 @@
     var form = columnEl.querySelector('.quick-card-form');
     form.innerHTML = [
       '<input name="title" required placeholder="Titolo job">',
-      '<div class="composer-grid">',
       '<input name="client" placeholder="Cliente">',
-      '<input name="assignee" list="assignee-options" placeholder="Assegnatario">',
-      '<input name="tag" list="tag-options" placeholder="Tag">',
+      '<select name="assignee"></select>',
+      '<select name="tag"></select>',
       '<select name="size_class">',
-      '<option value="XS">XS (3)</option>',
-      '<option value="S">S (5)</option>',
-      '<option value="M" selected>M (8)</option>',
-      '<option value="L">L (13)</option>',
-      '<option value="XL">XL (20)</option>',
+      '<option value="XS">XS - 3 pt</option>',
+      '<option value="S">S - 5 pt</option>',
+      '<option value="M" selected>M - 8 pt</option>',
+      '<option value="L">L - 13 pt</option>',
+      '<option value="XL">XL - 20 pt</option>',
       '</select>',
-      '</div>',
       '<div class="form-actions">',
-      '<button type="submit" class="primary-button">Crea</button>',
+      '<button type="submit" class="primary-button">Aggiungi</button>',
       '<button type="button" class="cancel-composer-button">Annulla</button>',
       '</div>'
     ].join('');
+    fillSelect(form.elements.assignee, state.options.assignees || [], 'Assegnatario');
+    fillSelect(form.elements.tag, state.options.tags || [], 'Tag');
 
     button.addEventListener('click', function() {
       button.hidden = true;
@@ -305,39 +378,126 @@
     });
   }
 
-  function renderCard(job) {
-    var card = document.createElement('article');
-    card.className = 'card';
-    card.draggable = true;
-    card.addEventListener('dragstart', function(event) {
-      event.dataTransfer.setData('text/plain', job.job_id);
-      card.classList.add('dragging');
+  function fillSelect(select, values, emptyLabel) {
+    select.innerHTML = '<option value="">' + emptyLabel + '</option>';
+    values.forEach(function(value) {
+      var option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
     });
-    card.addEventListener('dragend', function() {
-      card.classList.remove('dragging');
-    });
+  }
 
-    var reworkBadge = Number(job.visit_number || 1) > 1
-      ? '<span class="badge rework">v' + job.visit_number + '</span>'
-      : '<span class="badge">v1</span>';
-
-    card.innerHTML = [
-      '<div class="card-title"></div>',
-      '<div class="badges">',
-      '<span class="badge">' + escapeHtml(job.tag || 'senza tag') + '</span>',
-      '<span class="badge">' + escapeHtml(job.assignee || 'non assegnato') + '</span>',
-      '<span class="badge">' + escapeHtml((job.size_class || 'M') + ' - ' + (job.size_points || sizePoints[job.size_class] || 8) + ' pt') + '</span>',
-      reworkBadge,
-      '</div>',
-      '<div class="card-actions">',
-      '<button type="button" class="delete-card-button">Elimina</button>',
-      '</div>'
-    ].join('');
-    card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
-    card.querySelector('.delete-card-button').addEventListener('click', function() {
-      deleteJob(job);
+  function bindDropTarget(columnEl, status) {
+    columnEl.addEventListener('dragover', function(event) {
+      event.preventDefault();
     });
-    return card;
+    columnEl.addEventListener('drop', function(event) {
+      event.preventDefault();
+      columnEl.classList.remove('drop-target');
+      moveJob(event.dataTransfer.getData('text/plain'), status);
+    });
+    columnEl.addEventListener('dragenter', function() {
+      columnEl.classList.add('drop-target');
+    });
+    columnEl.addEventListener('dragleave', function(event) {
+      if (!columnEl.contains(event.relatedTarget)) {
+        columnEl.classList.remove('drop-target');
+      }
+    });
+  }
+
+  function openColumnMenu(column) {
+    var action = prompt('Menu colonna: nome, colore, nascondi', 'nome');
+    if (!action) {
+      return;
+    }
+    action = action.toLowerCase();
+    if (action === 'nome') {
+      var label = prompt('Nuovo nome colonna', column.label);
+      if (label) {
+        callApi('updateColumn', { status: column.status, label: label.trim() }).then(loadBoard).catch(showError);
+      }
+    } else if (action === 'colore') {
+      var color = prompt('Colore HEX', column.color || '#E8E8E8');
+      if (color) {
+        callApi('updateColumn', { status: column.status, color: color.trim() }).then(loadBoard).catch(showError);
+      }
+    } else if (action === 'nascondi') {
+      callApi('updateColumn', { status: column.status, hidden: true }).then(loadBoard).catch(showError);
+    }
+  }
+
+  function openCardModal(job) {
+    state.activeJob = job;
+    fillModalSelects();
+    document.getElementById('modal-title').value = job.title || '';
+    document.getElementById('modal-client').value = job.client || '';
+    document.getElementById('modal-description').value = job.description || '';
+    document.getElementById('modal-assignee').value = job.assignee || '';
+    document.getElementById('modal-tag').value = job.tag || '';
+    document.getElementById('modal-size').value = job.size_class || 'M';
+    document.getElementById('modal-priority-class').value = job.priority_class || 'p4_assess';
+    document.getElementById('modal-impact').value = job.impact || 1;
+    document.getElementById('modal-manageability').value = job.manageability || 1;
+    document.getElementById('modal-due-date').value = job.due_date || '';
+    document.getElementById('modal-invoiced').checked = coerceBool(job.invoiced);
+    updateLivePriorityBadge();
+    renderReworkHistory(job);
+    document.getElementById('card-modal').showModal();
+  }
+
+  function fillModalSelects() {
+    fillSelect(document.getElementById('modal-assignee'), state.options.assignees || [], 'Non assegnato');
+    fillSelect(document.getElementById('modal-tag'), state.options.tags || [], 'Senza tag');
+    renderPrioritySelect(document.getElementById('modal-priority-class'), false);
+  }
+
+  function renderPrioritySelect(select, includeEmpty) {
+    var previous = select.value;
+    select.innerHTML = includeEmpty ? '<option value="">Tutte</option>' : '';
+    Object.keys(state.priorityClasses).forEach(function(key) {
+      var option = document.createElement('option');
+      option.value = key;
+      option.textContent = state.priorityClasses[key].label || key;
+      select.appendChild(option);
+    });
+    select.value = previous;
+  }
+
+  function saveModalField(event) {
+    if (!state.activeJob) {
+      return;
+    }
+    var field = event.target.name;
+    var payload = { job_id: state.activeJob.job_id };
+    payload[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+    callApi('updateJob', payload).then(function(data) {
+      state.activeJob = data.job || Object.assign({}, state.activeJob, payload);
+      loadBoard();
+    }).catch(showError);
+  }
+
+  function updateLivePriorityBadge() {
+    var impact = Number(document.getElementById('modal-impact').value || 0);
+    var manageability = Number(document.getElementById('modal-manageability').value || 0);
+    var score = impact && manageability ? Math.round(Math.sqrt(impact * manageability) * 100) / 100 : 0;
+    var priority = document.getElementById('modal-priority-class').value || suggestPriorityClassClient(score);
+    var meta = state.priorityClasses[priority] || {};
+    var badge = document.getElementById('modal-priority-badge');
+    badge.textContent = (meta.label || priority || '-') + ' - ' + score;
+    badge.style.background = meta.color || '#CCCCCC';
+  }
+
+  function renderReworkHistory(job) {
+    var root = document.getElementById('modal-rework-history');
+    if (!coerceBool(job.is_rework) && Number(job.visit_number || 1) <= 1) {
+      root.hidden = true;
+      root.innerHTML = '';
+      return;
+    }
+    root.hidden = false;
+    root.innerHTML = '<h3>Storico rientri</h3><p>Visita ' + escapeHtml(job.visit_number || 1) + ' - causa: ' + escapeHtml(job.rework_cause || 'manual') + '</p>';
   }
 
   function moveJob(jobId, status) {
@@ -355,33 +515,10 @@
     });
   }
 
-  function renameColumn(column) {
-    var next = prompt('Nuovo nome colonna', column.label);
-    if (next === null) {
-      return;
-    }
-    next = next.trim();
-    if (!next) {
-      showError(new Error('Nome colonna vuoto'));
-      return;
-    }
-
-    callApi('updateColumn', { status: column.status, label: next }).then(loadBoard).catch(showError);
-  }
-
-  function updateColumnRole(column, role) {
-    callApi('updateColumn', { status: column.status, role: role }).then(loadBoard).catch(showError);
-  }
-
-  function moveColumn(column, direction) {
-    callApi('moveColumn', { status: column.status, direction: direction }).then(loadBoard).catch(showError);
-  }
-
   function deleteJob(job) {
     if (!confirm('Eliminare "' + (job.title || job.job_id) + '"?')) {
       return;
     }
-
     var previousBoard = cloneBoard();
     removeJobLocally(job.job_id);
     renderBoard();
@@ -390,6 +527,48 @@
       renderBoard();
       showError(error);
     });
+  }
+
+  function startTouchDrag(event, job, card) {
+    state.touchJobId = job.job_id;
+    state.touchGhost = card;
+    card.classList.add('dragging');
+  }
+
+  function moveTouchDrag(event) {
+    if (!state.touchJobId) {
+      return;
+    }
+    event.preventDefault();
+    var touch = event.touches[0];
+    document.querySelectorAll('.column.drop-target').forEach(function(column) {
+      column.classList.remove('drop-target');
+    });
+    var target = document.elementFromPoint(touch.clientX, touch.clientY);
+    var column = target && target.closest('.column');
+    if (column) {
+      column.classList.add('drop-target');
+    }
+  }
+
+  function endTouchDrag(event) {
+    if (!state.touchJobId) {
+      return;
+    }
+    var touch = event.changedTouches[0];
+    var target = document.elementFromPoint(touch.clientX, touch.clientY);
+    var column = target && target.closest('.column');
+    if (state.touchGhost) {
+      state.touchGhost.classList.remove('dragging');
+    }
+    document.querySelectorAll('.column.drop-target').forEach(function(item) {
+      item.classList.remove('drop-target');
+    });
+    if (column) {
+      moveJob(state.touchJobId, column.dataset.status);
+    }
+    state.touchJobId = null;
+    state.touchGhost = null;
   }
 
   function cloneBoard() {
@@ -431,12 +610,18 @@
   }
 
   function matchesFilters(job) {
-    var assignee = String(job.assignee || '').toLowerCase();
-    var tag = String(job.tag || '').toLowerCase();
-    var size = String(job.size_class || '').toLowerCase();
-    return (!state.filters.assignee || assignee === state.filters.assignee)
-      && (!state.filters.tag || tag === state.filters.tag)
-      && (!state.filters.size || size === state.filters.size);
+    return matchesSetFilter(state.filters.assignees, job.assignee)
+      && matchesSetFilter(state.filters.tags, job.tag)
+      && matchesSetFilter(state.filters.sizes, job.size_class)
+      && (!state.filters.priority || String(job.priority_class || '').toLowerCase() === state.filters.priority.toLowerCase());
+  }
+
+  function matchesSetFilter(filter, value) {
+    var keys = Object.keys(filter);
+    if (!keys.length) {
+      return true;
+    }
+    return Boolean(filter[String(value || '').toLowerCase()]);
   }
 
   function loadMetrics() {
@@ -491,6 +676,44 @@
     document.getElementById('queue-table').innerHTML = html + '</tbody>';
   }
 
+  function sumPoints(jobs) {
+    return jobs.reduce(function(sum, job) {
+      return sum + Number(job.size_points || 0);
+    }, 0);
+  }
+
+  function daysSince(iso) {
+    if (!iso) {
+      return 0;
+    }
+    return Math.floor((new Date().getTime() - new Date(iso).getTime()) / 864e5);
+  }
+
+  function initialsFor(value) {
+    value = String(value || '?').trim();
+    if (!value) {
+      return '?';
+    }
+    return value.split(/[ .@_-]+/).filter(Boolean).slice(0, 2).map(function(part) {
+      return part.charAt(0).toUpperCase();
+    }).join('') || '?';
+  }
+
+  function suggestPriorityClassClient(score) {
+    var keys = Object.keys(state.priorityClasses);
+    for (var i = 0; i < keys.length; i++) {
+      var item = state.priorityClasses[keys[i]];
+      if (Number(score) < Number(item.score_max || 99)) {
+        return keys[i];
+      }
+    }
+    return 'p4_assess';
+  }
+
+  function coerceBool(value) {
+    return value === true || value === 'TRUE' || value === 'true';
+  }
+
   function valueOrDash(value) {
     return value === null || value === undefined || value === '' ? '-' : value;
   }
@@ -502,6 +725,17 @@
   }
 
   function showError(error) {
-    alert(error.message || error);
+    var toast = document.getElementById('toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'toast';
+      toast.className = 'toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = error.message || error;
+    toast.classList.add('visible');
+    window.setTimeout(function() {
+      toast.classList.remove('visible');
+    }, 4200);
   }
 </script>
