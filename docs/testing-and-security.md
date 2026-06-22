@@ -10,7 +10,7 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 
 - Spreadsheet: `SigmaFlow Database`
 - ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
-- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p/exec?env=prod>
+- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=prod>
 
 ### Test
 
@@ -50,7 +50,7 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p/exec?env=test>
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=test>
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
@@ -74,6 +74,9 @@ Eseguire dopo ogni deploy:
 15. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
 16. Aprire una card e verificare che titolo, cliente, descrizione, assegnatario, tag, taglia, priorita', scadenza e fatturato salvino automaticamente.
 17. Verificare che i filtri rendano opache le card non corrispondenti senza rimuoverle dalla board.
+18. Verificare che impatto e gestibilita' aggiornino punteggio e classe quando la priorita' e' `Automatico`.
+19. Verificare l'ordinamento per priorita' e per scadenza.
+20. Verificare date `gg/mm/aaaa`, primo rientro `R1` e blocco del rientro diretto da attesa a `WIP`.
 
 ## Test backend
 
@@ -84,6 +87,8 @@ I primi test automatici coprono:
 - `moveJob` verso `wip`
 - `moveJob` verso `done`
 - rework automatico da `wait_client` verso una colonna `wip`
+- blocco del rientro diretto da una colonna di attesa a `wip`
+- priorita' automatica e manuale
 - colonne dinamiche, ruoli e opzioni dropdown
 - `markRework`
 - `getMetrics`

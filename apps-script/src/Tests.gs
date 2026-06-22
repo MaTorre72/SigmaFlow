@@ -28,7 +28,9 @@ function runAllTests() {
     testMoveJobLifecycle,
     testMarkRework,
     testAutomaticReworkFromStandBy,
+    testStandByCannotReturnDirectlyToWip,
     testPriorityHelpers,
+    testPriorityUpdate,
     testDynamicColumnsAndOptions,
     testMetrics,
     testMissingRequiredParam
@@ -162,6 +164,38 @@ function testPriorityHelpers() {
   assertEquals_('p1_plan', suggestPriorityClass(2), 'classe p1');
   assertEquals_('p2_urgent', suggestPriorityClass(3), 'classe p2');
   assertEquals_('p3_critical', suggestPriorityClass(4), 'classe p3');
+}
+
+function testStandByCannotReturnDirectlyToWip() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro vietato', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var failed = false;
+    try {
+      moveJob({ job_id: created.job_id, status: 'wip' });
+    } catch (err) {
+      failed = err.message.indexOf('non e consentito') !== -1;
+    }
+    assertTrue_(failed, 'rientro diretto da attesa a WIP dovrebbe fallire');
+  });
+}
+
+function testPriorityUpdate() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Priorita automatica', impact: 4, manageability: 4 }).data;
+    assertEquals_('p3_critical', created.job.priority_class, 'priorita automatica iniziale');
+
+    var manual = updateJob({ job_id: created.job_id, priority_class: 'p1_plan' });
+    assertEquals_('p1_plan', manual.data.job.priority_class, 'priorita manuale');
+
+    var automatic = updateJob({ job_id: created.job_id, priority_class: '', impact: 2, manageability: 2 });
+    assertEquals_('p1_plan', automatic.data.job.priority_class, 'ritorno a priorita automatica');
+    assertTrue_(!coerceBoolean_(automatic.data.job.priority_class_manual), 'flag manuale disattivato');
+  });
 }
 
 function testDynamicColumnsAndOptions() {

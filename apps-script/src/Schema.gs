@@ -129,8 +129,21 @@ function seedDefaultConfig_(sheet) {
       sheet.appendRow([key, value, descriptions[key] || '']);
     } else if (key === 'columns_json') {
       ensureConfigValue_(sheet, key, value);
+    } else if (key === 'assignees_json') {
+      ensureConfigValueIfEmpty_(sheet, key, value);
     }
   });
+}
+
+function ensureConfigValueIfEmpty_(sheet, key, value) {
+  var rows = readTable_(sheet);
+  var headers = getHeaderMap_(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key === key && (!rows[i].value || rows[i].value === '[]')) {
+      sheet.getRange(i + 2, headers.value).setValue(value);
+      return;
+    }
+  }
 }
 
 function defaultConfigValue_(key) {

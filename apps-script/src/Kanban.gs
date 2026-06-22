@@ -193,6 +193,10 @@ function moveJob(params) {
   var sourceColumn = findColumn_(columns, job.status) || { id: job.status, role: 'neutral' };
   var targetColumn = findColumn_(columns, status);
 
+  if (sourceColumn.role === 'stand_by' && targetColumn.id === 'wip') {
+    throw new Error('Il rientro diretto da una colonna di attesa a WIP non e consentito. Sposta prima il job in TO DO o in una colonna precedente.');
+  }
+
   if (sourceColumn.role === 'stand_by' && (targetColumn.role === 'wip' || targetColumn.role === 'backlog')) {
     job.visit_number = Number(job.visit_number || 1) + 1;
     job.is_rework = true;
@@ -308,7 +312,9 @@ function addColumn(params) {
     id: id,
     label: label,
     role: role,
-    order: (columns.length + 1) * 10
+    order: (columns.length + 1) * 10,
+    color: params.color || '#E8E8E8',
+    hidden: coerceBoolean_(params.hidden)
   });
   columns = writeColumns_(columns);
   return ok_({ column: findColumn_(columns, id), columns: columns });
@@ -446,11 +452,10 @@ function readJobFromRow_(sheet, row, headers) {
 }
 
 function writeJobToRow_(sheet, row, headers, job) {
-  JOB_HEADERS.forEach(function(header) {
-    if (headers[header]) {
-      sheet.getRange(row, headers[header]).setValue(job[header] === undefined ? '' : job[header]);
-    }
+  var values = JOB_HEADERS.map(function(header) {
+    return job[header] === undefined ? '' : job[header];
   });
+  sheet.getRange(row, 1, 1, JOB_HEADERS.length).setValues([values]);
 }
 
 function jobToRow_(job) {

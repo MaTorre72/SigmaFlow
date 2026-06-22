@@ -66,7 +66,7 @@
 | `size_L_days` | `4` |
 | `size_XL_days` | `8` |
 | `columns_json` | Configurazione dinamica colonne: `id`, `label`, `role`, `order`, `color` |
-| `assignees_json` | Assegnatari suggeriti per dropdown |
+| `assignees_json` | Assegnatari dei menu, default `Alessandra`, `Giovanni D`, `Marco`, `Altro` |
 | `tags_json` | Tag suggeriti per dropdown, default `AIA`, `ADR`, `VIA`, `rifiuti`, `acque`, `aria`, `suolo`, `rumore` |
 
 Le colonne sono configurabili dalla Web App. Il campo `role` determina il comportamento modellistico:
@@ -110,6 +110,8 @@ Azioni `doPost` previste:
 - `getMetrics`
 
 Il rework automatico viene marcato quando un job esce da una colonna con ruolo `stand_by` verso una colonna `wip` o `backlog`: `visit_number` aumenta, `is_rework` diventa `TRUE`, `rework_cause` diventa l'ID della colonna sorgente e `start_ts` riparte dal momento del rientro.
+
+Il rientro diretto da una colonna `stand_by` alla colonna con ID `wip` e' vietato. Il job deve passare prima da `todo` o da una colonna precedente. Nell'interfaccia il primo rientro e' mostrato come `R1`; nel database `visit_number` resta `2` per conservare il numero totale di visite.
 
 ## Frontend
 

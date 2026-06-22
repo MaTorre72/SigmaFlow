@@ -12,10 +12,10 @@ Spreadsheet database creato e verificato:
 - Timezone: `Europe/Rome`
 - Tab verificati: `jobs`, `cases`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
-- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p/exec>
-- Deployment corrente: `AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p` (`@9`)
-- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p/exec?env=prod>
-- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzuGXBg4gqqyLH00D6BjgpLehYep2c8hNKrD9DN0V_xcUOERUuxnqEMILF4WI6Io37p/exec?env=test>
+- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec>
+- Deployment corrente: `AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ` (`@10`)
+- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=prod>
+- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=test>
 
 Nota: `clasp create --type sheets` ha creato un nuovo contenitore Google Sheets per il progetto Apps Script. Il codice SigmaFlow usa comunque il database canonico tramite `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`.
 
@@ -106,3 +106,13 @@ cd apps-script
 8. Verifica che le colonne mostrino conteggio job e somma punti.
 9. Crea una nuova colonna, assegnale un ruolo, spostala a sinistra/destra e prova a rinominarla.
 10. Apri la tab Dashboard e verifica che le metriche vengano renderizzate senza errori.
+
+## 6. Assegnatari configurabili
+
+L'elenco dei nomi mostrato nei menu e' salvato nel foglio `config`, chiave `assignees_json`.
+
+```json
+["Alessandra","Giovanni D","Marco","Altro"]
+```
+
+Per aggiungere una persona, modifica l'array nella cella `value` mantenendo virgolette e parentesi quadre, quindi ricarica la Web App.

@@ -25,6 +25,11 @@
   </label>
   <button id="reset-filters-button" type="button">Reset filtri</button>
   <button id="add-column-button" type="button">+ Colonna</button>
+  <button id="show-hidden-columns-button" type="button">Mostra nascoste</button>
+  <div class="board-scroll-controls" aria-label="Esplora colonne">
+    <button id="scroll-board-left" type="button" title="Colonne precedenti">&lt;</button>
+    <button id="scroll-board-right" type="button" title="Colonne successive">&gt;</button>
+  </div>
   <span id="last-updated" class="last-updated">-</span>
 </section>
 
@@ -68,9 +73,11 @@
         </div>
         <label>Impatto
           <input id="modal-impact" name="impact" type="range" min="1" max="5" step="0.5">
+          <output id="modal-impact-value">1</output>
         </label>
         <label>Gestibilita'
           <input id="modal-manageability" name="manageability" type="range" min="1" max="5" step="0.5">
+          <output id="modal-manageability-value">1</output>
         </label>
         <label>Classe
           <select id="modal-priority-class" name="priority_class"></select>
@@ -84,7 +91,28 @@
         Fatturato
       </label>
       <section id="modal-rework-history" class="rework-history" hidden></section>
+      <button type="button" id="modal-create-button" class="primary-button" hidden>Aggiungi</button>
       <button type="button" class="archive-button" disabled>Archivia</button>
     </aside>
+  </form>
+</dialog>
+
+<dialog id="column-settings-modal" class="column-settings-modal">
+  <form method="dialog" class="column-settings-form">
+    <h2>Impostazioni colonna</h2>
+    <label>Nome
+      <input id="column-settings-label" required>
+    </label>
+    <label>Colore
+      <input id="column-settings-color" type="color">
+    </label>
+    <label class="checkbox-line">
+      <input id="column-settings-visible" type="checkbox">
+      Colonna visibile
+    </label>
+    <div class="form-actions">
+      <button id="column-settings-save" type="button" class="primary-button">Salva</button>
+      <button id="column-settings-cancel" type="button">Annulla</button>
+    </div>
   </form>
 </dialog>

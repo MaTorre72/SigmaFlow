@@ -130,6 +130,11 @@
     margin-bottom: 14px;
     overflow-x: auto;
     padding-bottom: 4px;
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    background: var(--bg);
+    padding-top: 6px;
   }
 
   .toolbar-group {
@@ -169,6 +174,23 @@
     font-size: 12px;
     margin-left: auto;
     white-space: nowrap;
+  }
+
+  .board-scroll-controls,
+  .column-header-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .board-scroll-controls button,
+  .column-header-actions button {
+    min-width: 34px;
+    padding: 0 8px;
+  }
+
+  .column-header-actions button.active {
+    background: var(--accent);
+    color: var(--accent-ink);
   }
 
   .kanban-board {
@@ -415,6 +437,21 @@
     padding: 12px;
   }
 
+  .priority-editor label {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+
+  .priority-editor input[type="range"] {
+    grid-column: 1 / -1;
+    padding: 0;
+    width: 100%;
+  }
+
+  .priority-editor output {
+    font-weight: 700;
+  }
+
   .priority-heading {
     align-items: center;
     display: flex;
@@ -454,6 +491,32 @@
   .toast.visible {
     opacity: 1;
     transform: translateY(0);
+  }
+
+  .toast-info {
+    background: #344154;
+  }
+
+  .column-settings-modal {
+    border: 0;
+    border-radius: 8px;
+    padding: 0;
+    width: min(430px, calc(100vw - 28px));
+  }
+
+  .column-settings-modal::backdrop {
+    background: rgba(15, 23, 42, 0.42);
+  }
+
+  .column-settings-form {
+    display: grid;
+    gap: 14px;
+    padding: 22px;
+  }
+
+  .system-explanation {
+    color: var(--muted);
+    margin-top: 10px;
   }
 
   .metrics-grid {

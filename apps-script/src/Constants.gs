@@ -50,7 +50,7 @@ var SIGMAFLOW = {
     size_L_days: 4,
     size_XL_days: 8,
     columns_json: '',
-    assignees_json: '[]',
+    assignees_json: '["Alessandra","Giovanni D","Marco","Altro"]',
     tags_json: '["AIA","ADR","VIA","rifiuti","acque","aria","suolo","rumore"]',
     column_backlog: 'Backlog',
     column_in_progress: 'In corso',
