@@ -41,9 +41,33 @@ var SIGMAFLOW = {
     XL: 20
   },
   REWORK_CAUSES: ['wait_client', 'wait_authority', 'wait_internal', 'manual'],
+  SCENARIOS: {
+    optimistic: {
+      label: 'Scenario ottimistico',
+      arrivals_multiplier: 0.85,
+      rework_multiplier: 0.80,
+      time_multiplier: 0.90,
+      capacity_multiplier: 1.05
+    },
+    baseline: {
+      label: 'Scenario medio',
+      arrivals_multiplier: 1.00,
+      rework_multiplier: 1.00,
+      time_multiplier: 1.00,
+      capacity_multiplier: 1.00
+    },
+    pessimistic: {
+      label: 'Scenario pessimistico',
+      arrivals_multiplier: 1.15,
+      rework_multiplier: 1.25,
+      time_multiplier: 1.20,
+      capacity_multiplier: 0.90
+    }
+  },
   DEFAULT_CONFIG: {
     team_size: 4,
     observation_window_days: 30,
+    theoretical_capacity_per_day: '',
     size_XS_days: 0.5,
     size_S_days: 1,
     size_M_days: 2,
@@ -52,6 +76,7 @@ var SIGMAFLOW = {
     columns_json: '',
     assignees_json: '["Alessandra","Giovanni D","Marco","Altro"]',
     tags_json: '["AIA","ADR","VIA","rifiuti","acque","aria","suolo","rumore"]',
+    scenarios_json: '',
     column_backlog: 'Backlog',
     column_in_progress: 'In corso',
     column_stand_by: 'Stand-by',

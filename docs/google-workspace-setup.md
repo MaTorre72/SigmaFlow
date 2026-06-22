@@ -12,10 +12,10 @@ Spreadsheet database creato e verificato:
 - Timezone: `Europe/Rome`
 - Tab verificati: `jobs`, `cases`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
-- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec>
-- Deployment corrente: `AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ` (`@10`)
-- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=prod>
-- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=test>
+- Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec>
+- Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@12`)
+- Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
+- Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=test>
 
 Nota: `clasp create --type sheets` ha creato un nuovo contenitore Google Sheets per il progetto Apps Script. Il codice SigmaFlow usa comunque il database canonico tramite `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`.
 
@@ -84,7 +84,7 @@ cd apps-script
 1. Nell'editor Apps Script seleziona la funzione `setupSigmaFlow`.
 2. Premi `Run`.
 3. Accetta le autorizzazioni richieste.
-4. Torna allo Spreadsheet e verifica che i fogli siano presenti e popolati.
+4. Torna allo Spreadsheet e verifica che i fogli siano presenti e popolati, comprese le chiavi `theoretical_capacity_per_day` e `scenarios_json` nel foglio `config`.
 
 ## 4. Deploy Web App
 
@@ -99,13 +99,13 @@ cd apps-script
 1. Apri la Web App URL.
 2. Verifica che la board mostri le colonne: NOTE, BACKLOG, TO DO, WIP, ATTESA CLIENTE, ATTESA ENTI, ATTESA MT/GC, DA INVIARE / DA FATTURARE.
 3. Crea un job di prova.
-4. Trascinalo in `WIP`, poi in `ATTESA CLIENTE`, poi in `TO DO` o `WIP`.
+4. Trascinalo in `WIP`, poi in `ATTESA CLIENTE`, poi in `TO DO`.
 5. Verifica nello Sheet TEST che il ritorno da `ATTESA CLIENTE` abbia impostato `is_rework`, `visit_number` e `rework_cause = wait_client`.
 6. Trascinalo in `DA INVIARE / DA FATTURARE`.
 7. Verifica nello Sheet che `start_ts`, `done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d` siano valorizzati.
 8. Verifica che le colonne mostrino conteggio job e somma punti.
 9. Crea una nuova colonna, assegnale un ruolo, spostala a sinistra/destra e prova a rinominarla.
-10. Apri la tab Dashboard e verifica che le metriche vengano renderizzate senza errori.
+10. Apri la tab Dashboard e verifica stato generale, affidabilita' dei dati, flusso, rientri, tempi, lavoro presente e capacita' senza errori o valori `NaN`.
 
 ## 6. Assegnatari configurabili
 

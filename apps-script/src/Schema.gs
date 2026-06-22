@@ -108,6 +108,7 @@ function seedDefaultConfig_(sheet) {
   var descriptions = {
     team_size: 'Numero di persone attive',
     observation_window_days: 'Finestra temporale metriche',
+    theoretical_capacity_per_day: 'Capacita teorica configurata in passaggi al giorno',
     size_XS_days: 'Giorni medi attesi per taglia XS',
     size_S_days: 'Giorni medi attesi per taglia S',
     size_M_days: 'Giorni medi attesi per taglia M',
@@ -116,6 +117,7 @@ function seedDefaultConfig_(sheet) {
     columns_json: 'Configurazione colonne board',
     assignees_json: 'Assegnatari disponibili in formato JSON',
     tags_json: 'Tag disponibili in formato JSON',
+    scenarios_json: 'Scenari futuri predisposti in formato JSON',
     column_backlog: 'Etichetta colonna backlog',
     column_in_progress: 'Etichetta colonna in lavorazione',
     column_stand_by: 'Etichetta colonna stand-by',
@@ -149,6 +151,9 @@ function ensureConfigValueIfEmpty_(sheet, key, value) {
 function defaultConfigValue_(key) {
   if (key === 'columns_json') {
     return JSON.stringify(SIGMAFLOW.DEFAULT_COLUMNS);
+  }
+  if (key === 'scenarios_json') {
+    return JSON.stringify(SIGMAFLOW.SCENARIOS);
   }
   return SIGMAFLOW.DEFAULT_CONFIG[key];
 }

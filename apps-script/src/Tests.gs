@@ -33,6 +33,10 @@ function runAllTests() {
     testPriorityUpdate,
     testDynamicColumnsAndOptions,
     testMetrics,
+    testSystemStateInsufficientData,
+    testDataQualityThresholds,
+    testSystemStateSeparatesFlowFromTimeSamples,
+    testSystemStateWorkload,
     testMissingRequiredParam
   ];
 
@@ -265,7 +269,89 @@ function testMetrics() {
     assertTrue_(metrics.data.E_S > 0, 'E_S positivo');
     assertTrue_(metrics.data.rework.p1 > 0, 'p1 rework positivo');
     assertTrue_(metrics.data.stability.system_state, 'system_state valorizzato');
+    assertTrue_(metrics.data.systemState, 'systemState valorizzato');
+    assertEquals_('low', metrics.data.systemState.dataQuality.level, 'qualita dati bassa');
   });
+}
+
+function testSystemStateInsufficientData() {
+  var now = new Date();
+  var state = buildSystemState_([{
+    job_id: 'JOB-TEST-1',
+    case_id: 'CASE-TEST-1',
+    status: 'backlog',
+    arrival_ts: nowIso_(),
+    visit_number: 1
+  }], SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_('low', state.dataQuality.level, 'qualita dati insufficiente');
+  assertEquals_('unknown', state.systemStatus.code, 'stato non stimabile');
+  assertEquals_(null, state.capacityMetrics.effective_load, 'carico non stimabile');
+  assertEquals_(null, state.timeMetrics.average_service_days, 'tempo medio non stimabile');
+  assertEquals_(null, buildSystemState_([], SIGMAFLOW.DEFAULT_CONFIG, now).reworkMetrics.initiatives_with_rework, 'rientri non stimabili senza iniziative');
+}
+
+function testDataQualityThresholds() {
+  assertEquals_('low', dataQuality_(9, 5).level, 'qualita bassa sotto 10');
+  assertEquals_('medium', dataQuality_(10, 5).level, 'qualita media da 10');
+  assertEquals_('medium', dataQuality_(30, 5).level, 'qualita media fino a 30');
+  assertEquals_('good', dataQuality_(31, 5).level, 'qualita buona oltre 30');
+}
+
+function testSystemStateSeparatesFlowFromTimeSamples() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{
+    job_id: 'JOB-DONE-NO-TIME',
+    case_id: 'CASE-DONE-NO-TIME',
+    status: 'done',
+    arrival_ts: arrival,
+    done_ts: nowIso_(),
+    visit_number: 1
+  }];
+
+  var state = buildSystemState_(jobs, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(1, state.flowMetrics.completed_initiatives, 'uscite conteggiate anche senza tempo valido');
+  assertEquals_(0, state.timeMetrics.completed_samples, 'campioni tempo esclusi se mancanti');
+  assertEquals_(null, state.capacityMetrics.effective_per_day, 'capacita non stimabile senza tempi');
+}
+
+function testSystemStateWorkload() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [];
+  for (var i = 0; i < 5; i++) {
+    jobs.push({
+      job_id: 'JOB-DONE-' + i,
+      case_id: 'CASE-DONE-' + i,
+      status: 'done',
+      arrival_ts: arrival,
+      done_ts: nowIso_(),
+      service_time_d: 2,
+      visit_number: i === 0 ? 2 : 1,
+      invoiced: false
+    });
+  }
+  jobs.push({ job_id: 'READY', case_id: 'READY', status: 'backlog', arrival_ts: arrival, visit_number: 1 });
+  jobs.push({ job_id: 'WIP', case_id: 'WIP', status: 'wip', arrival_ts: arrival, visit_number: 1 });
+  jobs.push({ job_id: 'WAIT', case_id: 'WAIT', status: 'wait_client', arrival_ts: arrival, visit_number: 1 });
+
+  var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, {
+    columns_json: JSON.stringify(SIGMAFLOW.DEFAULT_COLUMNS),
+    observation_window_days: 30,
+    team_size: 4
+  });
+  var state = buildSystemState_(jobs, config, now);
+
+  assertEquals_(1, state.workloadMetrics.ready, 'lavoro pronto');
+  assertEquals_(1, state.workloadMetrics.in_progress, 'lavoro in corso');
+  assertEquals_(5, state.workloadMetrics.can_return, 'lavoro che puo rientrare');
+  assertEquals_(1, state.workloadMetrics.waiting_client, 'attesa cliente');
+  assertTrue_(state.capacityMetrics.effective_per_day > 0, 'capacita effettiva stimata');
+  assertTrue_(state.reworkMetrics.average_passages_per_initiative > 1, 'passaggi medi con rientro');
+  assertTrue_(!state.scenarioReadiness.active, 'simulazione scenari non attiva');
+  assertEquals_(3, Object.keys(state.scenarioReadiness.scenarios).length, 'tre scenari predisposti');
 }
 
 function testMissingRequiredParam() {

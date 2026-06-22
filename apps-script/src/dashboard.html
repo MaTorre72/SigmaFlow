@@ -1,30 +1,52 @@
-<section id="metrics-grid" class="metrics-grid" aria-live="polite">
-  <article class="panel">
-    <h2>Stato del lavoro</h2>
-    <div id="system-state" class="state-badge">-</div>
-    <p id="rho-effective">Carico stimato: -</p>
-    <p id="system-explanation" class="system-explanation"></p>
+<section id="metrics-grid" class="metrics-grid dashboard-grid" aria-live="polite">
+  <article class="panel wide status-panel">
+    <h2>Stato generale del sistema</h2>
+    <div class="status-summary">
+      <div id="general-status" class="state-badge">-</div>
+      <strong id="general-load">Carico effettivo: -</strong>
+    </div>
+    <p id="general-message" class="panel-message"></p>
+  </article>
+
+  <article class="panel reliability-panel">
+    <h2>Affidabilita' della lettura</h2>
+    <div id="data-quality-status" class="quality-badge">-</div>
+    <p id="data-quality-message" class="panel-message"></p>
+    <p id="data-quality-sample" class="secondary-text"></p>
   </article>
 
   <article class="panel">
-    <h2>Indicatori del flusso</h2>
-    <dl id="empirical-metrics"></dl>
-  </article>
-
-  <article class="panel wide">
-    <h2>Tempi e carico stimati</h2>
-    <table id="queue-table"></table>
+    <h2>Flusso del lavoro</h2>
+    <dl id="flow-metrics"></dl>
+    <p class="panel-note">Nuove iniziative e passaggi totali sono misure diverse: i rientri aumentano il carico reale.</p>
   </article>
 
   <article class="panel">
     <h2>Rientri e rilavorazioni</h2>
-    <dl id="rework-metrics"></dl>
+    <dl id="system-rework-metrics"></dl>
+    <p class="panel-note">I passaggi totali al giorno rappresentano il lavoro reale richiesto al gruppo.</p>
+  </article>
+
+  <article class="panel">
+    <h2>Tempi e variabilita'</h2>
+    <dl id="time-metrics"></dl>
+    <p id="time-message" class="panel-message"></p>
+  </article>
+
+  <article class="panel">
+    <h2>Lavoro presente nel sistema</h2>
+    <dl id="workload-metrics"></dl>
   </article>
 
   <article class="panel">
     <h2>Capacita' disponibile</h2>
-    <div class="rho-track">
-      <div id="rho-marker" class="rho-marker"></div>
-    </div>
+    <dl id="capacity-metrics"></dl>
+    <p class="panel-note">La capacita' va confrontata con nuovi lavori e rientri, non solo con i nuovi ingressi.</p>
+  </article>
+
+  <article class="panel wide scenarios-panel">
+    <h2>Scenari futuri - predisposizione</h2>
+    <div id="scenario-list" class="scenario-list"></div>
+    <p id="scenario-message" class="panel-message"></p>
   </article>
 </section>

@@ -29,7 +29,7 @@ function calculateMetrics_(jobs, config, now) {
   var rework = reworkMetrics_(completed, lambda, teamSize, mu, stats.secondMoment);
   var stability = stabilityMetrics_(rho, rework.rho_effective, stats.cs2);
 
-  return {
+  var result = {
     window_days: windowDays,
     n_jobs_observed: observed.length,
     lambda: round_(lambda),
@@ -47,6 +47,251 @@ function calculateMetrics_(jobs, config, now) {
       size_counts: countBy_(observed, 'size_class'),
       lead_time_by_size: leadTimeBySize_(completed)
     }
+  };
+  result.systemState = buildSystemState_(jobs, config, now);
+  return result;
+}
+
+function buildSystemState_(jobs, config, now) {
+  var windowDays = Math.max(1, Number(config.observation_window_days || 30));
+  var teamSize = Math.max(1, Number(config.team_size || 1));
+  var since = new Date(now.getTime() - windowDays * 864e5);
+  var columns = columnsFromConfig_(config);
+  var columnMap = {};
+  columns.forEach(function(column) {
+    columnMap[column.id] = column;
+  });
+
+  var observed = jobs.filter(function(job) {
+    return job.arrival_ts && new Date(job.arrival_ts) >= since;
+  });
+  var completed = jobs.filter(function(job) {
+    return job.done_ts && new Date(job.done_ts) >= since;
+  });
+  var completedSamples = completed.filter(function(job) {
+    return numberJobField_(job, 'service_time_d', ['service_time_h']) > 0;
+  });
+  var initiatives = initiativeGroups_(observed);
+  var completedInitiatives = initiativeGroups_(completed);
+  var initiativeList = Object.keys(initiatives).map(function(key) { return initiatives[key]; });
+  var completedList = Object.keys(completedInitiatives).map(function(key) { return completedInitiatives[key]; });
+  var reworked = initiativeList.filter(function(item) { return item.reentries > 0; });
+  var serviceTimes = completedSamples.map(function(job) {
+    return numberJobField_(job, 'service_time_d', ['service_time_h']);
+  });
+  var stats = sampleStats_(serviceTimes);
+  var enoughCompleted = completedSamples.length >= 5 && stats.mean > 0;
+
+  var newRate = initiativeList.length / windowDays;
+  var completedRate = completedList.length / windowDays;
+  var reworkShare = initiativeList.length ? reworked.length / initiativeList.length : null;
+  var conditionalReentries = reworked.length ? reworked.reduce(function(sum, item) {
+    return sum + item.reentries;
+  }, 0) / reworked.length : null;
+  var averagePassages = reworkShare === null ? null : 1 + reworkShare * (conditionalReentries || 0);
+  var totalPassageRate = averagePassages === null ? null : newRate * averagePassages;
+  var reworkPassageRate = totalPassageRate === null ? null : Math.max(0, totalPassageRate - newRate);
+  var effectiveCapacity = enoughCompleted ? teamSize / stats.mean : null;
+  var theoreticalCapacity = positiveOrNull_(config.theoretical_capacity_per_day);
+  var effectiveLoad = effectiveCapacity && totalPassageRate !== null ? totalPassageRate / effectiveCapacity : null;
+  var residualCapacity = effectiveCapacity === null || totalPassageRate === null ? null : effectiveCapacity - totalPassageRate;
+  var availableShare = effectiveLoad === null ? null : 1 - effectiveLoad;
+  var dataQuality = dataQuality_(initiativeList.length, completedSamples.length);
+  var systemStatus = systemStatus_(effectiveLoad, dataQuality);
+  var variability = variabilityInterpretation_(enoughCompleted ? stats.cs2 : null);
+  var prudentTime = enoughCompleted ? stats.mean + Math.sqrt(stats.variance) : null;
+  var highObserved = enoughCompleted && serviceTimes.length ? Math.max.apply(null, serviceTimes) : null;
+  var mg1 = enoughCompleted && effectiveLoad < 1
+    ? queueMG1_(totalPassageRate, effectiveLoad, stats.mean, stats.secondMoment)
+    : unstableQueue_();
+  var workload = currentWorkload_(jobs, columnMap);
+
+  return {
+    dataQuality: dataQuality,
+    systemStatus: systemStatus,
+    flowMetrics: {
+      window_days: windowDays,
+      new_initiatives_observed: initiativeList.length,
+      new_initiatives_per_day: round_(newRate),
+      completed_initiatives: completedList.length,
+      completed_per_day: completedList.length ? round_(completedRate) : null,
+      estimated_capacity_per_day: effectiveCapacity === null ? null : round_(effectiveCapacity),
+      entry_exit_difference: completedList.length ? round_(newRate - completedRate) : null
+    },
+    reworkMetrics: {
+      initiatives_with_rework: reworkShare === null ? null : round_(reworkShare),
+      average_reentries_when_reworked: conditionalReentries === null ? null : round_(conditionalReentries),
+      average_passages_per_initiative: averagePassages === null ? null : round_(averagePassages),
+      total_passages_per_day: totalPassageRate === null ? null : round_(totalPassageRate),
+      additional_passages_from_rework: reworkPassageRate === null ? null : round_(reworkPassageRate)
+    },
+    workloadMetrics: workload,
+    timeMetrics: {
+      completed_samples: completedSamples.length,
+      average_service_days: enoughCompleted ? round_(stats.mean) : null,
+      variability: enoughCompleted ? round_(stats.cs2) : null,
+      variability_level: variability.level,
+      variability_message: variability.message,
+      high_observed_days: highObserved === null ? null : round_(highObserved),
+      prudent_service_days: prudentTime === null ? null : round_(prudentTime),
+      estimated_wait_days: mg1.Wq,
+      estimated_total_days: mg1.W,
+      waiting_message: waitingMessage_(effectiveLoad)
+    },
+    capacityMetrics: {
+      theoretical_per_day: theoreticalCapacity,
+      effective_per_day: effectiveCapacity === null ? null : round_(effectiveCapacity),
+      absorbed_by_new_work: round_(newRate),
+      absorbed_by_rework: reworkPassageRate === null ? null : round_(reworkPassageRate),
+      effective_load: effectiveLoad === null ? null : round_(effectiveLoad),
+      residual_per_day: residualCapacity === null ? null : round_(residualCapacity),
+      available_share: availableShare === null ? null : round_(availableShare),
+      safety_margin: availableShare === null ? null : round_(availableShare)
+    },
+    scenarioReadiness: {
+      active: false,
+      message: 'La simulazione non e ancora attiva. La struttura e pronta per confrontare scenari futuri.',
+      scenarios: scenariosFromConfig_(config)
+    },
+    descriptions: metricDescriptions_()
+  };
+}
+
+function initiativeGroups_(jobs) {
+  return jobs.reduce(function(groups, job) {
+    var key = job.case_id || job.job_id;
+    if (!groups[key]) {
+      groups[key] = { id: key, reentries: 0 };
+    }
+    groups[key].reentries = Math.max(groups[key].reentries, Math.max(0, Number(job.visit_number || 1) - 1));
+    return groups;
+  }, {});
+}
+
+function columnsFromConfig_(config) {
+  if (config.columns_json) {
+    try {
+      var parsed = JSON.parse(config.columns_json);
+      if (parsed && parsed.length) {
+        return parsed;
+      }
+    } catch (err) {
+      // Usa la configurazione standard se il JSON non e valido.
+    }
+  }
+  return SIGMAFLOW.DEFAULT_COLUMNS;
+}
+
+function currentWorkload_(jobs, columnMap) {
+  var result = {
+    ready: 0,
+    in_progress: 0,
+    can_return: 0,
+    blocked: 0,
+    waiting_client: 0,
+    waiting_authority: 0,
+    waiting_internal: 0
+  };
+  jobs.forEach(function(job) {
+    var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
+    if (column.role === 'backlog') { result.ready++; }
+    if (column.role === 'wip') { result.in_progress++; }
+    if (column.role === 'stand_by') { result.blocked++; }
+    if (column.role === 'done' && !coerceBoolean_(job.invoiced)) { result.can_return++; }
+    if (job.status === 'wait_client') { result.waiting_client++; }
+    if (job.status === 'wait_authority') { result.waiting_authority++; }
+    if (job.status === 'wait_internal') { result.waiting_internal++; }
+  });
+  return result;
+}
+
+function dataQuality_(observedCount, completedCount) {
+  var level = observedCount < 10 ? 'low' : (observedCount <= 30 ? 'medium' : 'good');
+  var labels = { low: 'BASSA', medium: 'MEDIA', good: 'BUONA' };
+  var messages = {
+    low: 'I dati sono ancora troppo pochi per leggere bene il sistema.',
+    medium: 'La lettura e utile, ma ancora sensibile a pochi casi anomali.',
+    good: 'La lettura e piu rappresentativa del funzionamento recente.'
+  };
+  if (completedCount < 5) {
+    messages[level] += ' Servono almeno 5 lavori completati per stimare tempi e capacita.';
+  }
+  return {
+    level: level,
+    label: labels[level],
+    message: messages[level],
+    observed_initiatives: observedCount,
+    completed_samples: completedCount,
+    capacity_estimable: completedCount >= 5
+  };
+}
+
+function systemStatus_(load, dataQuality) {
+  if (load === null) {
+    return {
+      code: 'unknown',
+      label: 'DATI INSUFFICIENTI',
+      message: 'Il sistema non mostra una misura affidabile del carico: servono piu lavori completati.'
+    };
+  }
+  if (load < 0.70) {
+    return { code: 'stable', label: 'STABILE', message: 'Il sistema ha margine operativo.' };
+  }
+  if (load < 0.85) {
+    return { code: 'attention', label: 'ATTENZIONE', message: 'Il sistema regge, ma il margine si sta riducendo.' };
+  }
+  if (load <= 1) {
+    return { code: 'stressed', label: 'SOTTO PRESSIONE', message: 'Il sistema e vicino alla saturazione. Rientri e tempi variabili possono aumentare rapidamente le attese.' };
+  }
+  return { code: 'critical', label: 'CRITICO', message: 'Il carico supera la capacita disponibile. Il lavoro tendera ad accumularsi.' };
+}
+
+function variabilityInterpretation_(value) {
+  if (value === null) {
+    return { level: null, message: 'Dato non ancora stimabile.' };
+  }
+  if (value < 0.5) {
+    return { level: 'BASSA', message: 'I tempi sono abbastanza regolari.' };
+  }
+  if (value < 1) {
+    return { level: 'MEDIA', message: 'I tempi cambiano in modo sensibile tra un lavoro e l altro.' };
+  }
+  return { level: 'ALTA', message: 'Pochi lavori lunghi possono bloccare molta capacita.' };
+}
+
+function waitingMessage_(load) {
+  if (load === null) { return 'Dato non ancora stimabile.'; }
+  if (load < 0.70) { return 'Attesa tendenzialmente bassa.'; }
+  if (load < 0.85) { return 'Attesa in aumento.'; }
+  if (load <= 1) { return 'Attesa sensibile: il sistema e quasi pieno.'; }
+  return 'Accumulo probabile: il carico supera la capacita.';
+}
+
+function scenariosFromConfig_(config) {
+  if (config.scenarios_json) {
+    try {
+      return JSON.parse(config.scenarios_json);
+    } catch (err) {
+      // Usa gli scenari standard se il JSON non e valido.
+    }
+  }
+  return SIGMAFLOW.SCENARIOS;
+}
+
+function positiveOrNull_(value) {
+  var number = Number(value);
+  return number > 0 ? round_(number) : null;
+}
+
+function metricDescriptions_() {
+  return {
+    new_initiatives_per_day: 'Numero medio di nuove iniziative entrate ogni giorno.',
+    total_passages_per_day: 'Passaggi di lavoro richiesti ogni giorno, compresi i rientri.',
+    effective_load: 'Quota della capacita effettiva richiesta dal lavoro osservato.',
+    ready: 'Lavori visibili e pronti, non ancora avviati.',
+    in_progress: 'Lavori attualmente aperti e gestiti dal team.',
+    can_return: 'Lavori conclusi ma non ancora fatturati, ancora esposti a richieste successive.',
+    prudent_service_days: 'Tempo medio aumentato della variabilita osservata, usato come riferimento prudenziale.'
   };
 }
 
@@ -106,7 +351,7 @@ function reworkMetrics_(completed, lambda, teamSize, mu, secondMoment) {
 
   var p1 = completed.length ? reworked.length / completed.length : 0;
   var r = reworked.length ? reworked.reduce(function(sum, job) {
-    return sum + Number(job.visit_number || 1);
+    return sum + Math.max(0, Number(job.visit_number || 1) - 1);
   }, 0) / reworked.length : 0;
   var expectedVisits = 1 + p1 * r;
   var lambdaEffective = lambda * expectedVisits;

@@ -10,7 +10,7 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 
 - Spreadsheet: `SigmaFlow Database`
 - ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
-- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=prod>
+- Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
 
 ### Test
 
@@ -50,12 +50,12 @@ runAllTests
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbyGPOulcD1M2IIAqdrlPpb9eEsZ_YKo2kwMU3CXHMStkXWdu22VCXLVWemePHwDkFUJ/exec?env=test>
+1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=test>
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
 5. Trascinare il job in `wip`.
-6. Trascinare il job in `wait_client`, poi di nuovo in `todo` o `wip`.
+6. Trascinare il job in `wait_client`, poi di nuovo in `todo`.
 7. Verificare nello Sheet TEST che il job sia marcato come rework automatico:
    - `visit_number` maggiore di `1`
    - `is_rework` `TRUE`
@@ -71,7 +71,7 @@ Eseguire dopo ogni deploy:
 12. Sposta la nuova colonna a sinistra/destra e verifica che l'ordine resti salvato dopo reload.
 13. Rinomina una colonna, ricarica la pagina e verifica che il nome resti salvato.
 14. Cambia il ruolo di una colonna a `WIP` o `Concluso` e verifica che la dashboard continui a renderizzare.
-15. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN`.
+15. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN` e senza zero fittizi per i dati non stimabili.
 16. Aprire una card e verificare che titolo, cliente, descrizione, assegnatario, tag, taglia, priorita', scadenza e fatturato salvino automaticamente.
 17. Verificare che i filtri rendano opache le card non corrispondenti senza rimuoverle dalla board.
 18. Verificare che impatto e gestibilita' aggiornino punteggio e classe quando la priorita' e' `Automatico`.
@@ -92,7 +92,20 @@ I primi test automatici coprono:
 - colonne dinamiche, ruoli e opzioni dropdown
 - `markRework`
 - `getMetrics`
+- stato unificato della dashboard con campione insufficiente
+- separazione tra lavori conclusi e campioni validi per i tempi
+- carico presente, capacita' e rientri nello stato unificato
 - validazione errori per parametri mancanti
+
+La suite corrente contiene 15 test. Dopo la sincronizzazione eseguire `setupSigmaFlow`, quindi `runAllTestsAndLog`, e verificare `passed: 15`, `failed: 0`.
+
+## Smoke test dashboard
+
+1. Con database TEST quasi vuoto, verificare `DATI INSUFFICIENTI` e la dicitura `Dato non ancora stimabile` per tempi, capacita' e carico.
+2. Verificare che siano visibili i tre contenitori `Lavoro pronto`, `Lavoro in corso` e `Lavoro che puo' rientrare`.
+3. Verificare i blocchi flusso, rientri, tempi, capacita' e affidabilita' dei dati.
+4. Verificare che la qualita' sia `BASSA` sotto 10 iniziative, `MEDIA` da 10 a 30 e `BUONA` oltre 30.
+5. Verificare che gli scenari siano indicati come predisposti e che nessuna simulazione futura sia mostrata come attiva.
 
 Ogni test deve:
 

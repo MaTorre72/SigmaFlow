@@ -782,38 +782,78 @@
   }
 
   function renderMetrics(metrics) {
-    var stability = metrics.stability || {};
-    var stateEl = document.getElementById('system-state');
-    stateEl.className = 'state-badge state-' + stability.system_state;
-    var stateLabels = { stable: 'STABILE', stressed: 'SOTTO PRESSIONE', critical: 'CRITICO', unstable: 'SATURO' };
-    var explanations = {
-      stable: 'Il carico e sostenibile e rimane margine per assorbire nuovi lavori.',
-      stressed: 'Il carico sta aumentando: nuovi lavori possono allungare i tempi di attesa.',
-      critical: 'Il gruppo e vicino alla saturazione. Conviene ridurre i lavori aperti o aumentare la capacita.',
-      unstable: 'Il carico supera la capacita disponibile. Serve un intervento organizzativo.'
-    };
-    stateEl.textContent = stateLabels[stability.system_state] || '-';
-    document.getElementById('rho-effective').textContent = 'Carico stimato: ' + formatPercent(metrics.rework && metrics.rework.rho_effective);
-    document.getElementById('system-explanation').textContent = explanations[stability.system_state] || '';
-    document.getElementById('rho-marker').style.left = Math.min(100, Math.max(0, ((metrics.rework && metrics.rework.rho_effective) || 0) * 100)) + '%';
+    var system = metrics.systemState;
+    if (!system) {
+      showError(new Error('La lettura operativa della dashboard non e disponibile. Aggiorna il deployment Apps Script.'));
+      return;
+    }
 
-    renderDl('empirical-metrics', {
-      'Periodo analizzato': metrics.window_days + ' giorni',
-      'Job osservati': metrics.n_jobs_observed,
-      'Nuovi job al giorno': metrics.lambda,
-      'Job completabili al giorno': metrics.mu,
-      'Tempo medio di lavorazione': valueOrDash(metrics.E_S) + ' giorni',
-      'Variabilita dei tempi': metrics.Cs2
+    var status = system.systemStatus || {};
+    var statusEl = document.getElementById('general-status');
+    statusEl.className = 'state-badge state-' + (status.code || 'unknown');
+    statusEl.textContent = status.label || 'DATI INSUFFICIENTI';
+    document.getElementById('general-load').textContent = 'Carico effettivo: ' + nullablePercent(system.capacityMetrics.effective_load, true);
+    document.getElementById('general-message').textContent = status.message || '';
+
+    var quality = system.dataQuality || {};
+    var qualityEl = document.getElementById('data-quality-status');
+    qualityEl.className = 'quality-badge quality-' + (quality.level || 'low');
+    qualityEl.textContent = quality.label || 'BASSA';
+    document.getElementById('data-quality-message').textContent = quality.message || '';
+    document.getElementById('data-quality-sample').textContent = 'Iniziative osservate: ' + valueOrDash(quality.observed_initiatives) + ' - lavori completati utili: ' + valueOrDash(quality.completed_samples);
+
+    var flow = system.flowMetrics || {};
+    renderDl('flow-metrics', {
+      'Periodo analizzato': metricValue(flow.window_days, ' giorni'),
+      'Nuove iniziative osservate': valueOrDash(flow.new_initiatives_observed),
+      'Nuove iniziative al giorno': metricValue(flow.new_initiatives_per_day),
+      'Lavori completati al giorno': estimableValue(flow.completed_per_day),
+      'Capacita disponibile stimata': estimableValue(flow.estimated_capacity_per_day, ' passaggi/giorno'),
+      'Differenza tra entrate e uscite': estimableValue(flow.entry_exit_difference)
     });
 
-    renderDl('rework-metrics', {
-      'Job con almeno un rientro': formatPercent(metrics.rework && metrics.rework.p1),
-      'Passaggi medi per iniziativa': metrics.rework && metrics.rework.E_K,
-      'Carico totale al giorno': metrics.rework && metrics.rework.lambda_effective,
-      'Attesa stimata con rientri': valueOrDash(metrics.rework && metrics.rework.Wq) + ' giorni'
+    var rework = system.reworkMetrics || {};
+    renderDl('system-rework-metrics', {
+      'Iniziative con almeno un rientro': nullablePercent(rework.initiatives_with_rework, true),
+      'Rientri medi quando il lavoro rientra': estimableValue(rework.average_reentries_when_reworked),
+      'Passaggi medi per iniziativa': metricValue(rework.average_passages_per_initiative),
+      'Passaggi totali al giorno': metricValue(rework.total_passages_per_day),
+      'Carico aggiuntivo dei rientri': estimableValue(rework.additional_passages_from_rework, ' passaggi/giorno')
     });
 
-    renderQueueTable(metrics);
+    var time = system.timeMetrics || {};
+    renderDl('time-metrics', {
+      'Tempo medio di lavorazione': estimableValue(time.average_service_days, ' giorni'),
+      'Variabilita dei tempi': time.variability_level || 'Dato non ancora stimabile',
+      'Tempo alto osservato': estimableValue(time.high_observed_days, ' giorni'),
+      'Tempo prudenziale consigliato': estimableValue(time.prudent_service_days, ' giorni'),
+      'Attesa stimata': estimableValue(time.estimated_wait_days, ' giorni'),
+      'Tempo totale stimato': estimableValue(time.estimated_total_days, ' giorni')
+    });
+    document.getElementById('time-message').textContent = (time.variability_message || '') + ' ' + (time.waiting_message || '');
+
+    var workload = system.workloadMetrics || {};
+    renderDl('workload-metrics', {
+      'Lavoro pronto': valueOrDash(workload.ready),
+      'Lavoro in corso': valueOrDash(workload.in_progress),
+      'Lavoro che puo rientrare': valueOrDash(workload.can_return),
+      'Lavori bloccati': valueOrDash(workload.blocked),
+      'In attesa di cliente': valueOrDash(workload.waiting_client),
+      'In attesa di enti': valueOrDash(workload.waiting_authority),
+      'Fermi per decisione interna': valueOrDash(workload.waiting_internal)
+    });
+
+    var capacity = system.capacityMetrics || {};
+    renderDl('capacity-metrics', {
+      'Capacita teorica giornaliera': capacity.theoretical_per_day === null ? 'Non configurata' : metricValue(capacity.theoretical_per_day),
+      'Capacita effettiva giornaliera': estimableValue(capacity.effective_per_day, ' passaggi/giorno'),
+      'Assorbita dai nuovi lavori': metricValue(capacity.absorbed_by_new_work, ' passaggi/giorno'),
+      'Assorbita dai rientri': estimableValue(capacity.absorbed_by_rework, ' passaggi/giorno'),
+      'Margine residuo': estimableValue(capacity.residual_per_day, ' passaggi/giorno'),
+      'Margine disponibile': nullablePercent(capacity.available_share, true)
+    });
+
+    renderScenarios(system.scenarioReadiness || {});
   }
 
   function renderDl(id, values) {
@@ -824,17 +864,17 @@
     });
   }
 
-  function renderQueueTable(metrics) {
-    var rows = [
-      ['Stima base', metrics.MM1],
-      ['Stima con tempi variabili', metrics.MG1],
-      ['Stima con rientri', { Wq: metrics.rework && metrics.rework.Wq, W: null, Lq: null, L: null }]
-    ];
-    var html = '<thead><tr><th>Stima</th><th>Attesa media</th><th>Tempo totale</th><th>Job in attesa</th><th>Job nel sistema</th></tr></thead><tbody>';
-    rows.forEach(function(row) {
-      html += '<tr><th>' + row[0] + '</th><td>' + valueOrDash(row[1].Wq) + '</td><td>' + valueOrDash(row[1].W) + '</td><td>' + valueOrDash(row[1].Lq) + '</td><td>' + valueOrDash(row[1].L) + '</td></tr>';
+  function renderScenarios(readiness) {
+    var root = document.getElementById('scenario-list');
+    root.innerHTML = '';
+    var scenarios = readiness.scenarios || {};
+    Object.keys(scenarios).forEach(function(key) {
+      var item = document.createElement('div');
+      item.className = 'scenario-item';
+      item.innerHTML = '<strong>' + escapeHtml(scenarios[key].label || key) + '</strong><span>Predisposto</span>';
+      root.appendChild(item);
     });
-    document.getElementById('queue-table').innerHTML = html + '</tbody>';
+    document.getElementById('scenario-message').textContent = readiness.message || 'La simulazione futura non e ancora attiva.';
   }
 
   function sumPoints(jobs) {
@@ -892,6 +932,30 @@
       return '-';
     }
     return Math.round(Number(value) * 100) + '%';
+  }
+
+  function nullablePercent(value, allowZero) {
+    if (value === null || value === undefined || value === '') {
+      return 'Dato non ancora stimabile';
+    }
+    if (!allowZero && Number(value) === 0) {
+      return 'Dato non ancora stimabile';
+    }
+    return Math.round(Number(value) * 100) + '%';
+  }
+
+  function estimableValue(value, suffix) {
+    if (value === null || value === undefined || value === '') {
+      return 'Dato non ancora stimabile';
+    }
+    return metricValue(value, suffix);
+  }
+
+  function metricValue(value, suffix) {
+    if (value === null || value === undefined || value === '') {
+      return 'Dato non ancora stimabile';
+    }
+    return String(value).replace('.', ',') + (suffix || '');
   }
 
   function escapeHtml(value) {

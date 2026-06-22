@@ -94,6 +94,19 @@ Configurazione colonne default:
 
 `Kanban.gs` contiene routing, setup e operazioni CRUD. `Model.gs` contiene calcolo metriche e funzioni matematiche pure.
 
+`getMetrics` mantiene le metriche storiche per compatibilita' e aggiunge un oggetto unificato `systemState`, articolato in:
+
+- `dataQuality`
+- `systemStatus`
+- `flowMetrics`
+- `reworkMetrics`
+- `workloadMetrics`
+- `timeMetrics`
+- `capacityMetrics`
+- `scenarioReadiness`
+
+Il backend restituisce `null` quando un indicatore non e' stimabile. Il frontend traduce il valore in una spiegazione leggibile e non lo presenta come zero. Gli scenari ottimistico, medio e pessimistico sono configurabili in `scenarios_json`, ma la simulazione resta disattivata in questa fase.
+
 Azioni `doPost` previste:
 
 - `getBoard`
