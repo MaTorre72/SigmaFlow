@@ -1,5 +1,96 @@
 var SIGMAFLOW_TEST_PROP_SPREADSHEET_ID = 'SIGMAFLOW_TEST_SPREADSHEET_ID';
 
+function seedTestData(params) {
+  params = params || {};
+  if (normalizeEnv_(params.env) !== 'test') {
+    throw new Error('La generazione dei dati dimostrativi e consentita solo in ambiente TEST.');
+  }
+  return ok_(seedTestDataset_(getSpreadsheet_(), coerceBoolean_(params.replace)));
+}
+
+function generateTestDataset() {
+  return withTestSpreadsheet_(function(ss) {
+    return seedTestDataset_(ss, true);
+  });
+}
+
+function seedTestDataset_(ss, replace) {
+  if (replace) { resetTestDatabase_(ss); }
+  var jobsSheet = ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
+  var casesSheet = ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
+  var sizes = ['XS', 'S', 'M', 'L', 'XL'];
+  var assignees = ['Alessandra', 'Giovanni D', 'Marco', 'Altro'];
+  var tags = ['AIA', 'VIA', 'rifiuti', 'acque', 'aria', 'suolo'];
+  var statuses = ['backlog', 'backlog', 'todo', 'todo', 'wip', 'wip', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done', 'done', 'done', 'done'];
+  var colors = SIGMAFLOW.CARD_COLORS;
+  var jobRows = [];
+  var caseRows = [];
+  var now = new Date();
+
+  for (var i = 0; i < 60; i++) {
+    var size = sizes[(i * 3 + Math.floor(i / 7)) % sizes.length];
+    var status = statuses[(i * 5 + Math.floor(i / 9)) % statuses.length];
+    var arrivalDays = 4 + ((i * 11) % 176);
+    var impact = 1 + (i % 4);
+    var manageability = 1 + ((i * 3) % 4);
+    var priority = priorityFields_({ impact: impact, manageability: manageability });
+    var visit = i % 8 === 0 ? 2 : 1;
+    var arrival = testIsoDaysAgo_(now, arrivalDays);
+    var started = ['todo', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done'].indexOf(status) >= 0
+      ? testIsoDaysAgo_(now, Math.max(0, arrivalDays - (1 + i % 5))) : '';
+    var done = status === 'done' ? testIsoDaysAgo_(now, Math.max(0, arrivalDays - (3 + i % 12))) : '';
+    var caseId = 'CASE-DEMO-' + String(i + 1);
+    var jobId = 'JOB-DEMO-' + String(i + 1);
+    var service = done ? diffDays(started, done) : '';
+    var lead = done ? diffDays(arrival, done) : '';
+    var wait = started ? diffDays(arrival, started) : '';
+    var job = {
+      job_id: jobId,
+      case_id: caseId,
+      visit_number: visit,
+      title: 'Pratica dimostrativa ' + String(i + 1),
+      client: 'Cliente ' + String(1 + i % 12),
+      status: status,
+      assignee: assignees[i % assignees.length],
+      tag: tags[(i * 2 + 1) % tags.length],
+      size_class: size,
+      size_points: SIGMAFLOW.SIZE_POINTS[size],
+      priority_class: priority.priority_class,
+      priority_class_manual: false,
+      impact: impact,
+      manageability: manageability,
+      priority_score: priority.priority_score,
+      description: i % 3 === 0 ? 'Attivita con note operative e dipendenze esterne.' : '',
+      due_date: testDateDaysFromNow_(now, (i % 35) - 12),
+      arrival_ts: arrival,
+      start_ts: started,
+      done_ts: done,
+      invoiced: status === 'done' && i % 3 === 0,
+      service_time_d: service,
+      lead_time_d: lead,
+      wait_time_d: wait,
+      is_rework: visit > 1,
+      rework_cause: visit > 1 ? ['wait_client', 'wait_authority', 'wait_internal'][i % 3] : '',
+      notes: '',
+      card_color: colors[(i % (colors.length - 1)) + 1]
+    };
+    jobRows.push(jobToRow_(job));
+    caseRows.push([caseId, job.title, job.client, visit, status !== 'done', arrival, done]);
+  }
+
+  jobsSheet.getRange(jobsSheet.getLastRow() + 1, 1, jobRows.length, JOB_HEADERS.length).setValues(jobRows);
+  casesSheet.getRange(casesSheet.getLastRow() + 1, 1, caseRows.length, CASE_HEADERS.length).setValues(caseRows);
+  return { jobs: jobRows.length, cases: caseRows.length, replace: replace };
+}
+
+function testIsoDaysAgo_(now, days) {
+  return Utilities.formatDate(new Date(now.getTime() - days * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
+function testDateDaysFromNow_(now, days) {
+  return Utilities.formatDate(new Date(now.getTime() + days * 864e5), SIGMAFLOW.TZ, 'yyyy-MM-dd');
+}
+
 function configureTestEnvironment() {
   PropertiesService.getScriptProperties().setProperty(
     SIGMAFLOW_TEST_PROP_SPREADSHEET_ID,
@@ -31,6 +122,8 @@ function runAllTests() {
     testStandByCannotReturnDirectlyToWip,
     testPriorityHelpers,
     testPriorityUpdate,
+    testCardColor,
+    testEditableOptions,
     testDynamicColumnsAndOptions,
     testMetrics,
     testSystemStateInsufficientData,
@@ -163,11 +256,18 @@ function testAutomaticReworkFromStandBy() {
 }
 
 function testPriorityHelpers() {
-  assertEquals_(3, calcPriorityScore(3, 3), 'score 3x3');
-  assertEquals_('p4_assess', suggestPriorityClass(1.49), 'classe p4');
-  assertEquals_('p1_plan', suggestPriorityClass(2), 'classe p1');
-  assertEquals_('p2_urgent', suggestPriorityClass(3), 'classe p2');
-  assertEquals_('p3_critical', suggestPriorityClass(4), 'classe p3');
+  assertEquals_(1, calcPriorityScore(1, 1), 'score 1x1');
+  assertEquals_('p4_assess', suggestPriorityClass(1), 'classe non urgente');
+  assertEquals_('p4_assess', suggestPriorityClass(1.99), 'non urgente fino a 2');
+  assertEquals_(2, calcPriorityScore(2, 2), 'score 2x2');
+  assertEquals_('p1_plan', suggestPriorityClass(2), 'classe da pianificare');
+  assertEquals_('p1_plan', suggestPriorityClass(2.99), 'da pianificare fino a 3');
+  assertEquals_('p2_urgent', suggestPriorityClass(3), 'urgente con margine da 3');
+  assertEquals_(3.46, calcPriorityScore(3, 4), 'score 3x4');
+  assertEquals_('p2_urgent', suggestPriorityClass(3.46), 'classe urgente con margine');
+  assertEquals_('p2_urgent', suggestPriorityClass(3.99), 'urgente con margine fino a 4');
+  assertEquals_(4, calcPriorityScore(4, 4), 'score 4x4');
+  assertEquals_('p3_critical', suggestPriorityClass(4), 'classe urgente');
 }
 
 function testStandByCannotReturnDirectlyToWip() {
@@ -202,6 +302,38 @@ function testPriorityUpdate() {
   });
 }
 
+function testCardColor() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Card colorata', card_color: '#DDEBF7' }).data;
+    assertEquals_('#DDEBF7', created.job.card_color, 'colore in creazione');
+    var updated = updateJob({ job_id: created.job_id, card_color: '#E2F0D9' });
+    assertEquals_('#E2F0D9', updated.data.job.card_color, 'colore aggiornato');
+  });
+}
+
+function testEditableOptions() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var added = updateOptionList({ kind: 'assignees', operation: 'add', value: 'Nuovo nome' });
+    assertEquals_('Nuovo nome', added.data.values[added.data.values.length - 1], 'nuovo valore in coda');
+    var moved = updateOptionList({ kind: 'assignees', operation: 'move', value: 'Nuovo nome', direction: 'up' });
+    assertTrue_(moved.data.values.indexOf('Nuovo nome') < added.data.values.indexOf('Nuovo nome'), 'ordine manuale');
+    var removed = updateOptionList({ kind: 'assignees', operation: 'remove', value: 'Nuovo nome' });
+    assertTrue_(removed.data.values.indexOf('Nuovo nome') === -1, 'valore non usato eliminato');
+
+    updateOptionList({ kind: 'assignees', operation: 'add', value: 'Nome in uso' });
+    addJob({ title: 'Card assegnata', assignee: 'Nome in uso' });
+    var failed = false;
+    try {
+      updateOptionList({ kind: 'assignees', operation: 'remove', value: 'Nome in uso' });
+    } catch (err) {
+      failed = err.message.indexOf('non può essere rimossa') !== -1;
+    }
+    assertTrue_(failed, 'valore usato non eliminabile');
+  });
+}
+
 function testDynamicColumnsAndOptions() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -209,6 +341,11 @@ function testDynamicColumnsAndOptions() {
     var added = addColumn({ label: 'Attesa cliente', role: 'stand_by' });
     assertTrue_(added.success, 'addColumn dovrebbe riuscire');
     assertEquals_('stand_by', added.data.column.role, 'ruolo nuova colonna');
+
+    var inserted = addColumn({ label: 'Inserita', role: 'neutral', after_status: 'backlog' });
+    var insertedColumns = inserted.data.columns;
+    var insertedIndex = insertedColumns.map(function(item) { return item.id; }).indexOf(inserted.data.column.id);
+    assertEquals_('backlog', insertedColumns[insertedIndex - 1].id, 'posizione nuova colonna');
 
     var moved = moveColumn({ status: added.data.column.id, direction: 'left' });
     assertTrue_(moved.success, 'moveColumn dovrebbe riuscire');
@@ -350,6 +487,8 @@ function testSystemStateWorkload() {
   assertEquals_(1, state.workloadMetrics.waiting_client, 'attesa cliente');
   assertTrue_(state.capacityMetrics.effective_per_day > 0, 'capacita effettiva stimata');
   assertTrue_(state.reworkMetrics.average_passages_per_initiative > 1, 'passaggi medi con rientro');
+  assertTrue_(state.pointsMetrics.completed_points > 0, 'punti completati');
+  assertEquals_(6, state.pointsMetrics.timeline.length, 'sei mesi nel grafico');
   assertTrue_(!state.scenarioReadiness.active, 'simulazione scenari non attiva');
   assertEquals_(3, Object.keys(state.scenarioReadiness.scenarios).length, 'tre scenari predisposti');
 }
@@ -399,7 +538,7 @@ function withTestSpreadsheet_(callback) {
 
   props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, testId);
   try {
-    callback(SpreadsheetApp.openById(testId));
+    return callback(SpreadsheetApp.openById(testId));
   } finally {
     if (previousId) {
       props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);

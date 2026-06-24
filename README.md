@@ -59,8 +59,9 @@ Per usare `clasp` locale:
 1. Database e CRUD backend.
 2. Kanban UI con drag & drop e filtri.
 3. Modello dinamico M/M/1, M/G/1 e rework.
-4. Dashboard metriche.
-5. Flusso rework completo.
+4. Dashboard a due livelli con indicatori rapidi, metriche di dettaglio e andamento punti.
+5. Colori card, menu configurabili e dataset dimostrativo riservato all'ambiente TEST.
+6. Flusso rework completo.
 
 ## Test e sicurezza
 

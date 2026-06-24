@@ -105,6 +105,7 @@ function buildSystemState_(jobs, config, now) {
     ? queueMG1_(totalPassageRate, effectiveLoad, stats.mean, stats.secondMoment)
     : unstableQueue_();
   var workload = currentWorkload_(jobs, columnMap);
+  var points = pointsStatistics_(jobs, columnMap, since, now);
 
   return {
     dataQuality: dataQuality,
@@ -148,6 +149,7 @@ function buildSystemState_(jobs, config, now) {
       available_share: availableShare === null ? null : round_(availableShare),
       safety_margin: availableShare === null ? null : round_(availableShare)
     },
+    pointsMetrics: points,
     scenarioReadiness: {
       active: false,
       message: 'La simulazione non e ancora attiva. La struttura e pronta per confrontare scenari futuri.',
@@ -155,6 +157,98 @@ function buildSystemState_(jobs, config, now) {
     },
     descriptions: metricDescriptions_()
   };
+}
+
+function pointsStatistics_(jobs, columnMap, since, now) {
+  var openJobs = jobs.filter(function(job) {
+    var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
+    return column.role !== 'done';
+  });
+  var completed = jobs.filter(function(job) {
+    return job.done_ts && new Date(job.done_ts) >= since;
+  });
+  var added = jobs.filter(function(job) {
+    return job.arrival_ts && new Date(job.arrival_ts) >= since;
+  });
+  var months = monthBuckets_(jobs, now, 6);
+
+  return {
+    open_points: sumJobPoints_(openJobs),
+    completed_points: sumJobPoints_(completed),
+    added_points: sumJobPoints_(added),
+    open_cards: openJobs.length,
+    timeline: months,
+    by_size: pointsBreakdown_(openJobs, 'size_class'),
+    by_column: pointsByColumn_(jobs, columnMap),
+    by_assignee: pointsBreakdown_(openJobs, 'assignee')
+  };
+}
+
+function monthBuckets_(jobs, now, count) {
+  var first = new Date(now.getFullYear(), now.getMonth() - count + 1, 1);
+  var buckets = [];
+  var byKey = {};
+  for (var i = 0; i < count; i++) {
+    var date = new Date(first.getFullYear(), first.getMonth() + i, 1);
+    var key = Utilities.formatDate(date, SIGMAFLOW.TZ, 'yyyy-MM');
+    var bucket = { key: key, label: Utilities.formatDate(date, SIGMAFLOW.TZ, 'MM/yyyy'), entered_points: 0, completed_points: 0, entered_cards: 0, completed_cards: 0, open_points: 0, net_points: 0 };
+    buckets.push(bucket);
+    byKey[key] = bucket;
+  }
+
+  var running = jobs.reduce(function(sum, job) {
+    var arrived = job.arrival_ts ? new Date(job.arrival_ts) : null;
+    var done = job.done_ts ? new Date(job.done_ts) : null;
+    return sum + (arrived && arrived < first && (!done || done >= first) ? Number(job.size_points || 0) : 0);
+  }, 0);
+
+  jobs.forEach(function(job) {
+    var points = Number(job.size_points || 0);
+    var arrivalKey = job.arrival_ts ? Utilities.formatDate(new Date(job.arrival_ts), SIGMAFLOW.TZ, 'yyyy-MM') : '';
+    var doneKey = job.done_ts ? Utilities.formatDate(new Date(job.done_ts), SIGMAFLOW.TZ, 'yyyy-MM') : '';
+    if (byKey[arrivalKey]) {
+      byKey[arrivalKey].entered_points += points;
+      byKey[arrivalKey].entered_cards++;
+    }
+    if (byKey[doneKey]) {
+      byKey[doneKey].completed_points += points;
+      byKey[doneKey].completed_cards++;
+    }
+  });
+
+  buckets.forEach(function(bucket) {
+    bucket.net_points = bucket.entered_points - bucket.completed_points;
+    running += bucket.net_points;
+    bucket.open_points = Math.max(0, running);
+  });
+  return buckets;
+}
+
+function pointsBreakdown_(jobs, field) {
+  var result = {};
+  jobs.forEach(function(job) {
+    var key = String(job[field] || 'Non assegnato');
+    if (!result[key]) { result[key] = { cards: 0, points: 0 }; }
+    result[key].cards++;
+    result[key].points += Number(job.size_points || 0);
+  });
+  return result;
+}
+
+function pointsByColumn_(jobs, columnMap) {
+  var result = {};
+  jobs.forEach(function(job) {
+    var status = normalizeStatus_(job.status);
+    var column = columnMap[status] || { label: status };
+    if (!result[status]) { result[status] = { label: column.label || status, cards: 0, points: 0 }; }
+    result[status].cards++;
+    result[status].points += Number(job.size_points || 0);
+  });
+  return result;
+}
+
+function sumJobPoints_(jobs) {
+  return jobs.reduce(function(sum, job) { return sum + Number(job.size_points || 0); }, 0);
 }
 
 function initiativeGroups_(jobs) {

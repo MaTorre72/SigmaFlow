@@ -9,7 +9,6 @@ var SIGMAFLOW = {
     CASES: 'cases',
     CONFIG: 'config'
   },
-  STATUSES: ['notes', 'backlog', 'todo', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done'],
   STATUS_ALIASES: {
     blocked: 'wait_internal',
     in_progress: 'wip',
@@ -28,11 +27,12 @@ var SIGMAFLOW = {
     { id: 'done', label: 'DA INVIARE / DA FATTURARE', role: 'done', order: 8, color: '#70AD47' }
   ],
   PRIORITY_CLASSES: {
-    p4_assess: { label: 'Da valutare', color: '#CCCCCC', score_max: 1.5 },
-    p1_plan: { label: 'Da pianificare', color: '#FFD966', score_max: 2.5 },
-    p2_urgent: { label: 'Urgente con margine', color: '#F4A020', score_max: 3.5 },
-    p3_critical: { label: 'Urgente critico', color: '#E02020', score_max: 99 }
+    p4_assess: { label: '0_Non urgente 🐘', color: '#D8DEE8', score_max: 2 },
+    p1_plan: { label: '1_Da pianificare 🍩', color: '#F2C94C', score_max: 3 },
+    p2_urgent: { label: '2_Urgente con margine 🦪', color: '#F2994A', score_max: 4 },
+    p3_critical: { label: '3_Urgente 💎', color: '#D92D20', score_max: 99 }
   },
+  CARD_COLORS: ['', '#DDEBF7', '#E2F0D9', '#FFF2CC', '#FCE4D6', '#E4DFEC', '#F4CCCC'],
   SIZE_POINTS: {
     XS: 3,
     S: 5,

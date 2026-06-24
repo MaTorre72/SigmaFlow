@@ -59,6 +59,8 @@ function routeAction_(params) {
     addColumn: addColumn,
     updateColumn: updateColumn,
     moveColumn: moveColumn,
+    updateOptionList: updateOptionList,
+    seedTestData: seedTestData,
     markRework: markRework,
     getMetrics: getMetrics
   };
@@ -169,7 +171,8 @@ function addJob(params) {
     wait_time_d: '',
     is_rework: Number(params.visit_number || 1) > 1,
     rework_cause: params.rework_cause || '',
-    notes: params.notes || ''
+    notes: params.notes || '',
+    card_color: normalizeCardColor_(params.card_color)
   };
 
   sheet.appendRow(jobToRow_(job));
@@ -237,7 +240,7 @@ function updateJob(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
-  ['title', 'client', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'notes'].forEach(function(field) {
+  ['title', 'client', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'notes', 'card_color'].forEach(function(field) {
     if (params[field] !== undefined && headers[field]) {
       job[field] = params[field];
     }
@@ -245,6 +248,9 @@ function updateJob(params) {
 
   if (params.size_class) {
     job.size_points = SIGMAFLOW.SIZE_POINTS[params.size_class] || SIGMAFLOW.SIZE_POINTS.M;
+  }
+  if (params.card_color !== undefined) {
+    job.card_color = normalizeCardColor_(params.card_color);
   }
 
   if (params.invoiced !== undefined) {
@@ -308,14 +314,16 @@ function addColumn(params) {
     seen[column.id] = true;
   });
   var id = uniqueColumnId_(slugify_(params.id || label), seen);
-  columns.push({
+  var column = {
     id: id,
     label: label,
     role: role,
     order: (columns.length + 1) * 10,
     color: params.color || '#E8E8E8',
     hidden: coerceBoolean_(params.hidden)
-  });
+  };
+  columns.push(column);
+  columns = repositionColumn_(columns, id, params.after_status);
   columns = writeColumns_(columns);
   return ok_({ column: findColumn_(columns, id), columns: columns });
 }
@@ -340,8 +348,28 @@ function updateColumn(params) {
   if (params.hidden !== undefined) {
     column.hidden = coerceBoolean_(params.hidden);
   }
+  if (params.after_status !== undefined) {
+    columns = repositionColumn_(columns, id, params.after_status);
+  }
   columns = writeColumns_(columns);
   return ok_({ column: findColumn_(columns, id), columns: columns });
+}
+
+function repositionColumn_(columns, id, afterStatus) {
+  if (afterStatus === undefined || afterStatus === id) { return columns; }
+  var moving = findColumn_(columns, id);
+  if (!moving) { return columns; }
+  columns = columns.filter(function(column) { return column.id !== id; });
+  if (!afterStatus) {
+    columns.unshift(moving);
+    return columns;
+  }
+  var target = -1;
+  columns.forEach(function(column, index) {
+    if (column.id === afterStatus) { target = index; }
+  });
+  columns.splice(target < 0 ? columns.length : target + 1, 0, moving);
+  return columns;
 }
 
 function moveColumn(params) {
@@ -395,6 +423,7 @@ function markRework(params) {
     impact: params.impact || source.impact,
     manageability: params.manageability || source.manageability,
     description: params.description || source.description || '',
+    card_color: params.card_color || source.card_color || '',
     rework_cause: params.rework_cause || 'manual',
     notes: params.notes || ''
   });
@@ -490,8 +519,59 @@ function boardOptions_(jobs) {
   });
 
   return {
-    assignees: uniqueSortedValues_(assignees),
-    tags: uniqueSortedValues_(tags),
-    sizes: Object.keys(SIGMAFLOW.SIZE_POINTS)
+    assignees: orderedUniqueValues_(assignees),
+    tags: orderedUniqueValues_(tags),
+    sizes: Object.keys(SIGMAFLOW.SIZE_POINTS),
+    card_colors: SIGMAFLOW.CARD_COLORS
   };
+}
+
+function updateOptionList(params) {
+  var kind = requireParam_(params, 'kind');
+  var configKey = optionConfigKey_(kind);
+  var values = parseJsonArray_(readConfig_()[configKey]);
+  var action = requireParam_(params, 'operation');
+  var value = String(params.value || '').trim();
+
+  if (action === 'add') {
+    if (!value) { throw new Error('Inserisci un valore'); }
+    values.push(value);
+    values = orderedUniqueValues_(values);
+  } else if (action === 'remove') {
+    if (optionUsageCount_(kind, value) > 0) {
+      throw new Error('Questa voce è usata da alcune card e non può essere rimossa.');
+    }
+    values = values.filter(function(item) { return item !== value; });
+  } else if (action === 'move') {
+    var index = values.indexOf(value);
+    var target = params.direction === 'up' ? index - 1 : index + 1;
+    if (index >= 0 && target >= 0 && target < values.length) {
+      var current = values[index];
+      values[index] = values[target];
+      values[target] = current;
+    }
+  } else {
+    throw new Error('Operazione elenco non supportata');
+  }
+
+  writeConfigValue_(configKey, JSON.stringify(values));
+  return ok_({ kind: kind, values: values });
+}
+
+function optionConfigKey_(kind) {
+  if (kind === 'assignees') { return 'assignees_json'; }
+  if (kind === 'tags') { return 'tags_json'; }
+  throw new Error('Elenco non supportato: ' + kind);
+}
+
+function optionUsageCount_(kind, value) {
+  var field = kind === 'assignees' ? 'assignee' : 'tag';
+  return readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(job) {
+    return String(job[field] || '') === value;
+  }).length;
+}
+
+function normalizeCardColor_(value) {
+  value = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(value) ? value : '';
 }

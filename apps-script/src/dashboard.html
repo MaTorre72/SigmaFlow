@@ -1,3 +1,30 @@
+<section class="dashboard-quick" aria-label="Vista rapida">
+  <div class="quick-heading">
+    <div><h2>Vista rapida</h2><p>Situazione corrente del sistema</p></div>
+    <button id="seed-test-data-button" type="button" hidden>Genera dati TEST</button>
+  </div>
+  <div class="quick-grid">
+    <article class="quick-card"><span>Stato del sistema</span><strong id="quick-system-status">-</strong></article>
+    <article class="quick-card"><span>Affidabilita' della lettura</span><strong id="quick-data-quality">-</strong></article>
+    <article class="gauge-card"><div id="gauge-load" class="gauge"><span>-</span></div><strong>Carico effettivo</strong></article>
+    <article class="gauge-card"><div id="gauge-capacity" class="gauge"><span>-</span></div><strong>Capacita' disponibile</strong></article>
+    <article class="gauge-card"><div id="gauge-rework" class="gauge"><span>-</span></div><strong>Rientri e rilavorazioni</strong></article>
+  </div>
+  <div class="points-summary">
+    <article><span>Punti aperti</span><strong id="points-open">-</strong></article>
+    <article><span>Punti aggiunti</span><strong id="points-added">-</strong></article>
+    <article><span>Punti completati</span><strong id="points-completed">-</strong></article>
+  </div>
+  <article class="chart-panel">
+    <div><h2>Andamento del carico</h2><p>Punti entrati, completati e ancora aperti</p></div>
+    <canvas id="points-timeline-chart" height="240" aria-label="Andamento punti nel tempo"></canvas>
+    <div class="chart-legend"><span class="legend-entered">Punti entrati</span><span class="legend-completed">Punti completati</span><span class="legend-open">Punti aperti</span></div>
+    <div id="points-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
+  </article>
+</section>
+
+<details class="dashboard-details" open>
+<summary>Vista dettagliata</summary>
 <section id="metrics-grid" class="metrics-grid dashboard-grid" aria-live="polite">
   <article class="panel wide status-panel">
     <h2>Stato generale del sistema</h2>
@@ -49,4 +76,25 @@
     <div id="scenario-list" class="scenario-list"></div>
     <p id="scenario-message" class="panel-message"></p>
   </article>
+
+  <article class="panel">
+    <h2>Distribuzione per taglia</h2>
+    <dl id="points-by-size"></dl>
+  </article>
+  <article class="panel">
+    <h2>Punti per assegnatario</h2>
+    <dl id="points-by-assignee"></dl>
+  </article>
+  <article class="panel wide">
+    <h2>Punti per colonna</h2>
+    <dl id="points-by-column"></dl>
+  </article>
+  <article class="panel wide">
+    <h2>Carico mensile</h2>
+    <div class="table-scroll"><table class="monthly-load-table">
+      <thead><tr><th>Mese</th><th>Card entrate</th><th>Card completate</th><th>Punti entrati</th><th>Punti completati</th><th>Saldo punti</th><th>Punti aperti</th></tr></thead>
+      <tbody id="monthly-load-body"></tbody>
+    </table></div>
+  </article>
 </section>
+</details>

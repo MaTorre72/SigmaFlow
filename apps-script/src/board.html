@@ -25,23 +25,25 @@
   </label>
   <button id="reset-filters-button" type="button">Reset filtri</button>
   <button id="add-column-button" type="button">+ Colonna</button>
+  <button id="manage-options-button" type="button">Gestisci menu</button>
   <button id="show-hidden-columns-button" type="button">Mostra nascoste</button>
-  <div class="board-scroll-controls" aria-label="Esplora colonne">
-    <button id="scroll-board-left" type="button" title="Colonne precedenti">&lt;</button>
-    <button id="scroll-board-right" type="button" title="Colonne successive">&gt;</button>
-  </div>
   <span id="last-updated" class="last-updated">-</span>
 </section>
 
 <datalist id="assignee-options"></datalist>
 <datalist id="tag-options"></datalist>
 
-<section id="kanban-board" class="kanban-board" aria-live="polite"></section>
+<div class="board-stage">
+  <button id="scroll-board-left" class="board-edge-button board-edge-left" type="button" title="Colonne precedenti" aria-label="Scorri la lavagna a sinistra">&#8249;</button>
+  <section id="kanban-board" class="kanban-board" aria-live="polite"></section>
+  <button id="scroll-board-right" class="board-edge-button board-edge-right" type="button" title="Colonne successive" aria-label="Scorri la lavagna a destra">&#8250;</button>
+</div>
 
 <dialog id="card-modal" class="card-modal">
   <form method="dialog" class="modal-shell">
     <button type="button" id="modal-close-button" class="modal-close" aria-label="Chiudi">x</button>
     <section class="modal-main">
+      <h2 id="card-modal-context" class="modal-context">Modifica card</h2>
       <input id="modal-title" class="modal-title-input" name="title" placeholder="Titolo job">
       <input id="modal-client" name="client" placeholder="Cliente">
       <textarea id="modal-description" name="description" rows="8" placeholder="Aggiungi descrizione o note operative..."></textarea>
@@ -54,8 +56,14 @@
       <label>Assegnatario
         <select id="modal-assignee" name="assignee"></select>
       </label>
+      <label id="modal-assignee-custom-wrap" class="custom-value-field" hidden>Nuovo assegnatario
+        <input id="modal-assignee-custom" autocomplete="off">
+      </label>
       <label>Tag
         <select id="modal-tag" name="tag"></select>
+      </label>
+      <label id="modal-tag-custom-wrap" class="custom-value-field" hidden>Nuovo tag
+        <input id="modal-tag-custom" autocomplete="off">
       </label>
       <label>Taglia
         <select id="modal-size" name="size_class">
@@ -71,13 +79,13 @@
           <span>Priorita'</span>
           <span id="modal-priority-badge" class="priority-badge">-</span>
         </div>
-        <label>Impatto
-          <input id="modal-impact" name="impact" type="range" min="1" max="5" step="0.5">
+        <label class="range-field"><span>Impatto</span>
           <output id="modal-impact-value">1</output>
+          <input id="modal-impact" name="impact" type="range" min="1" max="5" step="0.5">
         </label>
-        <label>Gestibilita'
-          <input id="modal-manageability" name="manageability" type="range" min="1" max="5" step="0.5">
+        <label class="range-field"><span>Gestibilita'</span>
           <output id="modal-manageability-value">1</output>
+          <input id="modal-manageability" name="manageability" type="range" min="1" max="5" step="0.5">
         </label>
         <label>Classe
           <select id="modal-priority-class" name="priority_class"></select>
@@ -86,14 +94,45 @@
       <label>Scadenza
         <input id="modal-due-date" name="due_date" type="date">
       </label>
+      <label>Colore card
+        <select id="modal-card-color" name="card_color">
+          <option value="">Predefinito</option>
+          <option value="#DDEBF7">Azzurro chiaro</option>
+          <option value="#E2F0D9">Verde chiaro</option>
+          <option value="#FFF2CC">Giallo chiaro</option>
+          <option value="#FCE4D6">Arancio chiaro</option>
+          <option value="#E4DFEC">Viola chiaro</option>
+          <option value="#F4CCCC">Rosso chiaro</option>
+        </select>
+      </label>
       <label class="checkbox-line">
         <input id="modal-invoiced" name="invoiced" type="checkbox">
         Fatturato
       </label>
       <section id="modal-rework-history" class="rework-history" hidden></section>
-      <button type="button" id="modal-create-button" class="primary-button" hidden>Aggiungi</button>
+      <button type="button" id="modal-create-button" class="primary-button">Salva</button>
       <button type="button" class="archive-button" disabled>Archivia</button>
     </aside>
+  </form>
+</dialog>
+
+<dialog id="options-manager-modal" class="column-settings-modal">
+  <form method="dialog" class="column-settings-form">
+    <h2>Gestisci menu</h2>
+    <label>Elenco
+      <select id="options-manager-kind">
+        <option value="assignees">Assegnatari</option>
+        <option value="tags">Tag</option>
+      </select>
+    </label>
+    <div id="options-manager-list" class="options-manager-list"></div>
+    <label>Nuovo valore
+      <input id="options-manager-new" autocomplete="off">
+    </label>
+    <div class="form-actions">
+      <button id="options-manager-add" type="button" class="primary-button">Aggiungi</button>
+      <button id="options-manager-close" type="button">Chiudi</button>
+    </div>
   </form>
 </dialog>
 
@@ -105,6 +144,18 @@
     </label>
     <label>Colore
       <input id="column-settings-color" type="color">
+    </label>
+    <label>Tipo di colonna
+      <select id="column-settings-role">
+        <option value="neutral">Generica</option>
+        <option value="backlog">Lavoro pronto</option>
+        <option value="wip">Lavoro in corso</option>
+        <option value="stand_by">Attesa</option>
+        <option value="done">Concluso</option>
+      </select>
+    </label>
+    <label>Posizione
+      <select id="column-settings-position"></select>
     </label>
     <label class="checkbox-line">
       <input id="column-settings-visible" type="checkbox">

@@ -25,7 +25,8 @@ var JOB_HEADERS = [
   'wait_time_d',
   'is_rework',
   'rework_cause',
-  'notes'
+  'notes',
+  'card_color'
 ];
 
 var CASE_HEADERS = [
@@ -46,8 +47,35 @@ function setupSigmaFlow() {
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+  migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
   return ok_({ spreadsheetId: ss.getId(), spreadsheetUrl: ss.getUrl() });
+}
+
+function migrateJobDefaults_(sheet) {
+  var jobs = readTable_(sheet);
+  if (!jobs.length) { return; }
+  var changed = false;
+  var rows = jobs.map(function(job) {
+    if (!coerceBoolean_(job.priority_class_manual)) {
+      var score = calcPriorityScore(job.impact, job.manageability);
+      var priorityClass = suggestPriorityClass(score);
+      if (Number(job.priority_score) !== score || job.priority_class !== priorityClass) {
+        job.priority_score = score;
+        job.priority_class = priorityClass;
+        changed = true;
+      }
+    }
+    if (!job.size_points && job.size_class) {
+      job.size_points = SIGMAFLOW.SIZE_POINTS[job.size_class] || SIGMAFLOW.SIZE_POINTS.M;
+      changed = true;
+    }
+    job.card_color = normalizeCardColor_(job.card_color);
+    return jobToRow_(job);
+  });
+  if (changed) {
+    sheet.getRange(2, 1, rows.length, JOB_HEADERS.length).setValues(rows);
+  }
 }
 
 function ensureSheet_(ss, name, headers) {
@@ -129,9 +157,7 @@ function seedDefaultConfig_(sheet) {
     var value = defaultConfigValue_(key);
     if (!existing[key]) {
       sheet.appendRow([key, value, descriptions[key] || '']);
-    } else if (key === 'columns_json') {
-      ensureConfigValue_(sheet, key, value);
-    } else if (key === 'assignees_json') {
+    } else if (key === 'columns_json' || key === 'assignees_json' || key === 'tags_json' || key === 'scenarios_json') {
       ensureConfigValueIfEmpty_(sheet, key, value);
     }
   });

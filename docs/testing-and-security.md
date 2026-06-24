@@ -97,7 +97,7 @@ I primi test automatici coprono:
 - carico presente, capacita' e rientri nello stato unificato
 - validazione errori per parametri mancanti
 
-La suite corrente contiene 15 test. Dopo la sincronizzazione eseguire `setupSigmaFlow`, quindi `runAllTestsAndLog`, e verificare `passed: 15`, `failed: 0`.
+La suite corrente contiene 17 test. Dopo la sincronizzazione eseguire `setupSigmaFlow`, quindi `runAllTestsAndLog`, e verificare `passed: 17`, `failed: 0`.
 
 ## Smoke test dashboard
 
@@ -106,6 +106,24 @@ La suite corrente contiene 15 test. Dopo la sincronizzazione eseguire `setupSigm
 3. Verificare i blocchi flusso, rientri, tempi, capacita' e affidabilita' dei dati.
 4. Verificare che la qualita' sia `BASSA` sotto 10 iniziative, `MEDIA` da 10 a 30 e `BUONA` oltre 30.
 5. Verificare che gli scenari siano indicati come predisposti e che nessuna simulazione futura sia mostrata come attiva.
+6. Verificare i tre indicatori grafici e controllare che un valore assente sia mostrato come `Dato non stimabile`.
+7. Verificare punti aperti, aggiunti, completati e il grafico `Andamento del carico`.
+
+## Dataset dimostrativo TEST
+
+Dal deployment con `?env=test`, aprire Dashboard e usare `Genera dati TEST`. L'operazione richiede conferma, ripristina il solo database TEST e genera 60 pratiche distribuite sugli ultimi sei mesi.
+
+In alternativa, dall'editor Apps Script eseguire `generateTestDataset()`. La funzione usa esclusivamente `SIGMAFLOW_TEST_SPREADSHEET_ID`; l'azione Web App `seedTestData` rifiuta l'ambiente PROD.
+
+## Verifiche UI aggiuntive
+
+- Priorita': verificare `1x1 = 1`, `2x2 = 2`, `3x4 = 3,46`, `4x4 = 4` e le quattro classi previste.
+- Card: verificare `Salva` sia in creazione sia in modifica e la fascia colore personalizzata.
+- Colonne: verificare titolo centrato, card a sinistra, punti a destra, controlli sotto e pulsante `+`.
+- Colonne: in creazione scegliere la posizione; in modifica riposizionare direttamente senza spostamenti ripetuti.
+- Scorrimento: verificare intestazioni sempre visibili, scroll verticale limitato alle card e frecce laterali sempre presenti nello schermo.
+- Touch: verificare swipe orizzontale senza trascinamento involontario; il drag parte dopo pressione prolungata.
+- Menu: aggiungere un valore da `Aggiungi...` o `Altro`, riordinarlo e verificare il blocco della rimozione quando e' usato.
 
 Ogni test deve:
 

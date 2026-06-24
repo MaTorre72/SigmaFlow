@@ -29,6 +29,7 @@
 | `impact` | Impatto 1.0-5.0 |
 | `manageability` | Gestibilita' 1.0-5.0 |
 | `priority_score` | `sqrt(impact * manageability)`, arrotondato a 2 decimali |
+| `card_color` | Colore opzionale della fascia superiore della card (`#RRGGBB`) |
 | `description` | Descrizione operativa |
 | `due_date` | Scadenza operativa in formato `yyyy-mm-dd` |
 | `arrival_ts` | Ingresso nel sistema |
@@ -77,6 +78,10 @@ Le colonne sono configurabili dalla Web App. Il campo `role` determina il compor
 - `done`: completamento;
 - `neutral`: colonna senza ruolo modellistico speciale.
 
+La scala della priorita' automatica e' divisa uniformemente sull'intervallo 1-5: `1 <= valore < 2` non urgente, `2 <= valore < 3` da pianificare, `3 <= valore < 4` urgente con margine, `4 <= valore <= 5` urgente. Il menu segue sempre questo ordine crescente.
+
+La colonna `NOTE` usa il ruolo generico `neutral`: il suo ID non attiva alcun comportamento speciale e nome, ruolo, colore e posizione sono modificabili come per ogni altra colonna.
+
 Configurazione colonne default:
 
 | ID | Label | Ruolo |
@@ -119,6 +124,8 @@ Azioni `doPost` previste:
 - `addColumn`
 - `updateColumn`
 - `moveColumn`
+- `updateOptionList`
+- `seedTestData` (solo ambiente TEST)
 - `markRework`
 - `getMetrics`
 
@@ -129,3 +136,9 @@ Il rientro diretto da una colonna `stand_by` alla colonna con ID `wip` e' vietat
 ## Frontend
 
 `index.html` carica la shell. `board.html` e `dashboard.html` sono inclusi tramite template Apps Script. `client.html` contiene JS vanilla che usa `google.script.run`.
+
+Assegnatari e tag mantengono l'ordine salvato nel foglio `config`. Possono essere aggiunti e riordinati; una voce puo' essere eliminata soltanto quando nessuna card la usa. Taglie e classi di priorita' restano domini controllati per preservare la corrispondenza punti e le soglie del modello. Gli stati restano configurabili attraverso le colonne e i relativi ruoli.
+
+La dashboard espone una vista rapida con indicatori di carico, capacita', rientri, stato e affidabilita'. La vista dettagliata mantiene tutte le metriche precedenti e aggiunge `pointsMetrics`: punti aperti, entrati e completati, serie mensile, distribuzione per taglia, colonna e assegnatario.
+
+`setupSigmaFlow()` aggiunge il campo `card_color` alle tabelle esistenti, conserva i valori precedenti e ricalcola classe e punteggio soltanto per le priorita' automatiche. Le priorita' manuali non vengono modificate.

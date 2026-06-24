@@ -14,7 +14,10 @@
     pendingWrites: 0,
     prioritySaveTimer: null,
     touchJobId: null,
-    touchGhost: null
+    touchGhost: null,
+    touchTimer: null,
+    touchStart: null,
+    suppressCardClick: false
   };
 
   var defaultColumns = [
@@ -92,11 +95,25 @@
   }
 
   function bindToolbar() {
+    var seedButton = document.getElementById('seed-test-data-button');
+    if (seedButton && state.env === 'test') {
+      seedButton.hidden = false;
+      seedButton.addEventListener('click', function() {
+        if (!confirm('Generare un nuovo dataset dimostrativo nel database TEST?')) { return; }
+        callApi('seedTestData', { replace: true }).then(function(data) {
+          showMessage('Creati ' + data.jobs + ' job TEST');
+          loadBoard(true);
+          loadMetrics();
+        }).catch(showError);
+      });
+    }
     document.getElementById('add-column-button').addEventListener('click', function() {
       state.columnSettings = { status: '', label: '', color: '#E8E8E8', hidden: false };
       document.getElementById('column-settings-label').value = '';
       document.getElementById('column-settings-color').value = '#E8E8E8';
+      document.getElementById('column-settings-role').value = 'neutral';
       document.getElementById('column-settings-visible').checked = true;
+      fillColumnPositionSelect('');
       document.getElementById('column-settings-modal').showModal();
     });
 
@@ -110,6 +127,8 @@
         return callApi('updateColumn', { status: column.status, hidden: false });
       })).then(function() { loadBoard(true); }).catch(showError);
     });
+
+    document.getElementById('manage-options-button').addEventListener('click', openOptionsManager);
 
     document.getElementById('reset-filters-button').addEventListener('click', function() {
       state.filters = { assignees: {}, tags: {}, sizes: {}, priority: '' };
@@ -144,12 +163,11 @@
     });
 
     [
-      'modal-assignee',
-      'modal-tag',
       'modal-size',
       'modal-priority-class',
       'modal-due-date',
-      'modal-invoiced'
+      'modal-invoiced',
+      'modal-card-color'
     ].forEach(function(id) {
       document.getElementById(id).addEventListener('change', saveModalField);
     });
@@ -159,12 +177,19 @@
       document.getElementById(id).addEventListener('change', savePriorityInputs);
     });
 
-    document.getElementById('modal-create-button').addEventListener('click', createJobFromModal);
+    document.getElementById('modal-create-button').addEventListener('click', saveCardFromModal);
     document.getElementById('modal-priority-class').addEventListener('change', updateLivePriorityBadge);
+    document.getElementById('modal-assignee').addEventListener('change', handleEditableSelectChange);
+    document.getElementById('modal-tag').addEventListener('change', handleEditableSelectChange);
 
     document.getElementById('column-settings-save').addEventListener('click', saveColumnSettings);
     document.getElementById('column-settings-cancel').addEventListener('click', function() {
       document.getElementById('column-settings-modal').close();
+    });
+    document.getElementById('options-manager-kind').addEventListener('change', renderOptionsManager);
+    document.getElementById('options-manager-add').addEventListener('click', addManagedOption);
+    document.getElementById('options-manager-close').addEventListener('click', function() {
+      document.getElementById('options-manager-modal').close();
     });
   }
 
@@ -265,13 +290,10 @@
       columnEl.innerHTML = [
         '<div class="column-color-bar"></div>',
         '<div class="column-header">',
-        '<div>',
-        '<h2 class="column-title"></h2>',
-        '<div class="column-badges">',
+        '<div class="column-summary-row">',
         '<span class="column-badge count-badge"></span>',
+        '<h2 class="column-title"></h2>',
         '<span class="column-badge points-badge"></span>',
-        '<span class="column-badge stale-badge" hidden></span>',
-        '</div>',
         '</div>',
         '<div class="column-header-actions">',
         '<button type="button" class="move-column-left" title="Sposta colonna a sinistra">&lt;</button>',
@@ -279,10 +301,11 @@
         '<button type="button" class="sort-priority-button" title="Ordina per priorita">P</button>',
         '<button type="button" class="sort-date-button" title="Ordina per scadenza">D</button>',
         '<button type="button" class="column-menu-button" title="Impostazioni colonna">...</button>',
+        '<button type="button" class="open-composer-button" title="Aggiungi card" aria-label="Aggiungi card">+</button>',
         '</div>',
+        '<span class="column-badge stale-badge" hidden></span>',
         '</div>',
-        '<div class="cards"></div>',
-        '<button type="button" class="open-composer-button">Aggiungi</button>'
+        '<div class="cards"></div>'
       ].join('');
 
       columnEl.querySelector('.column-title').textContent = column.label;
@@ -330,6 +353,10 @@
     var isLate = job.due_date && new Date(job.due_date + 'T23:59:59') < new Date();
     var isStale = column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
     card.className = 'card' + (matches ? '' : ' filtered-out') + (isStale ? ' stale-card' : '');
+    if (job.card_color) {
+      card.classList.add('custom-card-color');
+      card.style.setProperty('--card-color', job.card_color);
+    }
     card.draggable = true;
     card.dataset.jobId = job.job_id;
     card.innerHTML = [
@@ -367,7 +394,7 @@
     card.addEventListener('touchmove', moveTouchDrag, { passive: false });
     card.addEventListener('touchend', endTouchDrag);
     card.addEventListener('click', function(event) {
-      if (event.target.closest('button')) {
+      if (state.suppressCardClick || event.target.closest('button')) {
         return;
       }
       openCardModal(job);
@@ -418,7 +445,9 @@
     state.columnSettings = column;
     document.getElementById('column-settings-label').value = column.label || '';
     document.getElementById('column-settings-color').value = column.color || '#E8E8E8';
+    document.getElementById('column-settings-role').value = column.role || 'neutral';
     document.getElementById('column-settings-visible').checked = !column.hidden;
+    fillColumnPositionSelect(column.status);
     document.getElementById('column-settings-modal').showModal();
   }
 
@@ -429,6 +458,8 @@
     var payload = {
       label: document.getElementById('column-settings-label').value.trim(),
       color: document.getElementById('column-settings-color').value,
+      role: document.getElementById('column-settings-role').value,
+      after_status: document.getElementById('column-settings-position').value,
       hidden: !document.getElementById('column-settings-visible').checked
     };
     if (!payload.label) {
@@ -439,12 +470,74 @@
     if (state.columnSettings.status) {
       payload.status = state.columnSettings.status;
     } else {
-      payload.role = 'neutral';
+      payload.role = document.getElementById('column-settings-role').value;
     }
     callApi(action, payload).then(function() {
       document.getElementById('column-settings-modal').close();
       state.columnSettings = null;
       loadBoard(true);
+    }).catch(showError);
+  }
+
+  function fillColumnPositionSelect(currentId) {
+    var select = document.getElementById('column-settings-position');
+    var columns = getColumns();
+    var currentIndex = columns.findIndex(function(column) { return column.status === currentId; });
+    var previousId = currentIndex > 0 ? columns[currentIndex - 1].status : '';
+    select.innerHTML = '';
+    var start = document.createElement('option');
+    start.value = '';
+    start.textContent = "All'inizio";
+    select.appendChild(start);
+    columns.forEach(function(column) {
+      if (column.status === currentId) { return; }
+      var option = document.createElement('option');
+      option.value = column.status;
+      option.textContent = 'Dopo ' + column.label;
+      select.appendChild(option);
+    });
+    select.value = currentId ? previousId : (columns.length ? columns[columns.length - 1].status : '');
+  }
+
+  function openOptionsManager() {
+    document.getElementById('options-manager-new').value = '';
+    renderOptionsManager();
+    document.getElementById('options-manager-modal').showModal();
+  }
+
+  function renderOptionsManager() {
+    var kind = document.getElementById('options-manager-kind').value;
+    var values = (state.options[kind] || []).slice();
+    var root = document.getElementById('options-manager-list');
+    root.innerHTML = '';
+    values.forEach(function(value, index) {
+      var row = document.createElement('div');
+      row.className = 'option-manager-row';
+      row.innerHTML = '<span></span><div><button type="button" class="option-up" aria-label="Sposta su">&#8593;</button><button type="button" class="option-down" aria-label="Sposta giu">&#8595;</button><button type="button" class="option-remove" aria-label="Rimuovi">x</button></div>';
+      row.querySelector('span').textContent = value;
+      row.querySelector('.option-up').disabled = index === 0;
+      row.querySelector('.option-down').disabled = index === values.length - 1;
+      row.querySelector('.option-up').onclick = function() { changeManagedOption('move', value, 'up'); };
+      row.querySelector('.option-down').onclick = function() { changeManagedOption('move', value, 'down'); };
+      row.querySelector('.option-remove').onclick = function() { changeManagedOption('remove', value); };
+      root.appendChild(row);
+    });
+  }
+
+  function addManagedOption() {
+    var input = document.getElementById('options-manager-new');
+    var value = input.value.trim();
+    if (!value) { showError(new Error('Inserisci un valore')); return; }
+    changeManagedOption('add', value);
+    input.value = '';
+  }
+
+  function changeManagedOption(operation, value, direction) {
+    var kind = document.getElementById('options-manager-kind').value;
+    callApi('updateOptionList', { kind: kind, operation: operation, value: value, direction: direction || '' }).then(function(data) {
+      state.options[kind] = data.values || [];
+      renderOptionsManager();
+      renderToolbarFilters();
     }).catch(showError);
   }
 
@@ -463,7 +556,10 @@
     document.getElementById('modal-manageability').value = job.manageability || 1;
     document.getElementById('modal-due-date').value = job.due_date || '';
     document.getElementById('modal-invoiced').checked = coerceBool(job.invoiced);
-    document.getElementById('modal-create-button').hidden = true;
+    document.getElementById('modal-card-color').value = job.card_color || '';
+    document.getElementById('card-modal-context').textContent = 'Modifica card';
+    document.getElementById('modal-create-button').hidden = false;
+    resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
     document.getElementById('card-modal').showModal();
@@ -484,24 +580,59 @@
     document.getElementById('modal-manageability').value = 1;
     document.getElementById('modal-due-date').value = '';
     document.getElementById('modal-invoiced').checked = false;
+    document.getElementById('modal-card-color').value = '';
+    document.getElementById('card-modal-context').textContent = 'Nuova card';
     document.getElementById('modal-rework-history').hidden = true;
     document.getElementById('modal-create-button').hidden = false;
+    resetCustomValueFields();
     updateLivePriorityBadge();
     document.getElementById('card-modal').showModal();
     document.getElementById('modal-title').focus();
   }
 
   function fillModalSelects() {
-    fillSelect(document.getElementById('modal-assignee'), state.options.assignees || [], 'Non assegnato');
-    fillSelect(document.getElementById('modal-tag'), state.options.tags || [], 'Senza tag');
+    fillEditableSelect(document.getElementById('modal-assignee'), state.options.assignees || [], 'Non assegnato');
+    fillEditableSelect(document.getElementById('modal-tag'), state.options.tags || [], 'Senza tag');
     renderPrioritySelect(document.getElementById('modal-priority-class'), true);
+  }
+
+  function fillEditableSelect(select, values, emptyLabel) {
+    fillSelect(select, values, emptyLabel);
+    var option = document.createElement('option');
+    option.value = '__add__';
+    option.textContent = 'Aggiungi...';
+    select.appendChild(option);
+  }
+
+  function handleEditableSelectChange(event) {
+    var select = event.target;
+    var kind = select.id === 'modal-assignee' ? 'assignee' : 'tag';
+    var customWrap = document.getElementById('modal-' + kind + '-custom-wrap');
+    var customInput = document.getElementById('modal-' + kind + '-custom');
+    var wantsCustom = select.value === '__add__' || select.value === 'Altro';
+    customWrap.hidden = !wantsCustom;
+    if (wantsCustom) {
+      customInput.value = '';
+      customInput.focus();
+      return;
+    }
+    saveModalField(event);
+  }
+
+  function resetCustomValueFields() {
+    ['assignee', 'tag'].forEach(function(kind) {
+      document.getElementById('modal-' + kind + '-custom-wrap').hidden = true;
+      document.getElementById('modal-' + kind + '-custom').value = '';
+    });
   }
 
   function renderPrioritySelect(select, includeEmpty) {
     var previous = select.value;
     var emptyLabel = select.id === 'modal-priority-class' ? 'Automatico' : 'Tutte';
     select.innerHTML = includeEmpty ? '<option value="">' + emptyLabel + '</option>' : '';
-    Object.keys(state.priorityClasses).forEach(function(key) {
+    Object.keys(state.priorityClasses).sort(function(a, b) {
+      return Number(state.priorityClasses[a].score_max || 99) - Number(state.priorityClasses[b].score_max || 99);
+    }).forEach(function(key) {
       var option = document.createElement('option');
       option.value = key;
       option.textContent = state.priorityClasses[key].label || key;
@@ -555,7 +686,7 @@
     }, 180);
   }
 
-  function createJobFromModal() {
+  function saveCardFromModal() {
     var title = document.getElementById('modal-title').value.trim();
     if (!title) {
       showError(new Error('Inserisci il titolo del job'));
@@ -563,10 +694,17 @@
     }
     var payload = modalPayload_();
     payload.title = title;
-    payload.status = state.activeColumnId;
     state.pendingWrites++;
-    callApi('addJob', payload).then(function() {
+    prepareCustomOptions_(payload).then(function(prepared) {
+      if (state.activeJob) {
+        prepared.job_id = state.activeJob.job_id;
+        return callApi('updateJob', prepared);
+      }
+      prepared.status = state.activeColumnId;
+      return callApi('addJob', prepared);
+    }).then(function() {
       document.getElementById('card-modal').close();
+      state.activeJob = null;
       state.activeColumnId = null;
       loadBoard(true);
     }).catch(showError).finally(function() {
@@ -585,8 +723,26 @@
       manageability: document.getElementById('modal-manageability').value,
       priority_class: document.getElementById('modal-priority-class').value,
       due_date: document.getElementById('modal-due-date').value,
-      invoiced: document.getElementById('modal-invoiced').checked
+      invoiced: document.getElementById('modal-invoiced').checked,
+      card_color: document.getElementById('modal-card-color').value
     };
+  }
+
+  function prepareCustomOptions_(payload) {
+    return Promise.resolve().then(function() {
+      var requests = [];
+      [['assignee', 'assignees'], ['tag', 'tags']].forEach(function(pair) {
+        var field = pair[0];
+        var selected = document.getElementById('modal-' + field).value;
+        if (selected === '__add__' || selected === 'Altro') {
+          var custom = document.getElementById('modal-' + field + '-custom').value.trim();
+          if (!custom) { throw new Error('Inserisci il nuovo valore per ' + field); }
+          payload[field] = custom;
+          requests.push(callApi('updateOptionList', { kind: pair[1], operation: 'add', value: custom }));
+        }
+      });
+      return Promise.all(requests).then(function() { return payload; });
+    });
   }
 
   function updateLivePriorityBadge() {
@@ -643,13 +799,22 @@
   }
 
   function startTouchDrag(event, job, card) {
-    state.touchJobId = job.job_id;
-    state.touchGhost = card;
-    card.classList.add('dragging');
+    var touch = event.touches[0];
+    state.touchStart = { x: touch.clientX, y: touch.clientY };
+    window.clearTimeout(state.touchTimer);
+    state.touchTimer = window.setTimeout(function() {
+      state.touchJobId = job.job_id;
+      state.touchGhost = card;
+      card.classList.add('dragging');
+    }, 280);
   }
 
   function moveTouchDrag(event) {
     if (!state.touchJobId) {
+      var touch = event.touches[0];
+      if (state.touchStart && (Math.abs(touch.clientX - state.touchStart.x) > 8 || Math.abs(touch.clientY - state.touchStart.y) > 8)) {
+        window.clearTimeout(state.touchTimer);
+      }
       return;
     }
     event.preventDefault();
@@ -665,7 +830,9 @@
   }
 
   function endTouchDrag(event) {
+    window.clearTimeout(state.touchTimer);
     if (!state.touchJobId) {
+      state.touchStart = null;
       return;
     }
     var touch = event.changedTouches[0];
@@ -680,8 +847,11 @@
     if (column) {
       moveJob(state.touchJobId, column.dataset.status);
     }
+    state.suppressCardClick = true;
+    window.setTimeout(function() { state.suppressCardClick = false; }, 350);
     state.touchJobId = null;
     state.touchGhost = null;
+    state.touchStart = null;
   }
 
   function cloneBoard() {
@@ -794,6 +964,8 @@
     statusEl.textContent = status.label || 'DATI INSUFFICIENTI';
     document.getElementById('general-load').textContent = 'Carico effettivo: ' + nullablePercent(system.capacityMetrics.effective_load, true);
     document.getElementById('general-message').textContent = status.message || '';
+    document.getElementById('quick-system-status').textContent = status.label || 'DATI INSUFFICIENTI';
+    document.getElementById('quick-system-status').className = 'quick-state state-' + (status.code || 'unknown');
 
     var quality = system.dataQuality || {};
     var qualityEl = document.getElementById('data-quality-status');
@@ -801,6 +973,8 @@
     qualityEl.textContent = quality.label || 'BASSA';
     document.getElementById('data-quality-message').textContent = quality.message || '';
     document.getElementById('data-quality-sample').textContent = 'Iniziative osservate: ' + valueOrDash(quality.observed_initiatives) + ' - lavori completati utili: ' + valueOrDash(quality.completed_samples);
+    document.getElementById('quick-data-quality').textContent = quality.label || 'BASSA';
+    document.getElementById('quick-data-quality').className = 'quick-quality quality-' + (quality.level || 'low');
 
     var flow = system.flowMetrics || {};
     renderDl('flow-metrics', {
@@ -854,13 +1028,121 @@
     });
 
     renderScenarios(system.scenarioReadiness || {});
+    renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
+    renderGauge('gauge-capacity', system.capacityMetrics.available_share, 1, false);
+    renderGauge('gauge-rework', system.reworkMetrics.initiatives_with_rework, 0.5, true);
+    renderPointsMetrics(system.pointsMetrics || {});
+  }
+
+  function renderGauge(id, value, scaleMax, dangerWhenHigh) {
+    var root = document.getElementById(id);
+    var label = root.querySelector('span');
+    if (value === null || value === undefined || value === '') {
+      root.className = 'gauge gauge-unknown';
+      root.style.removeProperty('--gauge-value');
+      label.textContent = 'Dato non stimabile';
+      return;
+    }
+    var ratio = Math.max(0, Math.min(1, Number(value) / scaleMax));
+    var risk = dangerWhenHigh ? ratio : 1 - ratio;
+    var tone = risk < 0.70 ? 'stable' : (risk < 0.85 ? 'attention' : 'critical');
+    root.className = 'gauge gauge-' + tone;
+    root.style.setProperty('--gauge-value', Math.round(ratio * 100) + '%');
+    label.textContent = Math.round(Number(value) * 100) + '%';
+  }
+
+  function renderPointsMetrics(points) {
+    document.getElementById('points-open').textContent = metricValue(points.open_points, ' pt');
+    document.getElementById('points-added').textContent = metricValue(points.added_points, ' pt');
+    document.getElementById('points-completed').textContent = metricValue(points.completed_points, ' pt');
+    renderBreakdown('points-by-size', points.by_size || {}, false);
+    renderBreakdown('points-by-assignee', points.by_assignee || {}, false);
+    renderBreakdown('points-by-column', points.by_column || {}, true);
+    drawPointsTimeline(points.timeline || []);
+    renderMonthlyLoad(points.timeline || []);
+  }
+
+  function renderMonthlyLoad(rows) {
+    var root = document.getElementById('monthly-load-body');
+    root.innerHTML = '';
+    rows.forEach(function(row) {
+      var tr = document.createElement('tr');
+      [row.label, row.entered_cards, row.completed_cards, row.entered_points, row.completed_points, row.net_points, row.open_points].forEach(function(value) {
+        var td = document.createElement('td');
+        td.textContent = valueOrDash(value);
+        tr.appendChild(td);
+      });
+      root.appendChild(tr);
+    });
+  }
+
+  function renderBreakdown(id, values, useLabel) {
+    var mapped = {};
+    Object.keys(values).forEach(function(key) {
+      var item = values[key] || {};
+      mapped[useLabel ? (item.label || key) : key] = valueOrDash(item.points) + ' pt - ' + valueOrDash(item.cards) + ' card';
+    });
+    if (!Object.keys(mapped).length) { mapped['Nessun dato'] = '-'; }
+    renderDl(id, mapped);
+  }
+
+  function drawPointsTimeline(rows) {
+    var canvas = document.getElementById('points-timeline-chart');
+    var empty = document.getElementById('points-chart-empty');
+    var hasData = rows.some(function(row) {
+      return Number(row.entered_points || 0) > 0 || Number(row.completed_points || 0) > 0 || Number(row.open_points || 0) > 0;
+    });
+    if (!rows.length || !hasData) {
+      canvas.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    canvas.hidden = false;
+    empty.hidden = true;
+    var width = Math.max(560, canvas.parentElement.clientWidth - 32);
+    var height = 240;
+    var ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(ratio, ratio);
+    var pad = { left: 42, right: 18, top: 18, bottom: 34 };
+    var max = Math.max.apply(null, rows.map(function(row) { return Math.max(row.entered_points, row.completed_points, row.open_points); }).concat([1]));
+    ctx.font = '12px Arial';
+    ctx.strokeStyle = '#d8dee8';
+    ctx.fillStyle = '#627184';
+    for (var g = 0; g <= 4; g++) {
+      var gy = pad.top + (height - pad.top - pad.bottom) * g / 4;
+      ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(width - pad.right, gy); ctx.stroke();
+      ctx.fillText(String(Math.round(max * (1 - g / 4))), 4, gy + 4);
+    }
+    var colors = { entered_points: '#2F6B9A', completed_points: '#238636', open_points: '#B7791F' };
+    Object.keys(colors).forEach(function(field) {
+      ctx.beginPath();
+      ctx.strokeStyle = colors[field];
+      ctx.lineWidth = field === 'open_points' ? 3 : 2;
+      rows.forEach(function(row, index) {
+        var x = pad.left + (width - pad.left - pad.right) * index / Math.max(1, rows.length - 1);
+        var y = height - pad.bottom - (height - pad.top - pad.bottom) * Number(row[field] || 0) / max;
+        if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+        if (field === 'open_points') { ctx.fillStyle = '#627184'; ctx.fillText(row.label, x - 18, height - 12); }
+      });
+      ctx.stroke();
+    });
   }
 
   function renderDl(id, values) {
     var root = document.getElementById(id);
     root.innerHTML = '';
     Object.keys(values).forEach(function(label) {
-      root.insertAdjacentHTML('beforeend', '<dt>' + label + '</dt><dd>' + valueOrDash(values[label]) + '</dd>');
+      var dt = document.createElement('dt');
+      var dd = document.createElement('dd');
+      dt.textContent = label;
+      dd.textContent = valueOrDash(values[label]);
+      root.appendChild(dt);
+      root.appendChild(dd);
     });
   }
 
@@ -916,7 +1198,7 @@
         return keys[i];
       }
     }
-    return 'p4_assess';
+    return 'p3_critical';
   }
 
   function coerceBool(value) {

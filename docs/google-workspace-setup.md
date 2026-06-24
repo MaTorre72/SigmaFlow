@@ -13,7 +13,7 @@ Spreadsheet database creato e verificato:
 - Tab verificati: `jobs`, `cases`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
 - Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec>
-- Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@12`)
+- Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@14`)
 - Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
 - Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=test>
 
@@ -85,6 +85,7 @@ cd apps-script
 2. Premi `Run`.
 3. Accetta le autorizzazioni richieste.
 4. Torna allo Spreadsheet e verifica che i fogli siano presenti e popolati, comprese le chiavi `theoretical_capacity_per_day` e `scenarios_json` nel foglio `config`.
+5. Verifica che il foglio `jobs` contenga la nuova colonna `card_color`; le card precedenti devono restare invariate.
 
 ## 4. Deploy Web App
 
@@ -106,6 +107,7 @@ cd apps-script
 8. Verifica che le colonne mostrino conteggio job e somma punti.
 9. Crea una nuova colonna, assegnale un ruolo, spostala a sinistra/destra e prova a rinominarla.
 10. Apri la tab Dashboard e verifica stato generale, affidabilita' dei dati, flusso, rientri, tempi, lavoro presente e capacita' senza errori o valori `NaN`.
+11. In TEST, usa `Genera dati TEST` e verifica gli indicatori grafici e l'andamento dei punti su sei mesi.
 
 ## 6. Assegnatari configurabili
 
@@ -116,3 +118,5 @@ L'elenco dei nomi mostrato nei menu e' salvato nel foglio `config`, chiave `assi
 ```
 
 Per aggiungere una persona, modifica l'array nella cella `value` mantenendo virgolette e parentesi quadre, quindi ricarica la Web App.
+
+In alternativa usa `Gestisci menu` nella Board. L'interfaccia conserva l'ordine manuale e impedisce l'eliminazione di voci ancora utilizzate. La stessa gestione e' disponibile per `tags_json`.

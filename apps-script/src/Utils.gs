@@ -428,6 +428,17 @@ function uniqueSortedValues_(values) {
   }).sort();
 }
 
+function orderedUniqueValues_(values) {
+  var seen = {};
+  return values.filter(function(value) {
+    value = String(value || '').trim();
+    var key = value.toLowerCase();
+    if (!value || seen[key]) { return false; }
+    seen[key] = true;
+    return true;
+  }).map(function(value) { return String(value).trim(); });
+}
+
 function writeConfigValue_(key, value) {
   var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
   var rows = readTable_(sheet);

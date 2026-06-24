@@ -50,3 +50,12 @@ Il campione dei tempi e' distinto dal conteggio dei lavori conclusi: una conclus
 ## Scenari
 
 Gli scenari `optimistic`, `baseline` e `pessimistic` sono salvati in `scenarios_json`. I moltiplicatori sono predisposti, ma non vengono ancora usati per calcolare traiettorie future.
+
+## Punti e taglie
+
+- **Punti aperti**: somma dei punti delle card non concluse.
+- **Punti aggiunti**: punti delle card entrate nel periodo osservato.
+- **Punti completati**: punti delle card concluse nel periodo osservato.
+- **Andamento del carico**: confronto mensile, sugli ultimi sei mesi, fra punti entrati, completati e ancora aperti.
+- Le distribuzioni per taglia, colonna e assegnatario mostrano sia punti sia numero di card.
+- Se non esistono osservazioni utili, il grafico mostra `Dato non ancora stimabile` invece di una serie a zero.
