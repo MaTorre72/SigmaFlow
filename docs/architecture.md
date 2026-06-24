@@ -137,6 +137,8 @@ Il rientro diretto da una colonna `stand_by` alla colonna con ID `wip` e' vietat
 
 `index.html` carica la shell. `board.html` e `dashboard.html` sono inclusi tramite template Apps Script. `client.html` contiene JS vanilla che usa `google.script.run`.
 
+La scheda card salva tutti i campi con un'unica chiamata esplicita. Dopo la risposta del backend, la Board aggiorna il proprio stato locale senza eseguire un secondo caricamento completo.
+
 Assegnatari e tag mantengono l'ordine salvato nel foglio `config`. Possono essere aggiunti e riordinati; una voce puo' essere eliminata soltanto quando nessuna card la usa. Taglie e classi di priorita' restano domini controllati per preservare la corrispondenza punti e le soglie del modello. Gli stati restano configurabili attraverso le colonne e i relativi ruoli.
 
 La dashboard espone una vista rapida con indicatori di carico, capacita', rientri, stato e affidabilita'. La vista dettagliata mantiene tutte le metriche precedenti e aggiunge `pointsMetrics`: punti aperti, entrati e completati, serie mensile, distribuzione per taglia, colonna e assegnatario.

@@ -72,7 +72,7 @@ Eseguire dopo ogni deploy:
 13. Rinomina una colonna, ricarica la pagina e verifica che il nome resti salvato.
 14. Cambia il ruolo di una colonna a `WIP` o `Concluso` e verifica che la dashboard continui a renderizzare.
 15. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN` e senza zero fittizi per i dati non stimabili.
-16. Aprire una card e verificare che titolo, cliente, descrizione, assegnatario, tag, taglia, priorita', scadenza e fatturato salvino automaticamente.
+16. Aprire una card, modificare piu' campi e premere `Salva`: verificare che titolo, cliente, descrizione, assegnatario, tag, taglia, priorita', scadenza e fatturato siano aggiornati con una sola operazione.
 17. Verificare che i filtri rendano opache le card non corrispondenti senza rimuoverle dalla board.
 18. Verificare che impatto e gestibilita' aggiornino punteggio e classe quando la priorita' e' `Automatico`.
 19. Verificare l'ordinamento per priorita' e per scadenza.

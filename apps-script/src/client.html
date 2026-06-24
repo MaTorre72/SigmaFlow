@@ -12,7 +12,6 @@
     columnSettings: null,
     sortModes: {},
     pendingWrites: 0,
-    prioritySaveTimer: null,
     touchJobId: null,
     touchGhost: null,
     touchTimer: null,
@@ -158,23 +157,8 @@
       state.activeColumnId = null;
     });
 
-    ['modal-title', 'modal-client', 'modal-description'].forEach(function(id) {
-      document.getElementById(id).addEventListener('blur', saveModalField);
-    });
-
-    [
-      'modal-size',
-      'modal-priority-class',
-      'modal-due-date',
-      'modal-invoiced',
-      'modal-card-color'
-    ].forEach(function(id) {
-      document.getElementById(id).addEventListener('change', saveModalField);
-    });
-
     ['modal-impact', 'modal-manageability'].forEach(function(id) {
       document.getElementById(id).addEventListener('input', updateLivePriorityBadge);
-      document.getElementById(id).addEventListener('change', savePriorityInputs);
     });
 
     document.getElementById('modal-create-button').addEventListener('click', saveCardFromModal);
@@ -374,7 +358,7 @@
       job.description ? '<span class="description-icon" title="Descrizione presente">note</span>' : '',
       '</div>',
       '<div class="card-actions">',
-      '<button type="button" class="delete-card-button">Elimina</button>',
+      '<button type="button" class="delete-card-button" title="Elimina card" aria-label="Elimina card">x</button>',
       '</div>'
     ].join('');
     card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
@@ -616,7 +600,6 @@
       customInput.focus();
       return;
     }
-    saveModalField(event);
   }
 
   function resetCustomValueFields() {
@@ -630,60 +613,13 @@
     var previous = select.value;
     var emptyLabel = select.id === 'modal-priority-class' ? 'Automatico' : 'Tutte';
     select.innerHTML = includeEmpty ? '<option value="">' + emptyLabel + '</option>' : '';
-    Object.keys(state.priorityClasses).sort(function(a, b) {
-      return Number(state.priorityClasses[a].score_max || 99) - Number(state.priorityClasses[b].score_max || 99);
-    }).forEach(function(key) {
+    priorityClassKeys_().forEach(function(key) {
       var option = document.createElement('option');
       option.value = key;
       option.textContent = state.priorityClasses[key].label || key;
       select.appendChild(option);
     });
     select.value = previous;
-  }
-
-  function saveModalField(event) {
-    if (!state.activeJob) {
-      return;
-    }
-    var field = event.target.name;
-    var payload = { job_id: state.activeJob.job_id };
-    payload[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
-    state.activeJob = Object.assign({}, state.activeJob, payload);
-    mergeJobIntoState(state.activeJob);
-    renderBoard();
-    state.pendingWrites++;
-    callApi('updateJob', payload).then(function(data) {
-      state.activeJob = data.job || state.activeJob;
-      mergeJobIntoState(state.activeJob);
-      renderBoard();
-    }).catch(showError).finally(function() {
-      state.pendingWrites--;
-    });
-  }
-
-  function savePriorityInputs() {
-    updateLivePriorityBadge();
-    if (!state.activeJob) {
-      return;
-    }
-    window.clearTimeout(state.prioritySaveTimer);
-    state.prioritySaveTimer = window.setTimeout(function() {
-      var payload = {
-        job_id: state.activeJob.job_id,
-        impact: document.getElementById('modal-impact').value,
-        manageability: document.getElementById('modal-manageability').value,
-        priority_class: document.getElementById('modal-priority-class').value
-      };
-      state.pendingWrites++;
-      callApi('updateJob', payload).then(function(data) {
-        state.activeJob = data.job || state.activeJob;
-        mergeJobIntoState(state.activeJob);
-        renderBoard();
-        updateLivePriorityBadge();
-      }).catch(showError).finally(function() {
-        state.pendingWrites--;
-      });
-    }, 180);
   }
 
   function saveCardFromModal() {
@@ -695,18 +631,30 @@
     var payload = modalPayload_();
     payload.title = title;
     state.pendingWrites++;
+    var editing = Boolean(state.activeJob);
     prepareCustomOptions_(payload).then(function(prepared) {
-      if (state.activeJob) {
+      if (editing) {
         prepared.job_id = state.activeJob.job_id;
         return callApi('updateJob', prepared);
       }
       prepared.status = state.activeColumnId;
       return callApi('addJob', prepared);
-    }).then(function() {
+    }).then(function(data) {
+      var savedJob = data.job;
+      if (savedJob) {
+        updateOptionsFromJob(savedJob);
+        if (editing) {
+          mergeJobIntoState(savedJob);
+        } else {
+          addJobIntoState(savedJob);
+        }
+      }
       document.getElementById('card-modal').close();
       state.activeJob = null;
       state.activeColumnId = null;
-      loadBoard(true);
+      renderToolbarFilters();
+      renderBoard();
+      updateLastUpdated();
     }).catch(showError).finally(function() {
       state.pendingWrites--;
     });
@@ -749,13 +697,19 @@
     var impact = Number(document.getElementById('modal-impact').value || 0);
     var manageability = Number(document.getElementById('modal-manageability').value || 0);
     var score = impact && manageability ? Math.round(Math.sqrt(impact * manageability) * 100) / 100 : 0;
-    var priority = document.getElementById('modal-priority-class').value || suggestPriorityClassClient(score);
+    var automaticPriority = suggestPriorityClassClient(score);
+    var priority = document.getElementById('modal-priority-class').value || automaticPriority;
     var meta = state.priorityClasses[priority] || {};
+    var automaticMeta = state.priorityClasses[automaticPriority] || {};
     var badge = document.getElementById('modal-priority-badge');
     badge.textContent = (meta.label || priority || '-') + ' - ' + score;
     badge.style.background = meta.color || '#CCCCCC';
     document.getElementById('modal-impact-value').textContent = impact;
     document.getElementById('modal-manageability-value').textContent = manageability;
+    var automaticOption = document.querySelector('#modal-priority-class option[value=""]');
+    if (automaticOption) {
+      automaticOption.textContent = 'Automatico - ' + (automaticMeta.label || automaticPriority || '-');
+    }
   }
 
   function renderReworkHistory(job) {
@@ -899,6 +853,20 @@
       state.board[columnId] = (state.board[columnId] || []).map(function(item) {
         return item.job_id === job.job_id ? job : item;
       });
+    });
+  }
+
+  function addJobIntoState(job) {
+    state.jobs.push(job);
+    if (!state.board[job.status]) { state.board[job.status] = []; }
+    state.board[job.status].push(job);
+  }
+
+  function updateOptionsFromJob(job) {
+    [['assignees', job.assignee], ['tags', job.tag]].forEach(function(pair) {
+      if (pair[1] && state.options[pair[0]].indexOf(pair[1]) === -1) {
+        state.options[pair[0]].push(pair[1]);
+      }
     });
   }
 
@@ -1191,7 +1159,7 @@
   }
 
   function suggestPriorityClassClient(score) {
-    var keys = Object.keys(state.priorityClasses);
+    var keys = priorityClassKeys_();
     for (var i = 0; i < keys.length; i++) {
       var item = state.priorityClasses[keys[i]];
       if (Number(score) < Number(item.score_max || 99)) {
@@ -1199,6 +1167,12 @@
       }
     }
     return 'p3_critical';
+  }
+
+  function priorityClassKeys_() {
+    return Object.keys(state.priorityClasses).sort(function(a, b) {
+      return Number(state.priorityClasses[a].score_max || 99) - Number(state.priorityClasses[b].score_max || 99);
+    });
   }
 
   function coerceBool(value) {
