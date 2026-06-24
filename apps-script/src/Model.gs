@@ -199,11 +199,11 @@ function monthBuckets_(jobs, now, count) {
   var running = jobs.reduce(function(sum, job) {
     var arrived = job.arrival_ts ? new Date(job.arrival_ts) : null;
     var done = job.done_ts ? new Date(job.done_ts) : null;
-    return sum + (arrived && arrived < first && (!done || done >= first) ? Number(job.size_points || 0) : 0);
+    return sum + (arrived && arrived < first && (!done || done >= first) ? jobPoints_(job) : 0);
   }, 0);
 
   jobs.forEach(function(job) {
-    var points = Number(job.size_points || 0);
+    var points = jobPoints_(job);
     var arrivalKey = job.arrival_ts ? Utilities.formatDate(new Date(job.arrival_ts), SIGMAFLOW.TZ, 'yyyy-MM') : '';
     var doneKey = job.done_ts ? Utilities.formatDate(new Date(job.done_ts), SIGMAFLOW.TZ, 'yyyy-MM') : '';
     if (byKey[arrivalKey]) {
@@ -230,7 +230,7 @@ function pointsBreakdown_(jobs, field) {
     var key = String(job[field] || 'Non assegnato');
     if (!result[key]) { result[key] = { cards: 0, points: 0 }; }
     result[key].cards++;
-    result[key].points += Number(job.size_points || 0);
+    result[key].points += jobPoints_(job);
   });
   return result;
 }
@@ -242,13 +242,19 @@ function pointsByColumn_(jobs, columnMap) {
     var column = columnMap[status] || { label: status };
     if (!result[status]) { result[status] = { label: column.label || status, cards: 0, points: 0 }; }
     result[status].cards++;
-    result[status].points += Number(job.size_points || 0);
+    result[status].points += jobPoints_(job);
   });
   return result;
 }
 
 function sumJobPoints_(jobs) {
-  return jobs.reduce(function(sum, job) { return sum + Number(job.size_points || 0); }, 0);
+  return jobs.reduce(function(sum, job) { return sum + jobPoints_(job); }, 0);
+}
+
+function jobPoints_(job) {
+  var stored = Number(job.size_points);
+  if (stored > 0) { return stored; }
+  return SIGMAFLOW.SIZE_POINTS[job.size_class || 'M'] || SIGMAFLOW.SIZE_POINTS.M;
 }
 
 function initiativeGroups_(jobs) {

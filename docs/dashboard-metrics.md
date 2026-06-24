@@ -58,4 +58,5 @@ Gli scenari `optimistic`, `baseline` e `pessimistic` sono salvati in `scenarios_
 - **Punti completati**: punti delle card concluse nel periodo osservato.
 - **Andamento del carico**: confronto mensile, sugli ultimi sei mesi, fra punti entrati, completati e ancora aperti.
 - Le distribuzioni per taglia, colonna e assegnatario mostrano sia punti sia numero di card.
+- Per le card precedenti senza `size_points`, i punti sono ricavati dalla taglia; se manca anche la taglia viene usato il valore predefinito `M = 8`.
 - Se non esistono osservazioni utili, il grafico mostra `Dato non ancora stimabile` invece di una serie a zero.

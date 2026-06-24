@@ -488,6 +488,7 @@ function testSystemStateWorkload() {
   assertTrue_(state.capacityMetrics.effective_per_day > 0, 'capacita effettiva stimata');
   assertTrue_(state.reworkMetrics.average_passages_per_initiative > 1, 'passaggi medi con rientro');
   assertTrue_(state.pointsMetrics.completed_points > 0, 'punti completati');
+  assertEquals_(40, state.pointsMetrics.completed_points, 'fallback punti M per job legacy');
   assertEquals_(6, state.pointsMetrics.timeline.length, 'sei mesi nel grafico');
   assertTrue_(!state.scenarioReadiness.active, 'simulazione scenari non attiva');
   assertEquals_(3, Object.keys(state.scenarioReadiness.scenarios).length, 'tre scenari predisposti');
