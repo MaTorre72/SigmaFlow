@@ -5,7 +5,7 @@
     jobs: [],
     columnMeta: [],
     priorityClasses: {},
-    options: { assignees: [], tags: [], sizes: ['XS', 'S', 'M', 'L', 'XL'] },
+    options: { assignees: [], ambassadors: [], tags: [], sizes: ['XS', 'S', 'M', 'L', 'XL'] },
     filters: { assignees: {}, tags: {}, sizes: {}, priority: '' },
     activeJob: null,
     activeColumnId: null,
@@ -151,6 +151,10 @@
 
   function bindModal() {
     var modal = document.getElementById('card-modal');
+    modal.querySelector('form').addEventListener('submit', function(event) {
+      event.preventDefault();
+      saveCardFromModal();
+    });
     document.getElementById('modal-close-button').addEventListener('click', function() {
       modal.close();
       state.activeJob = null;
@@ -162,8 +166,10 @@
     });
 
     document.getElementById('modal-create-button').addEventListener('click', saveCardFromModal);
+    document.getElementById('modal-checklist-add').addEventListener('click', addChecklistItem);
     document.getElementById('modal-priority-class').addEventListener('change', updateLivePriorityBadge);
     document.getElementById('modal-assignee').addEventListener('change', handleEditableSelectChange);
+    document.getElementById('modal-ambassador').addEventListener('change', handleEditableSelectChange);
     document.getElementById('modal-tag').addEventListener('change', handleEditableSelectChange);
 
     document.getElementById('column-settings-save').addEventListener('click', saveColumnSettings);
@@ -258,6 +264,7 @@
   function renderBoard() {
     var root = document.getElementById('kanban-board');
     root.innerHTML = '';
+    var boardFragment = document.createDocumentFragment();
 
     getColumns().filter(function(column) {
       return !column.hidden;
@@ -321,22 +328,24 @@
       });
 
       bindDropTarget(columnEl, column.status);
-      jobs.forEach(function(job) {
-        columnEl.querySelector('.cards').appendChild(renderCard(job, column));
+      var cardsFragment = document.createDocumentFragment();
+      jobs.filter(matchesFilters).forEach(function(job) {
+        cardsFragment.appendChild(renderCard(job, column));
       });
+      columnEl.querySelector('.cards').appendChild(cardsFragment);
       columnEl.querySelector('.open-composer-button').addEventListener('click', function() {
         openNewJobModal(column.status);
       });
-      root.appendChild(columnEl);
+      boardFragment.appendChild(columnEl);
     });
+    root.appendChild(boardFragment);
   }
 
   function renderCard(job, column) {
     var card = document.createElement('article');
-    var matches = matchesFilters(job);
     var isLate = job.due_date && new Date(job.due_date + 'T23:59:59') < new Date();
     var isStale = column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
-    card.className = 'card' + (matches ? '' : ' filtered-out') + (isStale ? ' stale-card' : '');
+    card.className = 'card' + (isStale ? ' stale-card' : '');
     if (job.card_color) {
       card.classList.add('custom-card-color');
       card.style.setProperty('--card-color', job.card_color);
@@ -344,8 +353,8 @@
     card.draggable = true;
     card.dataset.jobId = job.job_id;
     card.innerHTML = [
-      '<div class="card-title"></div>',
       '<div class="card-client"></div>',
+      '<div class="card-title"></div>',
       '<div class="badges">',
       priorityBadgeHtml(job.priority_class),
       '<span class="badge">' + escapeHtml((job.size_class || 'M') + ' - ' + (job.size_points || sizePoints[job.size_class] || 8) + ' pt') + '</span>',
@@ -353,6 +362,7 @@
       '</div>',
       '<div class="card-footer">',
       '<span class="avatar" title="' + escapeHtml(job.assignee || 'Non assegnato') + '">' + escapeHtml(initialsFor(job.assignee || '')) + '</span>',
+      job.ambassador ? '<span class="ambassador" title="Ambasciatore: ' + escapeHtml(job.ambassador) + '">A ' + escapeHtml(initialsFor(job.ambassador)) + '</span>' : '',
       '<span class="due-date' + (isLate ? ' late' : '') + '">' + escapeHtml(formatItalianDate(job.due_date)) + '</span>',
       Number(job.visit_number || 1) > 1 ? '<span class="badge rework">R' + escapeHtml(Number(job.visit_number) - 1) + '</span>' : '',
       job.description ? '<span class="description-icon" title="Descrizione presente">note</span>' : '',
@@ -533,6 +543,7 @@
     document.getElementById('modal-client').value = job.client || '';
     document.getElementById('modal-description').value = job.description || '';
     document.getElementById('modal-assignee').value = job.assignee || '';
+    document.getElementById('modal-ambassador').value = job.ambassador || '';
     document.getElementById('modal-tag').value = job.tag || '';
     document.getElementById('modal-size').value = job.size_class || 'M';
     document.getElementById('modal-priority-class').value = coerceBool(job.priority_class_manual) ? (job.priority_class || '') : '';
@@ -543,6 +554,8 @@
     document.getElementById('modal-card-color').value = job.card_color || '';
     document.getElementById('card-modal-context').textContent = 'Modifica card';
     document.getElementById('modal-create-button').hidden = false;
+    document.getElementById('modal-create-button').textContent = 'Salva e chiudi';
+    renderChecklist(parseChecklist_(job.checklist_json));
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
@@ -557,6 +570,7 @@
     document.getElementById('modal-client').value = '';
     document.getElementById('modal-description').value = '';
     document.getElementById('modal-assignee').value = '';
+    document.getElementById('modal-ambassador').value = '';
     document.getElementById('modal-tag').value = '';
     document.getElementById('modal-size').value = 'M';
     document.getElementById('modal-priority-class').value = '';
@@ -568,6 +582,8 @@
     document.getElementById('card-modal-context').textContent = 'Nuova card';
     document.getElementById('modal-rework-history').hidden = true;
     document.getElementById('modal-create-button').hidden = false;
+    document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
+    renderChecklist([]);
     resetCustomValueFields();
     updateLivePriorityBadge();
     document.getElementById('card-modal').showModal();
@@ -576,6 +592,7 @@
 
   function fillModalSelects() {
     fillEditableSelect(document.getElementById('modal-assignee'), state.options.assignees || [], 'Non assegnato');
+    fillEditableSelect(document.getElementById('modal-ambassador'), state.options.ambassadors || [], 'Nessun ambasciatore');
     fillEditableSelect(document.getElementById('modal-tag'), state.options.tags || [], 'Senza tag');
     renderPrioritySelect(document.getElementById('modal-priority-class'), true);
   }
@@ -590,7 +607,7 @@
 
   function handleEditableSelectChange(event) {
     var select = event.target;
-    var kind = select.id === 'modal-assignee' ? 'assignee' : 'tag';
+    var kind = select.id === 'modal-assignee' ? 'assignee' : (select.id === 'modal-ambassador' ? 'ambassador' : 'tag');
     var customWrap = document.getElementById('modal-' + kind + '-custom-wrap');
     var customInput = document.getElementById('modal-' + kind + '-custom');
     var wantsCustom = select.value === '__add__' || select.value === 'Altro';
@@ -603,7 +620,7 @@
   }
 
   function resetCustomValueFields() {
-    ['assignee', 'tag'].forEach(function(kind) {
+    ['assignee', 'ambassador', 'tag'].forEach(function(kind) {
       document.getElementById('modal-' + kind + '-custom-wrap').hidden = true;
       document.getElementById('modal-' + kind + '-custom').value = '';
     });
@@ -623,6 +640,8 @@
   }
 
   function saveCardFromModal() {
+    var saveButton = document.getElementById('modal-create-button');
+    if (saveButton.disabled) { return; }
     var title = document.getElementById('modal-title').value.trim();
     if (!title) {
       showError(new Error('Inserisci il titolo del job'));
@@ -631,6 +650,8 @@
     var payload = modalPayload_();
     payload.title = title;
     state.pendingWrites++;
+    saveButton.disabled = true;
+    saveButton.textContent = 'Salvataggio...';
     var editing = Boolean(state.activeJob);
     prepareCustomOptions_(payload).then(function(prepared) {
       if (editing) {
@@ -657,6 +678,8 @@
       updateLastUpdated();
     }).catch(showError).finally(function() {
       state.pendingWrites--;
+      saveButton.disabled = false;
+      saveButton.textContent = state.activeJob ? 'Salva e chiudi' : 'Crea e chiudi';
     });
   }
 
@@ -665,6 +688,8 @@
       client: document.getElementById('modal-client').value,
       description: document.getElementById('modal-description').value,
       assignee: document.getElementById('modal-assignee').value,
+      ambassador: document.getElementById('modal-ambassador').value,
+      checklist_json: JSON.stringify(readChecklistFromDom_()),
       tag: document.getElementById('modal-tag').value,
       size_class: document.getElementById('modal-size').value,
       impact: document.getElementById('modal-impact').value,
@@ -679,7 +704,7 @@
   function prepareCustomOptions_(payload) {
     return Promise.resolve().then(function() {
       var requests = [];
-      [['assignee', 'assignees'], ['tag', 'tags']].forEach(function(pair) {
+      [['assignee', 'assignees'], ['ambassador', 'ambassadors'], ['tag', 'tags']].forEach(function(pair) {
         var field = pair[0];
         var selected = document.getElementById('modal-' + field).value;
         if (selected === '__add__' || selected === 'Altro') {
@@ -690,6 +715,41 @@
         }
       });
       return Promise.all(requests).then(function() { return payload; });
+    });
+  }
+
+  function parseChecklist_(value) {
+    try { var parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : []; } catch (err) { return []; }
+  }
+
+  function renderChecklist(items) {
+    var root = document.getElementById('modal-checklist');
+    root.innerHTML = '';
+    items.forEach(function(item) {
+      var row = document.createElement('label');
+      row.className = 'checklist-item';
+      row.innerHTML = '<input type="checkbox"><span></span><button type="button" aria-label="Rimuovi">x</button>';
+      row.querySelector('input').checked = coerceBool(item.done);
+      row.querySelector('span').textContent = item.text || '';
+      row.querySelector('button').onclick = function() { row.remove(); };
+      root.appendChild(row);
+    });
+  }
+
+  function addChecklistItem() {
+    var input = document.getElementById('modal-checklist-new');
+    var text = input.value.trim();
+    if (!text) { return; }
+    var items = readChecklistFromDom_();
+    items.push({ text: text, done: false });
+    renderChecklist(items);
+    input.value = '';
+    input.focus();
+  }
+
+  function readChecklistFromDom_() {
+    return Array.prototype.map.call(document.querySelectorAll('#modal-checklist .checklist-item'), function(row) {
+      return { text: row.querySelector('span').textContent, done: row.querySelector('input').checked };
     });
   }
 
@@ -863,7 +923,7 @@
   }
 
   function updateOptionsFromJob(job) {
-    [['assignees', job.assignee], ['tags', job.tag]].forEach(function(pair) {
+    [['assignees', job.assignee], ['ambassadors', job.ambassador], ['tags', job.tag]].forEach(function(pair) {
       if (pair[1] && state.options[pair[0]].indexOf(pair[1]) === -1) {
         state.options[pair[0]].push(pair[1]);
       }

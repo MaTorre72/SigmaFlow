@@ -123,6 +123,7 @@ function runAllTests() {
     testPriorityHelpers,
     testPriorityUpdate,
     testCardColor,
+    testAmbassadorAndChecklist,
     testEditableOptions,
     testDynamicColumnsAndOptions,
     testMetrics,
@@ -309,6 +310,27 @@ function testCardColor() {
     assertEquals_('#DDEBF7', created.job.card_color, 'colore in creazione');
     var updated = updateJob({ job_id: created.job_id, card_color: '#E2F0D9' });
     assertEquals_('#E2F0D9', updated.data.job.card_color, 'colore aggiornato');
+  });
+}
+
+function testAmbassadorAndChecklist() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    updateOptionList({ kind: 'ambassadors', operation: 'add', value: 'Referente Cliente' });
+    var created = addJob({
+      title: 'Progetto con referente',
+      client: 'Cliente prova',
+      ambassador: 'Referente Cliente',
+      checklist_json: JSON.stringify([{ text: 'Controllo documenti', done: false }])
+    }).data;
+    assertEquals_('Referente Cliente', created.job.ambassador, 'ambasciatore in creazione');
+    var updated = updateJob({
+      job_id: created.job_id,
+      checklist_json: JSON.stringify([{ text: 'Controllo documenti', done: true }])
+    });
+    var checklist = JSON.parse(updated.data.job.checklist_json);
+    assertTrue_(checklist[0].done, 'checklist completata');
+    assertTrue_(getBoard().data.options.ambassadors.indexOf('Referente Cliente') !== -1, 'ambasciatore nel menu');
   });
 }
 

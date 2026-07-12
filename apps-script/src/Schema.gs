@@ -4,6 +4,7 @@ var JOB_HEADERS = [
   'visit_number',
   'title',
   'client',
+  'ambassador',
   'status',
   'assignee',
   'tag',
@@ -26,7 +27,8 @@ var JOB_HEADERS = [
   'is_rework',
   'rework_cause',
   'notes',
-  'card_color'
+  'card_color',
+  'checklist_json'
 ];
 
 var CASE_HEADERS = [
@@ -49,7 +51,14 @@ function setupSigmaFlow() {
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
   migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+  PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SCHEMA_VERSION, SIGMAFLOW.SCHEMA_VERSION);
   return ok_({ spreadsheetId: ss.getId(), spreadsheetUrl: ss.getUrl() });
+}
+
+function ensureCurrentSchema_() {
+  var properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty(SIGMAFLOW.PROP_SCHEMA_VERSION) === SIGMAFLOW.SCHEMA_VERSION) { return; }
+  setupSigmaFlow();
 }
 
 function migrateJobDefaults_(sheet) {
@@ -144,6 +153,7 @@ function seedDefaultConfig_(sheet) {
     size_XL_days: 'Giorni medi attesi per taglia XL',
     columns_json: 'Configurazione colonne board',
     assignees_json: 'Assegnatari disponibili in formato JSON',
+    ambassadors_json: 'Ambasciatori disponibili in formato JSON',
     tags_json: 'Tag disponibili in formato JSON',
     scenarios_json: 'Scenari futuri predisposti in formato JSON',
     column_backlog: 'Etichetta colonna backlog',
@@ -157,7 +167,7 @@ function seedDefaultConfig_(sheet) {
     var value = defaultConfigValue_(key);
     if (!existing[key]) {
       sheet.appendRow([key, value, descriptions[key] || '']);
-    } else if (key === 'columns_json' || key === 'assignees_json' || key === 'tags_json' || key === 'scenarios_json') {
+    } else if (key === 'columns_json' || key === 'assignees_json' || key === 'ambassadors_json' || key === 'tags_json' || key === 'scenarios_json') {
       ensureConfigValueIfEmpty_(sheet, key, value);
     }
   });

@@ -44,12 +44,13 @@
     <button type="button" id="modal-close-button" class="modal-close" aria-label="Chiudi">x</button>
     <section class="modal-main">
       <h2 id="card-modal-context" class="modal-context">Modifica card</h2>
-      <input id="modal-title" class="modal-title-input" name="title" placeholder="Titolo job">
-      <input id="modal-client" name="client" placeholder="Cliente">
-      <textarea id="modal-description" name="description" rows="8" placeholder="Aggiungi descrizione o note operative..."></textarea>
-      <section class="activity-panel">
-        <h3>Attivita'</h3>
-        <p>Checklist e cronologia saranno aggiunte nella fase successiva.</p>
+      <input id="modal-client" class="modal-client-input" name="client" placeholder="Nome cliente">
+      <input id="modal-title" class="modal-title-input" name="title" placeholder="Nome progetto">
+      <textarea id="modal-description" name="description" rows="12" placeholder="Aggiungi note operative..."></textarea>
+      <section class="checklist-panel">
+        <h3>Checklist</h3>
+        <div id="modal-checklist" class="checklist-list"></div>
+        <div class="checklist-composer"><input id="modal-checklist-new" placeholder="Nuovo controllo o promemoria"><button id="modal-checklist-add" type="button">Aggiungi</button></div>
       </section>
     </section>
     <aside class="modal-sidebar">
@@ -58,6 +59,12 @@
       </label>
       <label id="modal-assignee-custom-wrap" class="custom-value-field" hidden>Nuovo assegnatario
         <input id="modal-assignee-custom" autocomplete="off">
+      </label>
+      <label>Ambasciatore
+        <select id="modal-ambassador" name="ambassador"></select>
+      </label>
+      <label id="modal-ambassador-custom-wrap" class="custom-value-field" hidden>Nuovo ambasciatore
+        <input id="modal-ambassador-custom" autocomplete="off">
       </label>
       <label>Tag
         <select id="modal-tag" name="tag"></select>
@@ -110,7 +117,7 @@
         Fatturato
       </label>
       <section id="modal-rework-history" class="rework-history" hidden></section>
-      <button type="button" id="modal-create-button" class="primary-button">Salva</button>
+      <button type="button" id="modal-create-button" class="primary-button">Salva e chiudi</button>
       <button type="button" class="archive-button" disabled>Archivia</button>
     </aside>
   </form>
@@ -122,6 +129,7 @@
     <label>Elenco
       <select id="options-manager-kind">
         <option value="assignees">Assegnatari</option>
+        <option value="ambassadors">Ambasciatori</option>
         <option value="tags">Tag</option>
       </select>
     </label>

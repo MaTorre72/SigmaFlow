@@ -73,6 +73,7 @@ function routeAction_(params) {
 }
 
 function getBoard() {
+  ensureCurrentSchema_();
   var jobs = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   var columns = readColumns_();
   var board = {};
@@ -150,6 +151,7 @@ function addJob(params) {
     visit_number: Number(params.visit_number || 1),
     title: title,
     client: params.client || '',
+    ambassador: params.ambassador || '',
     status: status,
     assignee: params.assignee || '',
     tag: params.tag || '',
@@ -172,7 +174,8 @@ function addJob(params) {
     is_rework: Number(params.visit_number || 1) > 1,
     rework_cause: params.rework_cause || '',
     notes: params.notes || '',
-    card_color: normalizeCardColor_(params.card_color)
+    card_color: normalizeCardColor_(params.card_color),
+    checklist_json: normalizeChecklistJson_(params.checklist_json)
   };
 
   sheet.appendRow(jobToRow_(job));
@@ -240,7 +243,7 @@ function updateJob(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
-  ['title', 'client', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'notes', 'card_color'].forEach(function(field) {
+  ['title', 'client', 'ambassador', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'notes', 'card_color', 'checklist_json'].forEach(function(field) {
     if (params[field] !== undefined && headers[field]) {
       job[field] = params[field];
     }
@@ -251,6 +254,9 @@ function updateJob(params) {
   }
   if (params.card_color !== undefined) {
     job.card_color = normalizeCardColor_(params.card_color);
+  }
+  if (params.checklist_json !== undefined) {
+    job.checklist_json = normalizeChecklistJson_(params.checklist_json);
   }
 
   if (params.invoiced !== undefined) {
@@ -417,6 +423,7 @@ function markRework(params) {
     case_id: source.case_id,
     visit_number: nextVisit,
     assignee: params.assignee || source.assignee,
+    ambassador: params.ambassador || source.ambassador,
     tag: params.tag || source.tag,
     size_class: params.size_class || source.size_class || 'M',
     priority_class: params.priority_class || source.priority_class,
@@ -511,15 +518,18 @@ function priorityFields_(params) {
 function boardOptions_(jobs) {
   var config = readConfig_();
   var assignees = parseJsonArray_(config.assignees_json);
+  var ambassadors = parseJsonArray_(config.ambassadors_json);
   var tags = parseJsonArray_(config.tags_json);
 
   jobs.forEach(function(job) {
     assignees.push(job.assignee);
+    ambassadors.push(job.ambassador);
     tags.push(job.tag);
   });
 
   return {
     assignees: orderedUniqueValues_(assignees),
+    ambassadors: orderedUniqueValues_(ambassadors),
     tags: orderedUniqueValues_(tags),
     sizes: Object.keys(SIGMAFLOW.SIZE_POINTS),
     card_colors: SIGMAFLOW.CARD_COLORS
@@ -560,15 +570,25 @@ function updateOptionList(params) {
 
 function optionConfigKey_(kind) {
   if (kind === 'assignees') { return 'assignees_json'; }
+  if (kind === 'ambassadors') { return 'ambassadors_json'; }
   if (kind === 'tags') { return 'tags_json'; }
   throw new Error('Elenco non supportato: ' + kind);
 }
 
 function optionUsageCount_(kind, value) {
-  var field = kind === 'assignees' ? 'assignee' : 'tag';
+  var field = kind === 'assignees' ? 'assignee' : (kind === 'ambassadors' ? 'ambassador' : 'tag');
   return readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(job) {
     return String(job[field] || '') === value;
   }).length;
+}
+
+function normalizeChecklistJson_(value) {
+  var items;
+  try { items = typeof value === 'string' ? JSON.parse(value || '[]') : (value || []); } catch (err) { items = []; }
+  if (!Array.isArray(items)) { items = []; }
+  return JSON.stringify(items.map(function(item) {
+    return { text: String(item && item.text || '').trim(), done: coerceBoolean_(item && item.done) };
+  }).filter(function(item) { return item.text; }));
 }
 
 function normalizeCardColor_(value) {

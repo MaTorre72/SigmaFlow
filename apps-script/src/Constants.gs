@@ -1,6 +1,8 @@
 var SIGMAFLOW = {
   TZ: 'Europe/Rome',
   PROP_SPREADSHEET_ID: 'SIGMAFLOW_SPREADSHEET_ID',
+  PROP_SCHEMA_VERSION: 'SIGMAFLOW_SCHEMA_VERSION',
+  SCHEMA_VERSION: '2',
   DEFAULT_SPREADSHEET_ID: '1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q',
   DEFAULT_TEST_SPREADSHEET_ID: '15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g',
   PROP_TEST_SPREADSHEET_ID: 'SIGMAFLOW_TEST_SPREADSHEET_ID',
@@ -75,6 +77,7 @@ var SIGMAFLOW = {
     size_XL_days: 8,
     columns_json: '',
     assignees_json: '["Alessandra","Giovanni D","Marco","Altro"]',
+    ambassadors_json: '[]',
     tags_json: '["AIA","ADR","VIA","rifiuti","acque","aria","suolo","rumore"]',
     scenarios_json: '',
     column_backlog: 'Backlog',
