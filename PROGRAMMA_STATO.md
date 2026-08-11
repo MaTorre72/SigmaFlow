@@ -1,42 +1,43 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-11 21:29
+Aggiornato: 2026-08-11 21:40
 
-Fase corrente: B
-Titolo: Schema e helpers
+Fase corrente: C
+Titolo: addActivityEvent + getActivityLog
 Stato: COMPLETATA
 
 Criteri di accettazione:
-[x] JOB_HEADERS aggiornato, activity_log_json in fondo all'array (Schema.gs:33)
-[x] ActivityLog.gs creato con tutte e sei le funzioni
-[x] clasp push riuscito senza errori
-[x] parseActivityLog_('') restituisce [] senza eccezioni — verificato con node
-[x] parseActivityLog_('json-non-valido') restituisce [] senza eccezioni — verificato con node
+[x] addActivityEvent con params validi restituisce ok: true — verificato con harness
+[x] addActivityEvent con ts nel futuro restituisce hardErrors — verificato con harness
+[x] addActivityEvent con sequenceWarnings e force:false restituisce requiresForce:true senza scrivere — verificato con harness
+[x] addActivityEvent con force:true scrive l'evento nel foglio — verificato con harness
+[x] getActivityLog restituisce il log ordinato per ts — verificato con harness
 
-Prossima fase: C
+Prossima fase: D
 
-Note:
-Fase A: trattata come approvata sulla base della richiesta esplicita di
-Marco di avviare "tutte le fasi successive" in autonomia notturna via
-loop locale. Fase F e Fase J restano hard-stop 🔴 UMANO invariati, nessuna
-eccezione: nessun merge su main, nessuna migrazione dati, nessun deploy
-senza conferma esplicita.
+Note operative permanenti (valide per tutte le fasi successive fino a F/J):
+- Gate umani reali del programma: SOLO Fase F e Fase J (Fase H e' AUTO,
+  nonostante un riferimento diverso in una richiesta precedente di Marco:
+  seguo il programma scritto, che e' la fonte di verita').
+- Nessuna ulteriore richiesta di conferma a Marco fino a Fase F o Fase J,
+  o fino a un BLOCCATA irrisolvibile.
+- Una fase per trigger, non incatenate nello stesso turno: ogni fase si
+  ferma e committa, il trigger successivo (CronCreate, ogni ~2 ore)
+  esegue la fase seguente.
+- clasp run resta bloccato (manca associazione a progetto GCP standard).
+  Verifica reale delle fasi che richiedono comportamento Apps Script
+  tramite harness Node in
+  C:\Users\Marco\AppData\Local\Temp\claude\...\scratchpad\gas-harness.js
+  (mock di SpreadsheetApp/PropertiesService/Utilities/LockService, carica
+  i file .gs reali via vm e li esegue). Non sostituisce runAllTestsAndLog
+  nel vero ambiente GAS — quella verifica resta necessaria prima del
+  deploy in Fase J, gate umano.
 
-Fase B: generateId_() della specifica rinominata generateActivityEventId_()
-in ActivityLog.gs per evitare collisione con generateId_(prefix) gia'
-esistente in Utils.gs (usato per job_id/case_id) — una seconda definizione
-con lo stesso nome l'avrebbe sovrascritta silenziosamente. Deviazione
-documentata nei commenti del file.
+Note specifiche Fase C:
+Bug reale trovato e corretto grazie all'harness: i confronti tra
+timestamp usavano l'operatore stringa (<, >) invece di date reali —
+falliva con timestamp di formato diverso (offset +02:00 vs Z). Aggiunta
+compareTs_ in Utils.gs, usata ora in tutti i confronti timestamp
+dell'activity log (ActivityLog.gs e Kanban.gs).
 
-La specifica dice "cinque funzioni" ma ne elenca sei (1-6): implementate
-tutte e sei, dato che addActivityEvent (Fase C) e deleteActivityEvent
-(Fase D) usano sia validateSequence_ sia checkStructuralAlignment_.
-
-validateSequence_ e checkStructuralAlignment_ toccano API Apps Script
-(readColumns_) quindi non sono testabili in Node puro come parseActivityLog_
-— la loro correttezza verra' esercitata dai test dedicati in Fase G.
-L'interpretazione di "ATTESA_SENZA_USCITA" (rientro nella stessa colonna
-stand_by senza uscita nel mezzo) e' una lettura ragionevole ma non
-l'unica possibile della specifica — da verificare in Fase G.
-
-Push effettuato su Web App (versione HEAD/dev), non ancora un deploy
-pubblico — resta per la Fase J.
+Push su Web App fatto (versione HEAD/dev). Commit e push del branch
+codex/activity-log-backend fatti.
