@@ -54,6 +54,8 @@ function routeAction_(params) {
     addJob: addJob,
     moveJob: moveJob,
     updateJob: updateJob,
+    addActivityEvent: addActivityEvent,
+    getActivityLog: getActivityLog,
     correctJobTimestamps: correctJobTimestamps,
     deleteJob: deleteJob,
     updateColumnLabel: updateColumnLabel,
@@ -292,6 +294,105 @@ function updateJob(params) {
 
   writeJobToRow_(sheet, row, headers, job);
   return ok_({ job_id: params.job_id, job: job });
+}
+
+// Costruisce l'evento candidato solo con i campi effettivamente forniti,
+// per non riempire il log di chiavi vuote/undefined.
+function buildActivityEventCandidate_(params, log) {
+  var candidate = {
+    id: generateActivityEventId_(),
+    ts: params.ts,
+    type: params.type,
+    source: 'manual',
+    from: computeFrom_(log, params.ts)
+  };
+  if (params.type === 'move') {
+    candidate.to = params.to;
+  }
+  if (params.type === 'correction') {
+    candidate.reason = params.reason;
+  }
+  ['note', 'field', 'old', 'new'].forEach(function(key) {
+    if (params[key] !== undefined) {
+      candidate[key] = params[key];
+    }
+  });
+  return candidate;
+}
+
+function addActivityEvent(params) {
+  var jobId = requireParam_(params, 'job_id');
+  requireParam_(params, 'type');
+  requireParam_(params, 'ts');
+
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Job non trovato: ' + jobId);
+  }
+
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  var log = parseActivityLog_(job.activity_log_json);
+  var candidate = buildActivityEventCandidate_(params, log);
+
+  var validation = validateSequence_(log, candidate);
+  if (validation.hardErrors.length) {
+    return ok_({ ok: false, hardErrors: validation.hardErrors });
+  }
+
+  if (validation.sequenceWarnings.length && !coerceBoolean_(params.force)) {
+    return ok_({ ok: false, requiresForce: true, warnings: validation.sequenceWarnings });
+  }
+
+  var structuralWarnings = checkStructuralAlignment_(job, candidate);
+  var alignFields = params.align_fields || {};
+  var uncoveredWarnings = structuralWarnings.filter(function(warning) {
+    return alignFields[warning.field] === undefined;
+  });
+  if (uncoveredWarnings.length) {
+    return ok_({ ok: false, alignmentRequired: true, structuralWarnings: structuralWarnings });
+  }
+
+  log.push(candidate);
+  log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+
+  Object.keys(alignFields).forEach(function(field) {
+    if (JOB_HEADERS.indexOf(field) !== -1) {
+      job[field] = alignFields[field];
+    }
+  });
+
+  job.activity_log_json = serializeActivityLog_(log);
+  writeJobToRow_(sheet, row, headers, job);
+
+  return ok_({ ok: true, job_id: jobId, event: candidate });
+}
+
+function getActivityLog(params) {
+  var jobId = requireParam_(params, 'job_id');
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Job non trovato: ' + jobId);
+  }
+
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  var log = parseActivityLog_(job.activity_log_json);
+
+  // Ricalcola "from" per ogni evento move al momento della lettura, cosi'
+  // resta coerente anche su dati migrati senza from o dopo modifiche/cancellazioni.
+  var recalculated = log.map(function(event) {
+    if (event.type !== 'move') {
+      return event;
+    }
+    var updated = Object.assign({}, event);
+    updated.from = computeFrom_(log, event.ts);
+    return updated;
+  });
+
+  return ok_({ job_id: jobId, log: recalculated });
 }
 
 function correctJobTimestamps(params) {

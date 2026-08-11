@@ -27,7 +27,7 @@ function parseActivityLog_(rawValue) {
   }
 
   return events.slice().sort(function(a, b) {
-    return a.ts < b.ts ? -1 : (a.ts > b.ts ? 1 : 0);
+    return compareTs_(a.ts, b.ts);
   });
 }
 
@@ -39,7 +39,7 @@ function serializeActivityLog_(events) {
 // l'ultimo evento 'move' con timestamp precedente a insertedTs.
 function computeFrom_(events, insertedTs) {
   var previousMoves = events.filter(function(event) {
-    return event.type === 'move' && event.ts < insertedTs;
+    return event.type === 'move' && compareTs_(event.ts, insertedTs) < 0;
   });
 
   if (!previousMoves.length) {
@@ -47,7 +47,7 @@ function computeFrom_(events, insertedTs) {
   }
 
   var latest = previousMoves.reduce(function(best, event) {
-    return (!best || event.ts > best.ts) ? event : best;
+    return (!best || compareTs_(event.ts, best.ts) > 0) ? event : best;
   }, null);
 
   return latest ? latest.to : null;
@@ -60,7 +60,7 @@ function validateSequence_(events, candidate) {
   var hardErrors = [];
   var sequenceWarnings = [];
 
-  if (candidate.ts > nowIso_()) {
+  if (compareTs_(candidate.ts, nowIso_()) > 0) {
     hardErrors.push('TS_IN_FUTURO');
   }
 
@@ -80,7 +80,7 @@ function validateSequence_(events, candidate) {
   }
 
   var merged = events.concat([candidate]).slice().sort(function(a, b) {
-    return a.ts < b.ts ? -1 : (a.ts > b.ts ? 1 : 0);
+    return compareTs_(a.ts, b.ts);
   });
   var moves = merged.filter(function(event) {
     return event.type === 'move';
@@ -141,16 +141,16 @@ function checkStructuralAlignment_(job, candidate) {
     var columns = readColumns_();
     var column = findColumn_(columns, candidate.to);
 
-    if (column && column.role === 'wip' && (!job.start_ts || job.start_ts !== candidate.ts)) {
+    if (column && column.role === 'wip' && (!job.start_ts || compareTs_(job.start_ts, candidate.ts) !== 0)) {
       warnings.push({ field: 'start_ts', currentValue: job.start_ts || '', suggestedValue: candidate.ts });
     }
 
-    if (column && column.role === 'done' && (!job.done_ts || job.done_ts !== candidate.ts)) {
+    if (column && column.role === 'done' && (!job.done_ts || compareTs_(job.done_ts, candidate.ts) !== 0)) {
       warnings.push({ field: 'done_ts', currentValue: job.done_ts || '', suggestedValue: candidate.ts });
     }
   }
 
-  if (job.arrival_ts && candidate.ts < job.arrival_ts) {
+  if (job.arrival_ts && compareTs_(candidate.ts, job.arrival_ts) < 0) {
     warnings.push({ field: 'arrival_ts', currentValue: job.arrival_ts, suggestedValue: candidate.ts });
   }
 
