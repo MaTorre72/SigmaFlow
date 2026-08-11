@@ -551,11 +551,14 @@ function runSingleTest_(testFn) {
 }
 
 function withTestSpreadsheet_(callback) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
   var props = PropertiesService.getScriptProperties();
   var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
   var testId = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
 
   if (!testId) {
+    lock.releaseLock();
     throw new Error('Script Property mancante: ' + SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
   }
 
@@ -568,6 +571,7 @@ function withTestSpreadsheet_(callback) {
     } else {
       props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
     }
+    lock.releaseLock();
   }
 }
 
@@ -616,6 +620,7 @@ function appendCompletedJob_(ss, data) {
     data.visit_number || 1,
     data.title,
     data.client || 'Cliente test',
+    data.ambassador || '',
     'done',
     'tester@sigmapiu.it',
     'test',

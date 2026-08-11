@@ -54,6 +54,7 @@ function routeAction_(params) {
     addJob: addJob,
     moveJob: moveJob,
     updateJob: updateJob,
+    correctJobTimestamps: correctJobTimestamps,
     deleteJob: deleteJob,
     updateColumnLabel: updateColumnLabel,
     addColumn: addColumn,
@@ -164,7 +165,7 @@ function addJob(params) {
     priority_score: priority.priority_score,
     description: params.description || '',
     due_date: params.due_date || '',
-    arrival_ts: targetColumn.role === 'backlog' ? now : '',
+    arrival_ts: now,
     start_ts: targetColumn.role === 'wip' ? now : '',
     done_ts: '',
     invoiced: coerceBoolean_(params.invoiced),
@@ -175,7 +176,8 @@ function addJob(params) {
     rework_cause: params.rework_cause || '',
     notes: params.notes || '',
     card_color: normalizeCardColor_(params.card_color),
-    checklist_json: normalizeChecklistJson_(params.checklist_json)
+    checklist_json: normalizeChecklistJson_(params.checklist_json),
+    correction_log_json: '[]'
   };
 
   sheet.appendRow(jobToRow_(job));
@@ -290,6 +292,69 @@ function updateJob(params) {
 
   writeJobToRow_(sheet, row, headers, job);
   return ok_({ job_id: params.job_id, job: job });
+}
+
+function correctJobTimestamps(params) {
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var jobId = requireParam_(params, 'job_id');
+  var reason = String(params.reason || '').trim();
+  if (!reason) {
+    throw new Error('Il motivo della correzione e obbligatorio');
+  }
+
+  var correctableFields = ['arrival_ts', 'start_ts', 'done_ts'];
+  var providedFields = correctableFields.filter(function(field) {
+    return params[field] !== undefined && params[field] !== '';
+  });
+  if (!providedFields.length) {
+    throw new Error('Specificare almeno uno tra arrival_ts, start_ts, done_ts');
+  }
+
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Job non trovato: ' + jobId);
+  }
+
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  var log = parseJsonArray_(job.correction_log_json);
+  var correctionTs = nowIso_();
+
+  providedFields.forEach(function(field) {
+    var newValue = params[field];
+    if (!isValidIso8601_(newValue)) {
+      throw new Error('Formato data non valido per ' + field + ': ' + newValue);
+    }
+    log.push({ ts: correctionTs, field: field, old: job[field] || '', new: newValue, reason: reason });
+    job[field] = newValue;
+  });
+
+  if (job.arrival_ts && job.start_ts && new Date(job.arrival_ts).getTime() > new Date(job.start_ts).getTime()) {
+    throw new Error('arrival_ts non puo essere successivo a start_ts');
+  }
+  if (job.start_ts && job.done_ts && new Date(job.start_ts).getTime() > new Date(job.done_ts).getTime()) {
+    throw new Error('start_ts non puo essere successivo a done_ts');
+  }
+  if (job.arrival_ts && job.done_ts && new Date(job.arrival_ts).getTime() > new Date(job.done_ts).getTime()) {
+    throw new Error('arrival_ts non puo essere successivo a done_ts');
+  }
+
+  if (job.done_ts) {
+    if (job.start_ts) {
+      job.service_time_d = diffDays(job.start_ts, job.done_ts);
+    }
+    if (job.arrival_ts) {
+      job.lead_time_d = diffDays(job.arrival_ts, job.done_ts);
+    }
+    if (job.arrival_ts && job.start_ts) {
+      job.wait_time_d = diffDays(job.arrival_ts, job.start_ts);
+    }
+  }
+
+  job.correction_log_json = JSON.stringify(log);
+  writeJobToRow_(sheet, row, headers, job);
+
+  return ok_({ job_id: jobId, corrections_applied: providedFields.length, job: job });
 }
 
 function deleteJob(params) {

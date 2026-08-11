@@ -28,7 +28,8 @@ var JOB_HEADERS = [
   'rework_cause',
   'notes',
   'card_color',
-  'checklist_json'
+  'checklist_json',
+  'correction_log_json'
 ];
 
 var CASE_HEADERS = [
