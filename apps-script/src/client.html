@@ -617,6 +617,13 @@
       loadActivityLogForModal_();
     } else {
       closeActivityForm_();
+      // Un evento di Cronologia con align_fields puo' aver aggiornato
+      // arrival_ts/start_ts/done_ts su state.activeJob senza un reload
+      // completo del modal: rinfresca i campi di "Correggi timestamp"
+      // cosi' restano coerenti anche tornando su Informazioni.
+      if (state.activeJob) {
+        fillTimestampCorrectionFields(state.activeJob);
+      }
     }
   }
 
