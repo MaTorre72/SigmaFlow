@@ -237,6 +237,28 @@ function moveJob(params) {
   writeJobToRow_(sheet, row, headers, job);
   refreshCaseVisitCount_(getSpreadsheet_(), job.case_id);
 
+  // Evento automatico per l'activity log: scrittura diretta (non passa da
+  // addActivityEvent) per evitare la doppia validazione su un movimento
+  // che il sistema ha gia' autorizzato spostando la card.
+  var autoEvent = {
+    id: generateActivityEventId_(),
+    ts: now,
+    type: 'move',
+    source: 'auto',
+    to: targetColumn.id,
+    from: sourceColumn.id,
+    note: ''
+  };
+  if (job.is_rework) {
+    autoEvent.is_rework = true;
+  }
+
+  var rawLog = sheet.getRange(row, headers.activity_log_json).getValue();
+  var log = parseActivityLog_(rawLog);
+  log.push(autoEvent);
+  log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+  sheet.getRange(row, headers.activity_log_json).setValue(serializeActivityLog_(log));
+
   return ok_({ job_id: params.job_id, status: status, job: job });
 }
 
