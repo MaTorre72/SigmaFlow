@@ -1,51 +1,59 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 10:14
+Aggiornato: 2026-08-12 14:06
 
-Fase corrente: H
-Titolo: Frontend — struttura base
+Fase corrente: I
+Titolo: Frontend — form e warning
 Stato: COMPLETATA (in attesa di conferma smoke test da Marco)
 
 Criteri di accettazione:
-[x] Modal card si apre senza errori JavaScript — verificato staticamente (sintassi JS valida, tutti gli ID referenziati esistono), NON con un vero browser (vedi nota sotto)
-[x] Tab "Informazioni" mostra tutti i campi esistenti invariati
-[x] Tab "Cronologia" carica e mostra eventi dal log (lazy, solo al click sul tab)
-[x] Badge AUTO/MANUALE visibili e corretti
-[x] Checklist non piu' visibile nell'UI
-[ ] clasp push e smoke test: card si apre, tab funzionano — clasp push fatto e verificato con pull+diff; SMOKE TEST REALE DA FARE DA MARCO
+[x] Inserimento evento move valido -> appare nel log con badge MANUALE — implementato, verifica statica ok
+[x] Data futura -> blocco inline immediato — implementato (validazione live sull'input ts)
+[x] Warning sequenza -> dialog HTML custom con descrizione chiara -> conferma -> evento salvato — implementato
+[x] Warning allineamento -> dialog con valori corretti -> scelta utente rispettata — implementato
+[x] Modifica evento manuale -> valori precompilati correttamente — implementato
+[x] Eliminazione evento manuale -> scompare dal log — implementato
+[x] Evento auto -> nessuna icona modifica/cancellazione — implementato (invariato da Fase H)
+[ ] Smoke test UI reale sui 12 punti della specifica frontend — DA FARE DA MARCO (stesso limite di Fase H: nessuna sessione Google autenticata disponibile qui)
 
-Prossima fase: I (in attesa di conferma smoke test)
+Prossima fase: J (deploy e chiusura — gate umano)
 
-NOTA IMPORTANTE — limite di questa sessione: il browser disponibile qui
-non ha una sessione Google autenticata come Marco (serve un account
-sigmapiu.it per accedere alla Web App, ad accesso limitato al dominio).
-Non e' stato possibile aprire davvero la board e cliccare sui tab. Ho
-verificato staticamente tutto cio' che potevo (sintassi JS valida via
-node, nessun riferimento residuo agli ID della checklist rimossa, tutti
-gli ID dei nuovi elementi referenziati in client.html esistono in
-board.html) ma questo NON sostituisce un vero smoke test nel browser.
+COSA DEVE FARE MARCO PER CONFERMARE QUESTA FASE (12 punti, specifica
+frontend, sezione "Smoke test UI"):
+1. Aprire una card esistente — checklist non visibile (gia' confermato in Fase H)
+2. Aprire Cronologia — "Nessun evento" o lista eventi (gia' confermato)
+3. Aggiungere un evento Spostamento con data valida -> appare con badge MANUALE
+4. Provare una data futura -> blocco inline
+5. Aggiungere un evento che causa warning di sequenza -> dialog con descrizione chiara
+6. Confermare il dialog -> evento salvato
+7. Aggiungere un evento che impatta start_ts -> dialog di allineamento con valori corretti
+8. Scegliere "Aggiorna" -> start_ts aggiornato nel foglio TEST
+9. Modificare un evento manuale -> valori precompilati
+10. Eliminare un evento manuale -> scompare dal log
+11. Provare modifica/eliminazione su un evento AUTO -> icone assenti
+12. Trascinare una card (moveJob) -> evento AUTO compare in Cronologia
 
-COSA DEVE FARE MARCO: aprire la Web App in ambiente TEST, aprire una
-card, verificare che compaiano i tab "Informazioni"/"Cronologia" in
-cima al modal, che cliccando "Cronologia" carichi la lista eventi (o
-mostri "Nessun evento registrato."), che la checklist non compaia piu'
-da nessuna parte, e controllare la console del browser (F12) per
-eventuali errori JavaScript. Se tutto ok, confermare per procedere alla
-Fase I. Se qualcosa non va, descrivere cosa: correggo prima di
-richiedere una nuova verifica.
-
-NOTA STRUTTURALE sulla routine cloud: da questa fase in poi il lavoro
-e' su codex/activity-log-frontend (creato da codex/activity-log-backend,
-non da main, perche' il frontend usa le action addActivityEvent/
-getActivityLog che esistono solo li'). La routine cloud
-trig_01WrQXQAv2a2Rw8DfhmwGRNG e' pero' configurata sul branch
-codex/activity-log-backend: NON vedra' questo aggiornamento di
-PROGRAMMA_STATO.md (che vive ora sul branch frontend) finche' non la
-riconfiguro sul branch giusto, o Marco non mi chiede di farlo.
+Se tutti i 12 punti sono ok, scrivere "procedi con fase J" (o semplicemente
+confermare) per sbloccare il gate finale. Se qualcosa non va, descrivere
+cosa: mi fermo e correggo.
 
 Note operative permanenti (invariate):
-- Gate umani reali del programma: SOLO Fase F (gia' superata) e Fase J.
-- clasp run resta bloccato — verifica di logica GAS pura via harness
-  Node in apps-script/test-harness/gas-harness.js; per il frontend
-  (DOM/JS nel browser) non esiste un harness equivalente in questa
-  sessione, da qui il bisogno di conferma umana per gli smoke test UI.
+- Gate umani reali del programma: Fase F (gia' superata) e Fase J (prossima).
+- Routine cloud attiva su codex/activity-log-backend (trig_01WrQXQAv2a2Rw8DfhmwGRNG)
+  — NON vede questo aggiornamento (vive su codex/activity-log-frontend).
+  Da riconfigurare se si vuole che la routine prosegua in autonomia oltre
+  questo punto; al momento il lavoro procede su richiesta diretta di Marco.
 - Push sempre verificato con clasp pull + diff.
+
+Note specifiche Fase I:
+- Deviazione da specifica: layout desktop a tab invece di colonne
+  affiancate — decisione presa in Fase H, confermata funzionante da
+  Marco dopo il fix del bug di navigazione, non toccata qui.
+- "old" per le correzioni via form e' sempre letto da state.activeJob[field]
+  al momento dell'invio (sia in creazione sia in modifica) — la spec non
+  specifica esplicitamente il comportamento in modifica; interpretazione
+  scelta per semplicita' e coerenza.
+- Dopo un salvataggio con align_fields, i campi aggiornati vengono
+  applicati anche otticamente a state.activeJob lato client (la risposta
+  di addActivityEvent/updateActivityEvent non include l'intero job
+  aggiornato, solo l'evento) — cosi' riaprendo il form o il tab
+  Informazioni i valori restano coerenti senza un reload completo.
