@@ -1,5 +1,27 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 07:45
+Aggiornato: 2026-08-12 08:55
+
+INCIDENTE RISOLTO (2026-08-12 ~08:50): Marco ha segnalato di non trovare
+ActivityLog.gs nell'editor Apps Script. Diagnosi iniziale sbagliata da
+parte mia (avevo detto "e' solo cache dell'editor, ricarica" — non era
+vero). Verifica con clasp pull in una cartella pulita: il codice delle
+Fasi B-F NON era davvero sul server, nonostante ogni "clasp push" di
+questa sessione avesse riportato successo ("Pushed 13 files") per tutta
+la notte. Causa esatta non accertata con certezza (nessun errore
+visibile nell'output di clasp durante la notte; possibile problema
+transitorio di token/quota lato Google non segnalato da clasp). Un push
+di prova con un commento marcatore ha confermato che ORA il meccanismo
+funziona di nuovo: il marcatore e' comparso in un pull immediato. Fatta
+poi una verifica completa (non a campione): diff file per file tra tutti
+i sorgenti locali e una copia fresca scaricata dal server — risultato
+identico su tutti i 12 file. Il codice delle Fasi B-F e' quindi
+realmente live ora.
+
+Nessuna azione correttiva sul codice necessaria (era gia' tutto corretto
+localmente e verificato via harness) — il problema era solo di
+sincronizzazione col server, ora risolto e verificato. Da questo punto
+in poi, ogni push viene seguito da una verifica con clasp pull invece di
+fidarsi del solo messaggio di successo.
 
 Fase corrente: F
 Titolo: migrateToActivityLog
