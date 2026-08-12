@@ -1,57 +1,63 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 07:34
+Aggiornato: 2026-08-12 07:45
 
-Fase corrente: E
-Titolo: moveJob — eventi automatici
-Stato: COMPLETATA
+Fase corrente: F
+Titolo: migrateToActivityLog
+Stato: IN_ATTESA_GATE_UMANO
 
 Criteri di accettazione:
-[x] Dopo moveJob, il log della card contiene un evento auto — verificato con harness (log grezzo sul foglio)
-[x] L'evento ha source: 'auto', from e to corretti — verificato con harness
-[x] Il job is_rework: true produce evento con is_rework: true — verificato con harness
-[x] La scrittura e' atomica con la scrittura del job — entrambe avvengono in sequenza sincrona nella stessa chiamata a moveJob, nessuno stato intermedio osservabile dall'esterno (single-thread Apps Script)
-[x] Nessuna regressione sui test backend esistenti legati a moveJob — verificato riportando testMoveJobLifecycle, testStandByCannotReturnDirectlyToWip, testAutomaticReworkFromStandBy nell'harness (clasp run non disponibile per i 18 test reali)
+[x] clasp push riuscito
+[ ] Funzione eseguita su TEST: errors: [] — DA FARE DA MARCO
+[ ] Su 2 card campione in TEST: correction_log_json migrato senza duplicati — DA VERIFICARE DA MARCO
+[ ] Su 2 card campione in TEST: description ha checklist appesa, testo originale intatto — DA VERIFICARE DA MARCO
+[ ] checklist_json e correction_log_json invariati nel foglio — DA VERIFICARE DA MARCO
 
-Prossima fase: F
+Prossima fase: G (solo dopo "procedi con fase G" esplicito di Marco)
 
-Note operative permanenti (invariate, valide fino a F/J):
-- Gate umani reali del programma: SOLO Fase F e Fase J (Fase H e' AUTO).
-- Nessuna richiesta di conferma a Marco fino a Fase F o Fase J, o fino a
-  un BLOCCATA irrisolvibile.
-- Una fase per trigger (~ogni 2 ore via CronCreate, job 2ff909ff).
-- clasp run resta bloccato. Verifica reale tramite harness Node in
-  ...\scratchpad\gas-harness.js — test-fase-c.js, test-fase-d.js,
-  test-fase-e.js nella stessa cartella coprono gli scenari verificati
-  finora, riusabili per Fase G (portarli dentro Tests.gs come test GAS).
+COSA DEVE FARE MARCO PER SBLOCCARE QUESTO GATE:
+1. Aprire l'editor Apps Script del progetto SigmaFlow.
+2. Selezionare la funzione migrateActivityLogOnTest (in ActivityLog.gs)
+   dal menu a tendina in alto ed eseguirla — forza da sola lo spreadsheet
+   di TEST, non serve passare parametri. In alternativa, dalla Web App in
+   ambiente TEST si puo' chiamare l'azione migrateToActivityLog via
+   api() (rifiuta automaticamente se l'ambiente non e' TEST).
+3. Guardare il riepilogo restituito (cards_processed, corrections_migrated,
+   checklist_items_migrated, cards_skipped, errors) — anche loggato con
+   console.log/Logger, visibile nei log di esecuzione.
+4. Aprire 2-3 card campione nel foglio jobs di TEST che avessero dati in
+   correction_log_json e/o checklist_json, e verificare a occhio:
+   - activity_log_json ha eventi 'correction' coerenti coi dati originali
+   - description ha il testo originale intatto in testa, con il blocco
+     "--- Checklist migrata ---" appeso in fondo
+   - checklist_json e correction_log_json sono rimasti identici a prima
+5. Se tutto e' in ordine, scrivere "procedi con fase G" per sbloccare la
+   sessione. Se qualcosa non torna, descrivere cosa non va: mi fermo e
+   correggo prima di richiedere una nuova esecuzione.
 
-Nota importante per il prossimo trigger (Fase F):
-Fase F (migrateToActivityLog) e' 🔴 UMANO per definizione del programma
-stesso: i suoi criteri di accettazione richiedono l'esecuzione REALE su
-TEST e la verifica di 2-3 card campione da parte di Marco nel foglio
-Google reale — cosa che l'harness locale non puo' sostituire (simula un
-foglio mock, non i dati veri di TEST). Il prossimo trigger deve quindi:
-scrivere la funzione migrateToActivityLog() secondo la specifica, fare
-clasp push, MA NON eseguirla (ne' su TEST ne' altrove) e NON considerarla
-completata — aggiornare subito lo stato a IN_ATTESA_GATE_UMANO e
-fermarsi, lasciando l'esecuzione vera e la verifica a Marco dall'editor
-GAS, come richiesto esplicitamente dal gate.
+Note operative permanenti (invariate):
+- Gate umani reali del programma: SOLO Fase F (questo) e Fase J.
+- Nessuna richiesta di conferma per altri motivi fino alla risposta di
+  Marco su questo gate.
+- clasp run resta bloccato — verifica di LOGICA (non di dati reali) fatta
+  con l'harness Node in ...\scratchpad\gas-harness.js, ora comprensivo
+  anche di Tests.gs e Logger tra i file mockati (serviva per
+  withTestSpreadsheet_, usata da migrateActivityLogOnTest).
 
-Nota tecnica emersa in Fase E (da rivedere eventualmente in Fase G, non
-un difetto bloccante): getActivityLog (Fase C) ricalcola sempre "from"
-tramite computeFrom_ guardando solo i "move" gia' presenti nel log. Per
-il primissimo movimento di una card non esiste un evento precedente nel
-log, quindi computeFrom_ restituisce null anche se moveJob aveva scritto
-un "from" corretto (es. 'backlog') al momento della scrittura. E' un
-comportamento coerente con la specifica di computeFrom_ cosi' com'e'
-scritta, ma vale la pena discuterne con Marco in Fase G: se preferisce
-che il primissimo evento move mantenga il from originale invece di None.
+Note specifiche Fase F:
+Bug reale trovato e corretto con l'harness: la migrazione della checklist
+non era idempotente — un secondo lancio avrebbe riappeso il blocco
+"Checklist migrata" duplicandolo in description. Aggiunta una guardia sul
+marcatore gia' presente nel testo (la spec richiedeva esplicitamente la
+deduplicazione solo per le correzioni, non per la checklist, ma la
+stessa cautela e' sembrata necessaria e coerente con lo spirito "mai
+sovrascrivere/duplicare" della fase).
+
+migrateActivityLogOnTest() forza lo spreadsheet TEST con
+withTestSpreadsheet_ invece di fidarsi della Script Property corrente —
+scelta deliberata dopo l'incidente di questa notte in cui la property
+condivisa risultava puntata al posto sbagliato: qui l'errore e'
+strutturalmente impossibile, non solo evitato per disciplina.
 
 Push su Web App fatto (versione HEAD/dev). Commit e push del branch
-codex/activity-log-backend fatti.
-
-Conferma reale di Marco (2026-08-12 07:38, runAllTestsAndLog eseguito a
-mano dall'editor Apps Script, non da questa sessione): 18/18 test
-passati, 0 falliti, nessuna regressione. Prima verifica indipendente nel
-vero ambiente GAS di tutto il lavoro delle Fasi B-E fatto finora tramite
-harness locale — conferma che il metodo di verifica adottato in assenza
-di clasp run e' stato affidabile fin qui.
+codex/activity-log-backend fatti. NESSUNA esecuzione reale su TEST fatta
+da questa sessione: e' compito di Marco, come da gate.
