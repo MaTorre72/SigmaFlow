@@ -1,43 +1,50 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-11 21:40
+Aggiornato: 2026-08-12 04:29
 
-Fase corrente: C
-Titolo: addActivityEvent + getActivityLog
+Fase corrente: D
+Titolo: updateActivityEvent + deleteActivityEvent
 Stato: COMPLETATA
 
 Criteri di accettazione:
-[x] addActivityEvent con params validi restituisce ok: true — verificato con harness
-[x] addActivityEvent con ts nel futuro restituisce hardErrors — verificato con harness
-[x] addActivityEvent con sequenceWarnings e force:false restituisce requiresForce:true senza scrivere — verificato con harness
-[x] addActivityEvent con force:true scrive l'evento nel foglio — verificato con harness
-[x] getActivityLog restituisce il log ordinato per ts — verificato con harness
+[x] updateActivityEvent su evento manual aggiorna correttamente — verificato con harness
+[x] updateActivityEvent su evento auto restituisce errore (EVENTO_AUTO_NON_MODIFICABILE) — verificato con harness
+[x] deleteActivityEvent su evento manual rimuove e ricalcola from dell'evento successivo — verificato con harness
+[x] deleteActivityEvent su evento auto restituisce errore (EVENTO_AUTO_NON_ELIMINABILE) — verificato con harness
+[x] Router aggiornato con updateActivityEvent e deleteActivityEvent
 
-Prossima fase: D
+Prossima fase: E
 
-Note operative permanenti (valide per tutte le fasi successive fino a F/J):
-- Gate umani reali del programma: SOLO Fase F e Fase J (Fase H e' AUTO,
-  nonostante un riferimento diverso in una richiesta precedente di Marco:
-  seguo il programma scritto, che e' la fonte di verita').
-- Nessuna ulteriore richiesta di conferma a Marco fino a Fase F o Fase J,
-  o fino a un BLOCCATA irrisolvibile.
-- Una fase per trigger, non incatenate nello stesso turno: ogni fase si
-  ferma e committa, il trigger successivo (CronCreate, ogni ~2 ore)
-  esegue la fase seguente.
-- clasp run resta bloccato (manca associazione a progetto GCP standard).
-  Verifica reale delle fasi che richiedono comportamento Apps Script
-  tramite harness Node in
-  C:\Users\Marco\AppData\Local\Temp\claude\...\scratchpad\gas-harness.js
-  (mock di SpreadsheetApp/PropertiesService/Utilities/LockService, carica
-  i file .gs reali via vm e li esegue). Non sostituisce runAllTestsAndLog
-  nel vero ambiente GAS — quella verifica resta necessaria prima del
-  deploy in Fase J, gate umano.
+Note operative permanenti (invariate, valide fino a F/J):
+- Gate umani reali del programma: SOLO Fase F e Fase J (Fase H e' AUTO).
+- Nessuna richiesta di conferma a Marco fino a Fase F o Fase J, o fino a
+  un BLOCCATA irrisolvibile.
+- Una fase per trigger (~ogni 2 ore via CronCreate, job 2ff909ff),
+  non incatenate nello stesso turno.
+- clasp run resta bloccato. Verifica reale tramite harness Node in
+  ...\scratchpad\gas-harness.js — vedi test-fase-c.js e test-fase-d.js
+  nella stessa cartella per gli scenari gia' coperti, riusabili come base
+  per le fasi successive (in particolare Fase G, che dovra' portare
+  questi scenari dentro Tests.gs come test GAS veri).
 
-Note specifiche Fase C:
-Bug reale trovato e corretto grazie all'harness: i confronti tra
-timestamp usavano l'operatore stringa (<, >) invece di date reali —
-falliva con timestamp di formato diverso (offset +02:00 vs Z). Aggiunta
-compareTs_ in Utils.gs, usata ora in tutti i confronti timestamp
-dell'activity log (ActivityLog.gs e Kanban.gs).
+Note specifiche Fase D:
+"campi modificabili" della specifica interpretato come: tutti i campi
+gestiti da buildActivityEventCandidate_ (ts, type, to, reason, note,
+field, old, new) tranne id e source, che restano quelli dell'evento
+originale. updateActivityEvent riusa buildActivityEventCandidate_
+partendo da Object.assign({}, existing, params).
+
+"checkStructuralAlignment_ sul log risultante" (D2, punto 5) della
+specifica e' ambiguo: la funzione richiede un singolo evento candidato,
+non un log intero. Interpretato come: eseguire il controllo sull'ultimo
+evento 'move' rimasto dopo la cancellazione (quello piu' rilevante per la
+coerenza di start_ts/done_ts), restituendo [] se non ci sono piu' eventi
+move. Deviazione documentata, da rivedere in Fase G se i test la
+smentiscono.
+
+Nella Fase D non esiste ancora un modo reale di generare eventi
+source:'auto' (arriva con moveJob in Fase E) — nei test verificati con
+harness un evento auto e' stato iniettato direttamente nel foglio mock
+per simulare lo scenario.
 
 Push su Web App fatto (versione HEAD/dev). Commit e push del branch
 codex/activity-log-backend fatti.
