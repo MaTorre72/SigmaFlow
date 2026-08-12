@@ -115,27 +115,11 @@
         <input id="modal-invoiced" name="invoiced" type="checkbox">
         Fatturato
       </label>
-      <section id="modal-rework-history" class="rework-history" hidden></section>
-      <details id="modal-timestamp-correction" class="timestamp-correction" hidden>
-        <summary>Correggi timestamp</summary>
-        <label>Arrivo
-          <input id="modal-correct-arrival" type="datetime-local">
-        </label>
-        <label>Inizio
-          <input id="modal-correct-start" type="datetime-local">
-        </label>
-        <label>Completamento
-          <input id="modal-correct-done" type="datetime-local">
-        </label>
-        <label>Motivo
-          <input id="modal-correct-reason" type="text" placeholder="Motivo della correzione (obbligatorio)">
-        </label>
-        <button type="button" id="modal-correct-apply" class="secondary-button">Applica correzione</button>
-      </details>
       <button type="button" id="modal-create-button" class="primary-button">Salva e chiudi</button>
       <button type="button" class="archive-button" disabled>Archivia</button>
     </aside>
     <section id="modal-tab-activity" class="modal-activity-panel" hidden>
+      <section id="modal-rework-history" class="rework-history" hidden></section>
       <div id="modal-activity-banner" class="activity-log-banner" hidden></div>
       <div id="modal-activity-list" class="activity-log-list"></div>
       <button type="button" id="modal-activity-add-button" class="secondary-button">Aggiungi evento</button>
@@ -148,7 +132,6 @@
           <select id="activity-form-type">
             <option value="move">Spostamento</option>
             <option value="note">Nota</option>
-            <option value="correction">Correzione timestamp</option>
           </select>
         </label>
         <div id="activity-form-move-fields" class="activity-form-fields">
@@ -162,21 +145,6 @@
         <div id="activity-form-note-fields" class="activity-form-fields" hidden>
           <label>Testo
             <textarea id="activity-form-note-text" rows="3"></textarea>
-          </label>
-        </div>
-        <div id="activity-form-correction-fields" class="activity-form-fields" hidden>
-          <label>Campo da correggere
-            <select id="activity-form-correction-field">
-              <option value="arrival_ts">Data creazione (arrival_ts)</option>
-              <option value="start_ts">Data inizio (start_ts)</option>
-              <option value="done_ts">Data completamento (done_ts)</option>
-            </select>
-          </label>
-          <label>Nuovo valore
-            <input id="activity-form-correction-new" type="datetime-local">
-          </label>
-          <label>Motivo
-            <input id="activity-form-correction-reason" type="text" placeholder="Motivo della correzione">
           </label>
         </div>
         <div class="form-actions">
@@ -196,17 +164,6 @@
     <div class="form-actions">
       <button type="button" id="activity-sequence-cancel">Annulla</button>
       <button type="button" id="activity-sequence-confirm" class="primary-button">Si, inserisci uguale</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="activity-alignment-dialog" class="column-settings-modal">
-  <form method="dialog" class="column-settings-form">
-    <h2>Allinea i campi strutturati</h2>
-    <div id="activity-alignment-list" class="activity-alignment-list"></div>
-    <div class="form-actions">
-      <button type="button" id="activity-alignment-cancel">Annulla tutto</button>
-      <button type="button" id="activity-alignment-confirm" class="primary-button">Conferma</button>
     </div>
   </form>
 </dialog>

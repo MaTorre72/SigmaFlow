@@ -158,7 +158,15 @@ function checkStructuralAlignment_(job, candidate) {
     }
   }
 
-  if (job.arrival_ts && compareTs_(candidate.ts, job.arrival_ts) < 0) {
+  if (candidate.type === 'move' && candidate.from === null) {
+    // L'evento con from null e' per costruzione l'evento di creazione
+    // della card (addJob): la sua data e' sempre la fonte di arrival_ts,
+    // in entrambe le direzioni (anche se corretta a una data successiva),
+    // non solo quando precede il valore attuale.
+    if (!job.arrival_ts || compareTs_(job.arrival_ts, candidate.ts) !== 0) {
+      warnings.push({ field: 'arrival_ts', currentValue: job.arrival_ts || '', suggestedValue: candidate.ts });
+    }
+  } else if (job.arrival_ts && compareTs_(candidate.ts, job.arrival_ts) < 0) {
     warnings.push({ field: 'arrival_ts', currentValue: job.arrival_ts, suggestedValue: candidate.ts });
   }
 

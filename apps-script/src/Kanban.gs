@@ -58,7 +58,6 @@ function routeAction_(params) {
     getActivityLog: getActivityLog,
     updateActivityEvent: updateActivityEvent,
     deleteActivityEvent: deleteActivityEvent,
-    correctJobTimestamps: correctJobTimestamps,
     migrateToActivityLog: migrateToActivityLog,
     deleteJob: deleteJob,
     updateColumnLabel: updateColumnLabel,
@@ -397,28 +396,28 @@ function addActivityEvent(params) {
     return ok_({ ok: false, requiresForce: true, warnings: validation.sequenceWarnings });
   }
 
-  var structuralWarnings = checkStructuralAlignment_(job, candidate);
-  var alignFields = params.align_fields || {};
-  var uncoveredWarnings = structuralWarnings.filter(function(warning) {
-    return alignFields[warning.field] === undefined;
-  });
-  if (uncoveredWarnings.length) {
-    return ok_({ ok: false, alignmentRequired: true, structuralWarnings: structuralWarnings });
-  }
-
   log.push(candidate);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
-  Object.keys(alignFields).forEach(function(field) {
-    if (JOB_HEADERS.indexOf(field) !== -1) {
-      job[field] = alignFields[field];
-    }
-  });
+  // I campi strutturati (arrival_ts/incarico_ts/prep_ts/start_ts/done_ts)
+  // sono una cache derivata dal log, non uno stato indipendente: si
+  // allineano sempre in automatico al valore suggerito dall'evento appena
+  // registrato, senza chiedere conferma all'utente. I dettagli di questi
+  // campi restano interni: l'utente cura solo la cronologia.
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job);
 
   return ok_({ ok: true, job_id: jobId, event: candidate });
+}
+
+function applyStructuralAlignment_(job, warnings) {
+  warnings.forEach(function(warning) {
+    if (JOB_HEADERS.indexOf(warning.field) !== -1) {
+      job[warning.field] = warning.suggestedValue;
+    }
+  });
 }
 
 function getActivityLog(params) {
@@ -465,9 +464,11 @@ function updateActivityEvent(params) {
   if (!existing) {
     throw new Error('Evento non trovato: ' + eventId);
   }
-  if (existing.source === 'auto') {
-    throw new Error('EVENTO_AUTO_NON_MODIFICABILE');
-  }
+  // Qualunque evento e' correggibile, auto o manuale: il diario deve poter
+  // essere reso corretto e coerente dall'utente. La cancellazione resta
+  // invece bloccata per gli eventi auto (vedi deleteActivityEvent) perche'
+  // cancellare cancella un pezzo di storia reale, mentre correggerne la
+  // data la rende semplicemente piu' accurata.
 
   var remaining = log.filter(function(event) { return event.id !== eventId; });
 
@@ -486,23 +487,10 @@ function updateActivityEvent(params) {
     return ok_({ ok: false, requiresForce: true, warnings: validation.sequenceWarnings });
   }
 
-  var structuralWarnings = checkStructuralAlignment_(job, candidate);
-  var alignFields = params.align_fields || {};
-  var uncoveredWarnings = structuralWarnings.filter(function(warning) {
-    return alignFields[warning.field] === undefined;
-  });
-  if (uncoveredWarnings.length) {
-    return ok_({ ok: false, alignmentRequired: true, structuralWarnings: structuralWarnings });
-  }
-
   remaining.push(candidate);
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
-  Object.keys(alignFields).forEach(function(field) {
-    if (JOB_HEADERS.indexOf(field) !== -1) {
-      job[field] = alignFields[field];
-    }
-  });
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job);
@@ -545,19 +533,28 @@ function deleteActivityEvent(params) {
     return updated;
   });
 
-  // Warning informativi (non bloccanti per la cancellazione): confronta
-  // l'ultimo evento move rimasto con i campi strutturati del job, per
-  // segnalare eventuali incoerenze introdotte dalla cancellazione.
+  // La cancellazione puo' rendere l'ultimo campo strutturato alimentato
+  // dall'evento cancellato non piu' rappresentativo: si riallinea in
+  // automatico all'evento move piu' recente rimasto, con lo stesso
+  // meccanismo (silenzioso) usato per l'aggiunta/modifica di un evento.
   var moves = recalculated.filter(function(event) { return event.type === 'move'; });
   var lastMove = moves.length ? moves[moves.length - 1] : null;
-  var structuralWarnings = lastMove ? checkStructuralAlignment_(job, lastMove) : [];
+  if (lastMove) {
+    applyStructuralAlignment_(job, checkStructuralAlignment_(job, lastMove));
+  }
 
   job.activity_log_json = serializeActivityLog_(recalculated);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ job_id: jobId, event_id: eventId, structuralWarnings: structuralWarnings });
+  return ok_({ job_id: jobId, event_id: eventId });
 }
 
+// Non piu' esposta via routeAction_/UI: le correzioni utente passano
+// dall'evento "Correzione" in Cronologia (addActivityEvent), che scrive
+// su activity_log_json invece che su un log separato. Questa funzione
+// resta solo per uso interno di test (testAddJobWithPastArrival_), che
+// deve spostare arrival_ts nel passato senza generare un evento visibile
+// nel diario.
 function correctJobTimestamps(params) {
   var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var jobId = requireParam_(params, 'job_id');

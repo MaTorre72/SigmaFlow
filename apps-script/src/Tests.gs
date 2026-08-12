@@ -161,11 +161,11 @@ function runAllTests() {
     testAddActivityEventReasonObbligatoria,
     testAddActivityEventSequenceWarningsSenzaForce,
     testAddActivityEventSequenceWarningsConForce,
-    testAddActivityEventStructuralWarningsSenzaAlign,
-    testAddActivityEventStructuralWarningsConAlign,
+    testAddActivityEventAutoAllineaCampoStrutturato,
     testAddActivityEventNotaValida,
     testUpdateActivityEventManual,
-    testUpdateActivityEventBloccoAuto,
+    testUpdateActivityEventCorreggeEventoAutoDiCreazione,
+    testUpdateActivityEventCorreggeEventoAutoDiSpostamento,
     testDeleteActivityEventManual,
     testDeleteActivityEventBloccoAuto,
     testGetActivityLogOrdinato,
@@ -740,37 +740,19 @@ function testAddActivityEventSequenceWarningsConForce() {
   });
 }
 
-function testAddActivityEventStructuralWarningsSenzaAlign() {
+function testAddActivityEventAutoAllineaCampoStrutturato() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
-    var jobId = testAddJobWithPastArrival_({ title: 'Structural warning senza align', size_class: 'M' });
-    var columns = readColumns_();
-    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
-
-    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: testTsMinutesAgo_(60), to: wipCol.id });
-
-    assertTrue_(result.data.ok === false, 'senza align_fields: ok false');
-    assertTrue_(result.data.alignmentRequired === true, 'alignmentRequired true');
-    assertTrue_(result.data.structuralWarnings.length > 0, 'structuralWarnings presenti');
-
-    var log = getActivityLog({ job_id: jobId }).data.log;
-    assertEquals_(1, log.length, 'nessuna scrittura extra senza align_fields: resta solo l\'evento di creazione');
-  });
-}
-
-function testAddActivityEventStructuralWarningsConAlign() {
-  withTestSpreadsheet_(function(ss) {
-    resetTestDatabase_(ss);
-    var jobId = testAddJobWithPastArrival_({ title: 'Structural warning con align', size_class: 'M' });
+    var jobId = testAddJobWithPastArrival_({ title: 'Allineamento automatico', size_class: 'M' });
     var columns = readColumns_();
     var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
     var ts = testTsMinutesAgo_(60);
 
-    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: ts, to: wipCol.id, align_fields: { start_ts: ts } });
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: ts, to: wipCol.id });
 
-    assertTrue_(result.data.ok === true, 'con align_fields dovrebbe riuscire');
+    assertTrue_(result.data.ok === true, 'move verso wip dovrebbe riuscire senza alcuna conferma dell\'utente');
     var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
-    assertEquals_(ts, job.start_ts, 'start_ts aggiornato atomicamente dal campo strutturato');
+    assertEquals_(ts, job.start_ts, 'start_ts allineato automaticamente al valore suggerito dall\'evento');
   });
 }
 
@@ -802,22 +784,40 @@ function testUpdateActivityEventManual() {
   });
 }
 
-function testUpdateActivityEventBloccoAuto() {
+function testUpdateActivityEventCorreggeEventoAutoDiCreazione() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
-    var jobId = testAddJobWithPastArrival_({ title: 'Update blocco auto', size_class: 'M' });
-    var moved = moveJob({ job_id: jobId, status: 'todo' });
-    var log = getActivityLog({ job_id: jobId }).data.log;
-    var autoEventId = log[0].id;
-    assertEquals_('auto', log[0].source, 'evento generato da moveJob e\' auto');
+    var created = addJob({ title: 'Correzione evento di creazione', size_class: 'M' }).data;
+    var log = getActivityLog({ job_id: created.job_id }).data.log;
+    var creationEvent = log[0];
+    assertEquals_('auto', creationEvent.source, 'evento di creazione e\' auto');
+    assertEquals_(null, creationEvent.from, 'evento di creazione ha from null');
 
-    var failed = false;
-    try {
-      updateActivityEvent({ job_id: jobId, event_id: autoEventId, note: 'tentativo' });
-    } catch (err) {
-      failed = err.message.indexOf('EVENTO_AUTO_NON_MODIFICABILE') !== -1;
-    }
-    assertTrue_(failed, 'updateActivityEvent su evento auto dovrebbe fallire');
+    var correctedTs = testTsMinutesAgo_(120);
+    var result = updateActivityEvent({ job_id: created.job_id, event_id: creationEvent.id, ts: correctedTs, to: creationEvent.to });
+
+    assertTrue_(result.data.ok === true, 'la correzione della data sull\'evento di creazione (auto) deve riuscire');
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(correctedTs, job.arrival_ts, 'arrival_ts si allinea alla data corretta dell\'evento di creazione');
+  });
+}
+
+function testUpdateActivityEventCorreggeEventoAutoDiSpostamento() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Correzione spostamento auto', size_class: 'M' });
+    moveJob({ job_id: jobId, status: 'todo' });
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    var autoMoveEvent = log.filter(function(e) { return e.source === 'auto' && e.to === 'todo'; })[0];
+
+    var correctedTs = testTsMinutesAgo_(45);
+    var result = updateActivityEvent({ job_id: jobId, event_id: autoMoveEvent.id, ts: correctedTs, to: autoMoveEvent.to, note: 'orario corretto' });
+
+    assertTrue_(result.data.ok === true, 'la correzione di un evento auto generato da moveJob deve riuscire');
+    var updatedLog = getActivityLog({ job_id: jobId }).data.log;
+    var updated = updatedLog.filter(function(e) { return e.id === autoMoveEvent.id; })[0];
+    assertEquals_(correctedTs, updated.ts, 'la data dell\'evento auto e\' stata corretta');
+    assertEquals_('manual', updated.source, 'un evento corretto da un utente diventa manual: segnala che non e\' piu\' un dato puramente di sistema');
   });
 }
 
@@ -842,6 +842,9 @@ function testDeleteActivityEventManual() {
     assertEquals_(3, log.length, 'evento di creazione + due move rimasti dopo la cancellazione');
     var remaining3 = log.filter(function(e) { return e.id === e3.data.event.id; })[0];
     assertEquals_(todoCol.id, remaining3.from, 'from dell\'evento successivo ricalcolato dopo la cancellazione');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
+    assertEquals_(t3, job.start_ts, 'start_ts riallineato in automatico all\'ultimo move rimasto dopo la cancellazione, senza intervento dell\'utente');
   });
 }
 
