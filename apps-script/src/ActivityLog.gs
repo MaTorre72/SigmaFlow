@@ -156,3 +156,121 @@ function checkStructuralAlignment_(job, candidate) {
 
   return warnings;
 }
+
+// Migrazione una tantum: correction_log_json -> activity_log_json e
+// checklist_json -> description (Fase F, gate umano). Da eseguire solo
+// su TEST, mai su PROD.
+
+// Azione Web App: rifiuta esplicitamente se non chiamata con env: 'test',
+// stesso pattern gia' usato da seedTestData in Tests.gs.
+function migrateToActivityLog(params) {
+  params = params || {};
+  if (normalizeEnv_(params.env) !== 'test') {
+    throw new Error('La migrazione dell\'activity log e\' consentita solo in ambiente TEST.');
+  }
+  return ok_(migrateActivityLogData_(getSpreadsheet_()));
+}
+
+// Versione eseguibile direttamente dall'editor Apps Script (nessun
+// parametro env disponibile in quel contesto): forza esplicitamente lo
+// spreadsheet di TEST con withTestSpreadsheet_, esattamente come fa
+// generateTestDataset() in Tests.gs per lo stesso motivo — senza questo
+// avvolgimento, un click su "Esegui" in editor userebbe lo spreadsheet
+// puntato al momento dalla Script Property (oggi PROD), rischio reale
+// vista l'incidente di questa notte sulla property condivisa.
+function migrateActivityLogOnTest() {
+  return withTestSpreadsheet_(function(ss) {
+    return migrateActivityLogData_(ss);
+  });
+}
+
+function migrateActivityLogData_(ss) {
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var jobs = readTable_(sheet);
+  var summary = {
+    cards_processed: 0,
+    corrections_migrated: 0,
+    checklist_items_migrated: 0,
+    cards_skipped: 0,
+    errors: []
+  };
+
+  if (!jobs.length) {
+    console.log(JSON.stringify(summary));
+    return summary;
+  }
+
+  var migrationTs = nowIso_();
+  var rows = jobs.map(function(job) {
+    try {
+      var result = migrateSingleJobActivityLog_(job, migrationTs);
+      summary.cards_processed++;
+      summary.corrections_migrated += result.correctionsMigrated;
+      summary.checklist_items_migrated += result.checklistItemsMigrated;
+      return jobToRow_(job);
+    } catch (err) {
+      summary.cards_skipped++;
+      summary.errors.push({ job_id: job.job_id, message: err.message });
+      return jobToRow_(job);
+    }
+  });
+
+  sheet.getRange(2, 1, rows.length, JOB_HEADERS.length).setValues(rows);
+  console.log(JSON.stringify(summary));
+  return summary;
+}
+
+// Migra una singola card: aggiunge eventi 'correction' al log a partire
+// da correction_log_json (senza duplicare) e appende la checklist in
+// fondo a description. Muta l'oggetto job passato, ma NON tocca
+// checklist_json/correction_log_json, che restano invariati nel foglio.
+function migrateSingleJobActivityLog_(job, migrationTs) {
+  var log = parseActivityLog_(job.activity_log_json);
+  var correctionsMigrated = 0;
+
+  var corrections = parseJsonArray_(job.correction_log_json);
+  corrections.forEach(function(record) {
+    var ts = record.ts || job.arrival_ts || migrationTs;
+    var alreadyMigrated = log.some(function(event) {
+      return event.type === 'correction' &&
+        event.field === record.field &&
+        event.old === record.old &&
+        event.new === record.new &&
+        event.ts === ts;
+    });
+    if (alreadyMigrated) {
+      return;
+    }
+    log.push({
+      id: generateActivityEventId_(),
+      ts: ts,
+      type: 'correction',
+      source: 'manual',
+      field: record.field,
+      old: record.old,
+      new: record.new,
+      reason: record.reason || ''
+    });
+    correctionsMigrated++;
+  });
+
+  log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+  job.activity_log_json = serializeActivityLog_(log);
+
+  // La spec non lo dice esplicitamente per la checklist (a differenza delle
+  // correzioni, dove la deduplicazione e' richiesta), ma senza questa guardia
+  // un secondo lancio della migrazione duplicherebbe il blocco in description.
+  var checklistItemsMigrated = 0;
+  var checklist = parseJsonArray_(job.checklist_json);
+  var checklistMarker = '--- Checklist migrata ---';
+  var alreadyAppended = String(job.description || '').indexOf(checklistMarker) !== -1;
+  if (checklist.length && !alreadyAppended) {
+    var lines = checklist.map(function(item) {
+      checklistItemsMigrated++;
+      return '[' + (coerceBoolean_(item.done) ? 'x' : ' ') + '] ' + String(item.text || '');
+    });
+    job.description = String(job.description || '') + '\n\n' + checklistMarker + '\n' + lines.join('\n');
+  }
+
+  return { correctionsMigrated: correctionsMigrated, checklistItemsMigrated: checklistItemsMigrated };
+}
