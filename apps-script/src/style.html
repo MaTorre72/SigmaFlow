@@ -499,6 +499,11 @@
     grid-template-columns: minmax(0, 65%) minmax(260px, 35%);
     min-height: 560px;
     position: relative;
+    /* Senza questo, le righe implicite della grid (tab nav, colonna
+       principale/laterale, pannello cronologia) si distendono per
+       riempire i 560px di min-height, spingendo tutto verso il basso
+       e facendo gonfiare a dismisura la barra dei tab. */
+    align-content: start;
   }
 
   .modal-close {
@@ -513,12 +518,15 @@
     display: grid;
     gap: 12px;
     padding: 24px;
+    /* Idem: senza questo i campi si distendono per riempire l'altezza
+       imposta dalla colonna piu' alta, invece di restare compatti in
+       cima con lo spazio in eccesso lasciato in fondo. */
+    align-content: start;
   }
 
   .modal-sidebar {
     background: #f6f8fa;
     border-left: 1px solid var(--line);
-    align-content: start;
   }
 
   .modal-title-input {
