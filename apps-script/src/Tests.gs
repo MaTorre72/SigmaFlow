@@ -87,6 +87,29 @@ function testIsoDaysAgo_(now, days) {
   return Utilities.formatDate(new Date(now.getTime() - days * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
 }
 
+// Timestamp saldamente nel passato per i test sull'activity log: evita che
+// un evento risulti "nel futuro" per il tempo reale trascorso tra le
+// chiamate durante l'esecuzione dei test.
+function testTsMinutesAgo_(minutesAgo) {
+  return Utilities.formatDate(new Date(Date.now() - minutesAgo * 60000), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
+// I job nascono con arrival_ts = adesso: per testare eventi nel passato
+// senza scatenare il warning strutturale legittimo su arrival_ts, la
+// spostiamo indietro (180 min fa) subito dopo la creazione.
+function testAddJobWithPastArrival_(params) {
+  var created = addJob(params).data;
+  var correction = correctJobTimestamps({
+    job_id: created.job_id,
+    arrival_ts: testTsMinutesAgo_(180),
+    reason: 'setup test'
+  });
+  if (!correction.success) {
+    throw new Error('setup correctJobTimestamps fallita: ' + correction.error);
+  }
+  return created.job_id;
+}
+
 function testDateDaysFromNow_(now, days) {
   return Utilities.formatDate(new Date(now.getTime() + days * 864e5), SIGMAFLOW.TZ, 'yyyy-MM-dd');
 }
@@ -131,7 +154,24 @@ function runAllTests() {
     testDataQualityThresholds,
     testSystemStateSeparatesFlowFromTimeSamples,
     testSystemStateWorkload,
-    testMissingRequiredParam
+    testMissingRequiredParam,
+    testAddActivityEventMoveValido,
+    testAddActivityEventTsFuturo,
+    testAddActivityEventColonnaNonTrovata,
+    testAddActivityEventReasonObbligatoria,
+    testAddActivityEventSequenceWarningsSenzaForce,
+    testAddActivityEventSequenceWarningsConForce,
+    testAddActivityEventStructuralWarningsSenzaAlign,
+    testAddActivityEventStructuralWarningsConAlign,
+    testAddActivityEventNotaValida,
+    testUpdateActivityEventManual,
+    testUpdateActivityEventBloccoAuto,
+    testDeleteActivityEventManual,
+    testDeleteActivityEventBloccoAuto,
+    testGetActivityLogOrdinato,
+    testGetActivityLogFromRicalcolato,
+    testMoveJobScriveEventoAuto,
+    testMigrateToActivityLogChecklist
   ];
 
   tests.forEach(function(testFn) {
@@ -528,6 +568,307 @@ function testMissingRequiredParam() {
     }
 
     assertTrue_(failed, 'addJob senza title dovrebbe fallire');
+  });
+}
+
+// --- Fase G: suite completa activity log (17 nuovi test) ---
+
+function testAddActivityEventMoveValido() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Evento move valido', size_class: 'M' });
+    var columns = readColumns_();
+    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var ts = testTsMinutesAgo_(60);
+
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: ts, to: wipCol.id, align_fields: { start_ts: ts } });
+
+    assertTrue_(result.success, 'addActivityEvent move dovrebbe riuscire');
+    assertTrue_(result.data.ok === true, 'evento move valido: ok true');
+    assertEquals_('move', result.data.event.type, 'type move');
+    assertEquals_(wipCol.id, result.data.event.to, 'to corretto');
+  });
+}
+
+function testAddActivityEventTsFuturo() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Evento ts futuro', size_class: 'M' });
+    var future = Utilities.formatDate(new Date(Date.now() + 365 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+
+    var result = addActivityEvent({ job_id: jobId, type: 'note', ts: future, note: 'x' });
+
+    assertTrue_(result.data.ok === false, 'ts nel futuro: ok false');
+    assertTrue_(result.data.hardErrors.indexOf('TS_IN_FUTURO') !== -1, 'hardErrors contiene TS_IN_FUTURO');
+  });
+}
+
+function testAddActivityEventColonnaNonTrovata() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Colonna inesistente', size_class: 'M' });
+
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: testTsMinutesAgo_(60), to: 'colonna_che_non_esiste' });
+
+    assertTrue_(result.data.ok === false, 'colonna non trovata: ok false');
+    assertTrue_(result.data.hardErrors.indexOf('COLONNA_NON_TROVATA') !== -1, 'hardErrors contiene COLONNA_NON_TROVATA');
+  });
+}
+
+function testAddActivityEventReasonObbligatoria() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Reason obbligatoria', size_class: 'M' });
+
+    var result = addActivityEvent({ job_id: jobId, type: 'correction', ts: testTsMinutesAgo_(60), field: 'arrival_ts', old: '', new: testTsMinutesAgo_(90) });
+
+    assertTrue_(result.data.ok === false, 'reason vuota: ok false');
+    assertTrue_(result.data.hardErrors.indexOf('REASON_OBBLIGATORIA') !== -1, 'hardErrors contiene REASON_OBBLIGATORIA');
+  });
+}
+
+function testAddActivityEventSequenceWarningsSenzaForce() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Sequence warning senza force', size_class: 'M' });
+    var columns = readColumns_();
+    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var t1 = testTsMinutesAgo_(60);
+    var first = addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: wipCol.id, align_fields: { start_ts: t1 } });
+    assertTrue_(first.data.ok, 'primo move dovrebbe riuscire');
+
+    var t2 = testTsMinutesAgo_(59);
+    var second = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: wipCol.id, align_fields: { start_ts: t1 } });
+
+    assertTrue_(second.data.ok === false, 'secondo move con colonna doppia: ok false');
+    assertTrue_(second.data.requiresForce === true, 'requiresForce true');
+    assertTrue_(second.data.warnings.length > 0, 'warnings presenti');
+
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    assertEquals_(1, log.length, 'nessuna scrittura extra: resta un solo evento');
+  });
+}
+
+function testAddActivityEventSequenceWarningsConForce() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Sequence warning con force', size_class: 'M' });
+    var columns = readColumns_();
+    var standByCol = columns.filter(function(c) { return c.role === 'stand_by'; })[0];
+    var t1 = testTsMinutesAgo_(60);
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: standByCol.id });
+
+    var t2 = testTsMinutesAgo_(59);
+    var forced = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: standByCol.id, force: true });
+
+    assertTrue_(forced.data.ok === true, 'con force:true dovrebbe riuscire');
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    assertEquals_(2, log.length, 'due eventi nel log dopo force');
+  });
+}
+
+function testAddActivityEventStructuralWarningsSenzaAlign() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Structural warning senza align', size_class: 'M' });
+    var columns = readColumns_();
+    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: testTsMinutesAgo_(60), to: wipCol.id });
+
+    assertTrue_(result.data.ok === false, 'senza align_fields: ok false');
+    assertTrue_(result.data.alignmentRequired === true, 'alignmentRequired true');
+    assertTrue_(result.data.structuralWarnings.length > 0, 'structuralWarnings presenti');
+
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    assertEquals_(0, log.length, 'nessuna scrittura senza align_fields');
+  });
+}
+
+function testAddActivityEventStructuralWarningsConAlign() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Structural warning con align', size_class: 'M' });
+    var columns = readColumns_();
+    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var ts = testTsMinutesAgo_(60);
+
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: ts, to: wipCol.id, align_fields: { start_ts: ts } });
+
+    assertTrue_(result.data.ok === true, 'con align_fields dovrebbe riuscire');
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
+    assertEquals_(ts, job.start_ts, 'start_ts aggiornato atomicamente dal campo strutturato');
+  });
+}
+
+function testAddActivityEventNotaValida() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Nota valida', size_class: 'M' });
+
+    var result = addActivityEvent({ job_id: jobId, type: 'note', ts: testTsMinutesAgo_(60), note: 'promemoria di test' });
+
+    assertTrue_(result.data.ok === true, 'evento note dovrebbe riuscire');
+    assertEquals_('promemoria di test', result.data.event.note, 'nota salvata correttamente');
+  });
+}
+
+function testUpdateActivityEventManual() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Update evento manual', size_class: 'M' });
+    var added = addActivityEvent({ job_id: jobId, type: 'note', ts: testTsMinutesAgo_(60), note: 'nota originale' });
+    var eventId = added.data.event.id;
+
+    var updated = updateActivityEvent({ job_id: jobId, event_id: eventId, note: 'nota corretta' });
+
+    assertTrue_(updated.data.ok === true, 'update dovrebbe riuscire');
+    assertEquals_('nota corretta', updated.data.event.note, 'nota aggiornata');
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    assertEquals_(1, log.length, 'un solo evento nel log dopo update (sostituito, non duplicato)');
+  });
+}
+
+function testUpdateActivityEventBloccoAuto() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Update blocco auto', size_class: 'M' });
+    var moved = moveJob({ job_id: jobId, status: 'todo' });
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    var autoEventId = log[0].id;
+    assertEquals_('auto', log[0].source, 'evento generato da moveJob e\' auto');
+
+    var failed = false;
+    try {
+      updateActivityEvent({ job_id: jobId, event_id: autoEventId, note: 'tentativo' });
+    } catch (err) {
+      failed = err.message.indexOf('EVENTO_AUTO_NON_MODIFICABILE') !== -1;
+    }
+    assertTrue_(failed, 'updateActivityEvent su evento auto dovrebbe fallire');
+  });
+}
+
+function testDeleteActivityEventManual() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Delete evento manual', size_class: 'M' });
+    var columns = readColumns_();
+    var todoCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var waitCol = columns.filter(function(c) { return c.role === 'stand_by'; })[0];
+    var t1 = testTsMinutesAgo_(90);
+    var t2 = testTsMinutesAgo_(60);
+    var t3 = testTsMinutesAgo_(30);
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: todoCol.id, align_fields: { start_ts: t1 } });
+    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: waitCol.id });
+    var e3 = addActivityEvent({ job_id: jobId, type: 'move', ts: t3, to: todoCol.id, force: true, align_fields: { start_ts: t3 } });
+
+    var del = deleteActivityEvent({ job_id: jobId, event_id: e2.data.event.id });
+
+    assertTrue_(del.success, 'delete dovrebbe riuscire');
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    assertEquals_(2, log.length, 'due eventi rimasti dopo la cancellazione');
+    var remaining3 = log.filter(function(e) { return e.id === e3.data.event.id; })[0];
+    assertEquals_(todoCol.id, remaining3.from, 'from dell\'evento successivo ricalcolato dopo la cancellazione');
+  });
+}
+
+function testDeleteActivityEventBloccoAuto() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Delete blocco auto', size_class: 'M' });
+    moveJob({ job_id: jobId, status: 'todo' });
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    var autoEventId = log[0].id;
+
+    var failed = false;
+    try {
+      deleteActivityEvent({ job_id: jobId, event_id: autoEventId });
+    } catch (err) {
+      failed = err.message.indexOf('EVENTO_AUTO_NON_ELIMINABILE') !== -1;
+    }
+    assertTrue_(failed, 'deleteActivityEvent su evento auto dovrebbe fallire');
+  });
+}
+
+function testGetActivityLogOrdinato() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Log ordinato', size_class: 'M' });
+    var columns = readColumns_();
+    var todoCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var doneCol = columns.filter(function(c) { return c.role === 'done'; })[0];
+    var t1 = testTsMinutesAgo_(60);
+    var t2 = testTsMinutesAgo_(30);
+    // Inseriti fuori ordine cronologico apposta.
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: doneCol.id, align_fields: { done_ts: t2 } });
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: todoCol.id, align_fields: { start_ts: t1 } });
+
+    var log = getActivityLog({ job_id: jobId }).data.log;
+
+    assertEquals_(2, log.length, 'due eventi nel log');
+    assertEquals_(t1, log[0].ts, 'primo evento e\' il piu\' vecchio');
+    assertEquals_(t2, log[1].ts, 'secondo evento e\' il piu\' recente');
+  });
+}
+
+function testGetActivityLogFromRicalcolato() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'From ricalcolato', size_class: 'M' });
+    var columns = readColumns_();
+    var todoCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var doneCol = columns.filter(function(c) { return c.role === 'done'; })[0];
+    var t1 = testTsMinutesAgo_(60);
+    var t2 = testTsMinutesAgo_(30);
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: todoCol.id, align_fields: { start_ts: t1 } });
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: doneCol.id, align_fields: { done_ts: t2 } });
+
+    var log = getActivityLog({ job_id: jobId }).data.log;
+
+    assertEquals_(null, log[0].from, 'primo evento non ha un move precedente: from null');
+    assertEquals_(todoCol.id, log[1].from, 'secondo evento: from ricalcolato sul move precedente');
+  });
+}
+
+function testMoveJobScriveEventoAuto() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'MoveJob evento auto', size_class: 'M' }).data;
+
+    var moved = moveJob({ job_id: created.job_id, status: 'todo' });
+
+    assertTrue_(moved.success, 'moveJob dovrebbe riuscire');
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    var log = parseActivityLog_(job.activity_log_json);
+    assertEquals_(1, log.length, 'un evento nel log grezzo dopo moveJob');
+    assertEquals_('auto', log[0].source, 'source auto');
+    assertEquals_('backlog', log[0].from, 'from = backlog');
+    assertEquals_('todo', log[0].to, 'to = todo');
+  });
+}
+
+function testMigrateToActivityLogChecklist() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Migrazione checklist', size_class: 'M', description: 'Testo originale della card' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.checklist_json = JSON.stringify([{ text: 'Voce A', done: true }, { text: 'Voce B', done: false }]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = migrateToActivityLog({ env: 'test' });
+
+    assertTrue_(result.success, 'migrazione dovrebbe riuscire');
+    assertEquals_(2, result.data.checklist_items_migrated, 'due voci checklist migrate');
+
+    var after = readJobFromRow_(sheet, row, headers);
+    assertTrue_(after.description.indexOf('Testo originale della card') === 0, 'testo originale intatto in testa');
+    assertTrue_(after.description.indexOf('--- Checklist migrata ---') !== -1, 'separatore presente');
+    assertTrue_(after.description.indexOf('[x] Voce A') !== -1, 'voce completata con [x]');
+    assertTrue_(after.description.indexOf('[ ] Voce B') !== -1, 'voce non completata con [ ]');
   });
 }
 
