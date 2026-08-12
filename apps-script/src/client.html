@@ -163,7 +163,10 @@
       modal.close();
       state.activeJob = null;
       state.activeColumnId = null;
+      closeActivityForm_();
     });
+
+    bindActivityForm_();
 
     ['modal-impact', 'modal-manageability'].forEach(function(id) {
       document.getElementById(id).addEventListener('input', updateLivePriorityBadge);
@@ -612,6 +615,8 @@
     document.getElementById('modal-tab-activity').hidden = tab !== 'activity';
     if (tab === 'activity') {
       loadActivityLogForModal_();
+    } else {
+      closeActivityForm_();
     }
   }
 
@@ -825,7 +830,29 @@
     root.innerHTML = '<h3>Storico rientri</h3><p>Rientro ' + escapeHtml(Math.max(1, Number(job.visit_number || 1) - 1)) + ' - causa: ' + escapeHtml(job.rework_cause || 'manual') + '</p>';
   }
 
-  var ACTIVITY_TYPE_LABELS_ = { move: 'Spostamento', note: 'Nota', correction: 'Correzione' };
+  var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
+  var STRUCTURAL_FIELD_LABELS_ = {
+    arrival_ts: 'Data creazione (arrival_ts)',
+    start_ts: 'Data inizio lavorazione (start_ts)',
+    done_ts: 'Data completamento (done_ts)'
+  };
+  var HARD_ERROR_MESSAGES_ = {
+    TS_IN_FUTURO: 'La data non puo\' essere nel futuro.',
+    COLONNA_NON_TROVATA: 'La colonna selezionata non e\' valida.',
+    REASON_OBBLIGATORIA: 'Il motivo della correzione e\' obbligatorio.'
+  };
+  var SEQUENCE_WARNING_MESSAGES_ = {
+    SEQUENZA_MODIFICATA: function(w) {
+      return 'L\'evento del ' + formatEventTimestamp_(w.eventTs) + ' risultera\' provenire da "' +
+        columnLabelById_(w.newFrom) + '" invece che da "' + columnLabelById_(w.oldFrom) + '".';
+    },
+    COLONNA_DOPPIA: function(w) {
+      return 'Due soggiorni consecutivi in "' + columnLabelById_(w.colonna) + '" (probabile evento mancante tra i due).';
+    },
+    ATTESA_SENZA_USCITA: function(w) {
+      return 'Rientro in "' + columnLabelById_(w.colonna) + '" senza un\'uscita registrata nel mezzo.';
+    }
+  };
 
   function columnLabelById_(id) {
     var column = (state.columnMeta || []).filter(function(item) { return item.id === id; })[0];
@@ -833,31 +860,35 @@
   }
 
   function formatEventTimestamp_(ts) {
+    if (!ts) { return '-'; }
     var date = new Date(ts);
-    if (isNaN(date.getTime())) { return ts || ''; }
+    if (isNaN(date.getTime())) { return ts; }
     var pad = function(n) { return String(n).padStart(2, '0'); };
     return pad(date.getDate()) + '/' + pad(date.getMonth() + 1) + '/' + date.getFullYear() + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
   }
 
   function activityEventDescription_(event) {
     if (event.type === 'move') {
-      return 'Da ' + columnLabelById_(event.from) + ' a ' + columnLabelById_(event.to);
+      return event.from ? ('da ' + columnLabelById_(event.from) + ' → ' + columnLabelById_(event.to)) : ('→ ' + columnLabelById_(event.to));
     }
     if (event.type === 'correction') {
-      var reason = event.reason ? ' (' + event.reason + ')' : '';
-      return 'Campo ' + (event.field || '') + ': ' + (event.old || '-') + ' -> ' + (event.new || '-') + reason;
+      var reason = event.reason ? ' — ' + event.reason : '';
+      return (STRUCTURAL_FIELD_LABELS_[event.field] || event.field || '') + ': ' + formatEventTimestamp_(event.old) + ' → ' + formatEventTimestamp_(event.new) + reason;
     }
     return event.note || '';
   }
 
   function loadActivityLogForModal_() {
     if (!state.activeJob) { return; }
+    closeActivityForm_();
+    document.getElementById('modal-activity-banner').hidden = true;
     var list = document.getElementById('modal-activity-list');
     list.innerHTML = '<p class="activity-log-status">Caricamento cronologia...</p>';
     callApi('getActivityLog', { job_id: state.activeJob.job_id }).then(function(data) {
-      renderActivityLog_(data.log || []);
+      state.activityLog = data.log || [];
+      renderActivityLog_(state.activityLog);
     }).catch(function(error) {
-      list.innerHTML = '<p class="activity-log-status">Errore nel caricamento della cronologia.</p>';
+      list.innerHTML = '<p class="activity-log-status">Impossibile caricare la cronologia. Riprovare.</p>';
       showError(error);
     });
   }
@@ -866,51 +897,339 @@
     var list = document.getElementById('modal-activity-list');
     list.innerHTML = '';
     if (!events.length) {
-      list.innerHTML = '<p class="activity-log-empty">Nessun evento registrato.</p>';
+      list.innerHTML = '<p class="activity-log-empty">Nessun evento registrato. Gli spostamenti futuri verranno registrati automaticamente.</p>';
       return;
     }
-    events.forEach(function(event) {
-      list.appendChild(renderActivityLogRow_(event));
+    events.forEach(function(logEvent) {
+      list.appendChild(renderActivityLogRow_(logEvent));
     });
   }
 
-  function renderActivityLogRow_(event) {
+  function renderActivityLogRow_(logEvent) {
     var row = document.createElement('div');
     row.className = 'activity-log-row';
 
     var ts = document.createElement('span');
     ts.className = 'activity-log-ts';
-    ts.textContent = formatEventTimestamp_(event.ts);
+    ts.textContent = formatEventTimestamp_(logEvent.ts);
     row.appendChild(ts);
 
     var typeBadge = document.createElement('span');
     typeBadge.className = 'activity-log-badge activity-log-badge-type';
-    typeBadge.textContent = ACTIVITY_TYPE_LABELS_[event.type] || event.type;
+    typeBadge.textContent = ACTIVITY_TYPE_LABELS_[logEvent.type] || logEvent.type;
     row.appendChild(typeBadge);
 
     var sourceBadge = document.createElement('span');
-    var isAuto = event.source === 'auto';
+    var isAuto = logEvent.source === 'auto';
     sourceBadge.className = 'activity-log-badge activity-log-badge-source ' + (isAuto ? 'activity-log-badge-auto' : 'activity-log-badge-manual');
     sourceBadge.textContent = isAuto ? 'AUTO' : 'MANUALE';
     row.appendChild(sourceBadge);
 
     var description = document.createElement('span');
     description.className = 'activity-log-description';
-    description.textContent = activityEventDescription_(event);
+    description.textContent = activityEventDescription_(logEvent);
     row.appendChild(description);
 
-    // Icone visibili solo sugli eventi manuali; non ancora funzionanti in
-    // questa fase (Fase H) — il click viene collegato in Fase I.
+    // Icone visibili e attive solo sugli eventi manuali: gli eventi auto
+    // non si possono ne' modificare ne' eliminare (bloccato anche lato server).
     if (!isAuto) {
       var actions = document.createElement('span');
       actions.className = 'activity-log-actions';
-      actions.innerHTML =
-        '<button type="button" class="activity-log-edit" aria-label="Modifica evento">&#9998;</button>' +
-        '<button type="button" class="activity-log-delete" aria-label="Elimina evento">&#128465;</button>';
+      var editButton = document.createElement('button');
+      editButton.type = 'button';
+      editButton.className = 'activity-log-edit';
+      editButton.setAttribute('aria-label', 'Modifica evento');
+      editButton.innerHTML = '&#9998;';
+      editButton.addEventListener('click', function() { openActivityForm_(logEvent); });
+      var deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'activity-log-delete';
+      deleteButton.setAttribute('aria-label', 'Elimina evento');
+      deleteButton.innerHTML = '&#128465;';
+      deleteButton.addEventListener('click', function() {
+        state.activityDeleteEventId = logEvent.id;
+        document.getElementById('activity-delete-dialog').showModal();
+      });
+      actions.appendChild(editButton);
+      actions.appendChild(deleteButton);
       row.appendChild(actions);
     }
 
     return row;
+  }
+
+  // --- Fase I: form di inserimento/modifica evento e dialog di warning ---
+
+  function bindActivityForm_() {
+    document.getElementById('modal-activity-add-button').addEventListener('click', function() { openActivityForm_(null); });
+    document.getElementById('activity-form-type').addEventListener('change', updateActivityFormFieldsVisibility_);
+    document.getElementById('activity-form-ts').addEventListener('input', validateActivityFormTs_);
+    document.getElementById('activity-form-save').addEventListener('click', saveActivityForm_);
+    document.getElementById('activity-form-cancel').addEventListener('click', closeActivityForm_);
+
+    document.getElementById('activity-sequence-cancel').addEventListener('click', function() {
+      document.getElementById('activity-sequence-dialog').close();
+      state.activityPending = null;
+    });
+    document.getElementById('activity-sequence-confirm').addEventListener('click', function() {
+      document.getElementById('activity-sequence-dialog').close();
+      if (!state.activityPending) { return; }
+      state.activityPending.payload.force = true;
+      submitActivityPayload_(state.activityPending.payload, state.activityPending.mode);
+    });
+
+    document.getElementById('activity-alignment-cancel').addEventListener('click', function() {
+      document.getElementById('activity-alignment-dialog').close();
+      state.activityPending = null;
+    });
+    document.getElementById('activity-alignment-confirm').addEventListener('click', confirmActivityAlignment_);
+
+    document.getElementById('activity-delete-cancel').addEventListener('click', function() {
+      document.getElementById('activity-delete-dialog').close();
+      state.activityDeleteEventId = null;
+    });
+    document.getElementById('activity-delete-confirm').addEventListener('click', confirmActivityDelete_);
+  }
+
+  function fillActivityColumnSelect_() {
+    var select = document.getElementById('activity-form-to');
+    select.innerHTML = '';
+    (state.columnMeta || []).forEach(function(column) {
+      var option = document.createElement('option');
+      option.value = column.id;
+      option.textContent = column.label;
+      select.appendChild(option);
+    });
+  }
+
+  function updateActivityFormFieldsVisibility_() {
+    var type = document.getElementById('activity-form-type').value;
+    document.getElementById('activity-form-move-fields').hidden = type !== 'move';
+    document.getElementById('activity-form-note-fields').hidden = type !== 'note';
+    document.getElementById('activity-form-correction-fields').hidden = type !== 'correction';
+  }
+
+  function validateActivityFormTs_() {
+    var value = document.getElementById('activity-form-ts').value;
+    var errorEl = document.getElementById('modal-activity-form-error');
+    var saveButton = document.getElementById('activity-form-save');
+    if (value && new Date(value).getTime() > Date.now()) {
+      errorEl.hidden = false;
+      errorEl.textContent = 'La data non puo\' essere nel futuro.';
+      saveButton.disabled = true;
+    } else {
+      errorEl.hidden = true;
+      saveButton.disabled = false;
+    }
+  }
+
+  function openActivityForm_(eventToEdit) {
+    var isEdit = Boolean(eventToEdit);
+    state.activityFormEditId = isEdit ? eventToEdit.id : null;
+    document.getElementById('modal-activity-form-error').hidden = true;
+    document.getElementById('activity-form-save').disabled = false;
+    fillActivityColumnSelect_();
+
+    var tsInput = document.getElementById('activity-form-ts');
+    var typeSelect = document.getElementById('activity-form-type');
+    if (isEdit) {
+      tsInput.value = isoToDatetimeLocal_(eventToEdit.ts);
+      typeSelect.value = eventToEdit.type;
+      document.getElementById('activity-form-to').value = eventToEdit.type === 'move' ? (eventToEdit.to || '') : '';
+      document.getElementById('activity-form-move-note').value = eventToEdit.type === 'move' ? (eventToEdit.note || '') : '';
+      document.getElementById('activity-form-note-text').value = eventToEdit.type === 'note' ? (eventToEdit.note || '') : '';
+      document.getElementById('activity-form-correction-field').value = eventToEdit.field || 'arrival_ts';
+      document.getElementById('activity-form-correction-new').value = eventToEdit.type === 'correction' ? isoToDatetimeLocal_(eventToEdit.new) : '';
+      document.getElementById('activity-form-correction-reason').value = eventToEdit.reason || '';
+    } else {
+      tsInput.value = isoToDatetimeLocal_(new Date().toISOString());
+      typeSelect.value = 'move';
+      document.getElementById('activity-form-to').value = '';
+      document.getElementById('activity-form-move-note').value = '';
+      document.getElementById('activity-form-note-text').value = '';
+      document.getElementById('activity-form-correction-field').value = 'arrival_ts';
+      document.getElementById('activity-form-correction-new').value = '';
+      document.getElementById('activity-form-correction-reason').value = '';
+    }
+    updateActivityFormFieldsVisibility_();
+    document.getElementById('modal-activity-form').hidden = false;
+    document.getElementById('modal-activity-add-button').hidden = true;
+  }
+
+  function closeActivityForm_() {
+    var form = document.getElementById('modal-activity-form');
+    if (form) { form.hidden = true; }
+    var addButton = document.getElementById('modal-activity-add-button');
+    if (addButton) { addButton.hidden = false; }
+    state.activityFormEditId = null;
+  }
+
+  function buildActivityFormPayload_() {
+    var payload = {
+      job_id: state.activeJob.job_id,
+      ts: document.getElementById('activity-form-ts').value,
+      type: document.getElementById('activity-form-type').value
+    };
+    if (payload.type === 'move') {
+      payload.to = document.getElementById('activity-form-to').value;
+      var note = document.getElementById('activity-form-move-note').value.trim();
+      if (note) { payload.note = note; }
+    } else if (payload.type === 'note') {
+      payload.note = document.getElementById('activity-form-note-text').value.trim();
+    } else if (payload.type === 'correction') {
+      var field = document.getElementById('activity-form-correction-field').value;
+      payload.field = field;
+      payload.old = state.activeJob[field] || '';
+      payload.new = document.getElementById('activity-form-correction-new').value;
+      payload.reason = document.getElementById('activity-form-correction-reason').value.trim();
+    }
+    if (state.activityFormEditId) {
+      payload.event_id = state.activityFormEditId;
+    }
+    return payload;
+  }
+
+  function saveActivityForm_() {
+    var errorEl = document.getElementById('modal-activity-form-error');
+    errorEl.hidden = true;
+    var type = document.getElementById('activity-form-type').value;
+
+    if (!document.getElementById('activity-form-ts').value) {
+      errorEl.hidden = false; errorEl.textContent = 'Inserisci data e ora.'; return;
+    }
+    if (type === 'move' && !document.getElementById('activity-form-to').value) {
+      errorEl.hidden = false; errorEl.textContent = 'Seleziona la colonna di destinazione.'; return;
+    }
+    if (type === 'note' && !document.getElementById('activity-form-note-text').value.trim()) {
+      errorEl.hidden = false; errorEl.textContent = 'Inserisci il testo della nota.'; return;
+    }
+    if (type === 'correction') {
+      if (!document.getElementById('activity-form-correction-new').value) {
+        errorEl.hidden = false; errorEl.textContent = 'Inserisci il nuovo valore.'; return;
+      }
+      if (!document.getElementById('activity-form-correction-reason').value.trim()) {
+        errorEl.hidden = false; errorEl.textContent = 'Inserisci il motivo della correzione.'; return;
+      }
+    }
+
+    var payload = buildActivityFormPayload_();
+    var mode = state.activityFormEditId ? 'edit' : 'add';
+    submitActivityPayload_(payload, mode);
+  }
+
+  function submitActivityPayload_(payload, mode) {
+    var saveButton = document.getElementById('activity-form-save');
+    saveButton.disabled = true;
+    var action = mode === 'edit' ? 'updateActivityEvent' : 'addActivityEvent';
+    callApi(action, payload).then(function(data) {
+      if (data && data.ok === false) {
+        handleActivityRejection_(data, payload, mode);
+        return;
+      }
+      state.activityPending = null;
+      if (payload.align_fields) {
+        Object.keys(payload.align_fields).forEach(function(field) {
+          state.activeJob[field] = payload.align_fields[field];
+        });
+      }
+      closeActivityForm_();
+      loadActivityLogForModal_();
+    }).catch(function(error) {
+      var errorEl = document.getElementById('modal-activity-form-error');
+      errorEl.hidden = false;
+      errorEl.textContent = error.message;
+    }).finally(function() {
+      saveButton.disabled = false;
+    });
+  }
+
+  function handleActivityRejection_(data, payload, mode) {
+    if (data.hardErrors && data.hardErrors.length) {
+      var errorEl = document.getElementById('modal-activity-form-error');
+      errorEl.hidden = false;
+      errorEl.textContent = data.hardErrors.map(function(code) {
+        return HARD_ERROR_MESSAGES_[code] || code;
+      }).join(' ');
+      return;
+    }
+    if (data.requiresForce) {
+      state.activityPending = { payload: payload, mode: mode };
+      renderSequenceWarnings_(data.warnings || []);
+      document.getElementById('activity-sequence-dialog').showModal();
+      return;
+    }
+    if (data.alignmentRequired) {
+      state.activityPending = { payload: payload, mode: mode, structuralWarnings: data.structuralWarnings || [] };
+      renderAlignmentWarnings_(data.structuralWarnings || []);
+      document.getElementById('activity-alignment-dialog').showModal();
+    }
+  }
+
+  function renderSequenceWarnings_(warnings) {
+    var root = document.getElementById('activity-sequence-warnings');
+    root.innerHTML = '';
+    warnings.forEach(function(warning) {
+      var p = document.createElement('p');
+      var describe = SEQUENCE_WARNING_MESSAGES_[warning.code];
+      p.textContent = describe ? describe(warning) : warning.code;
+      root.appendChild(p);
+    });
+  }
+
+  function renderAlignmentWarnings_(warnings) {
+    var root = document.getElementById('activity-alignment-list');
+    root.innerHTML = '';
+    warnings.forEach(function(warning) {
+      var row = document.createElement('div');
+      row.className = 'activity-alignment-row';
+      row.dataset.field = warning.field;
+      var groupName = 'align-' + warning.field;
+      row.innerHTML =
+        '<strong>' + escapeHtml(STRUCTURAL_FIELD_LABELS_[warning.field] || warning.field) + '</strong>' +
+        '<span>Attuale: ' + escapeHtml(formatEventTimestamp_(warning.currentValue)) + '</span>' +
+        '<span>Suggerito: ' + escapeHtml(formatEventTimestamp_(warning.suggestedValue)) + '</span>' +
+        '<label><input type="radio" name="' + groupName + '" value="update" checked> Aggiorna</label>' +
+        '<label><input type="radio" name="' + groupName + '" value="keep"> Mantieni attuale</label>';
+      root.appendChild(row);
+    });
+  }
+
+  function confirmActivityAlignment_() {
+    document.getElementById('activity-alignment-dialog').close();
+    if (!state.activityPending) { return; }
+    var alignFields = {};
+    document.querySelectorAll('#activity-alignment-list .activity-alignment-row').forEach(function(row) {
+      var field = row.dataset.field;
+      var checked = row.querySelector('input[type="radio"]:checked');
+      if (checked && checked.value === 'update') {
+        var warning = (state.activityPending.structuralWarnings || []).filter(function(w) { return w.field === field; })[0];
+        if (warning) { alignFields[field] = warning.suggestedValue; }
+      }
+    });
+    var payload = state.activityPending.payload;
+    payload.align_fields = alignFields;
+    submitActivityPayload_(payload, state.activityPending.mode);
+  }
+
+  function confirmActivityDelete_() {
+    document.getElementById('activity-delete-dialog').close();
+    var eventId = state.activityDeleteEventId;
+    state.activityDeleteEventId = null;
+    if (!eventId || !state.activeJob) { return; }
+    callApi('deleteActivityEvent', { job_id: state.activeJob.job_id, event_id: eventId }).then(function(data) {
+      loadActivityLogForModal_();
+      if (data.structuralWarnings && data.structuralWarnings.length) {
+        showActivityBanner_(data.structuralWarnings);
+      }
+    }).catch(showError);
+  }
+
+  function showActivityBanner_(warnings) {
+    var banner = document.getElementById('modal-activity-banner');
+    banner.hidden = false;
+    banner.innerHTML = warnings.map(function(warning) {
+      return '<p>' + escapeHtml((STRUCTURAL_FIELD_LABELS_[warning.field] || warning.field) + ': valore suggerito ' + formatEventTimestamp_(warning.suggestedValue)) + '</p>';
+    }).join('');
   }
 
   function moveJob(jobId, status) {
