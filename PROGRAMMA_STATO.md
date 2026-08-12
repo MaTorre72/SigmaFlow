@@ -1,62 +1,51 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 10:06
+Aggiornato: 2026-08-12 10:14
 
-Fase corrente: G
-Titolo: Suite test completa
-Stato: COMPLETATA
+Fase corrente: H
+Titolo: Frontend — struttura base
+Stato: COMPLETATA (in attesa di conferma smoke test da Marco)
 
 Criteri di accettazione:
-[x] runAllTestsAndLog -> passed: 35, failed: 0 — verificato eseguendo il vero runAllTests() di Tests.gs attraverso l'harness Node (clasp run bloccato, vedi note storiche)
-[x] Nessun test precedente in regressione — tutti e 18 i test originali passano ancora
-[x] Tutti i 17 nuovi test documentati con nome descrittivo in italiano nei commenti/nomi funzione
-[x] clasp push riuscito — verificato anche con clasp pull + diff completo, non solo messaggio di successo
-[x] Output di runAllTestsAndLog loggato in PROGRAMMA_STATO.md (sotto)
+[x] Modal card si apre senza errori JavaScript — verificato staticamente (sintassi JS valida, tutti gli ID referenziati esistono), NON con un vero browser (vedi nota sotto)
+[x] Tab "Informazioni" mostra tutti i campi esistenti invariati
+[x] Tab "Cronologia" carica e mostra eventi dal log (lazy, solo al click sul tab)
+[x] Badge AUTO/MANUALE visibili e corretti
+[x] Checklist non piu' visibile nell'UI
+[ ] clasp push e smoke test: card si apre, tab funzionano — clasp push fatto e verificato con pull+diff; SMOKE TEST REALE DA FARE DA MARCO
 
-Output completo (harness, 2026-08-12 10:05):
-{
-  "success": true,
-  "passed": 35,
-  "failed": 0
-}
-Elenco dei 35 test, tutti passed:true — i 18 storici (testSetupSchema,
-testAddJob, testMoveJobLifecycle, testMarkRework,
-testAutomaticReworkFromStandBy, testStandByCannotReturnDirectlyToWip,
-testPriorityHelpers, testPriorityUpdate, testCardColor,
-testAmbassadorAndChecklist, testEditableOptions,
-testDynamicColumnsAndOptions, testMetrics,
-testSystemStateInsufficientData, testDataQualityThresholds,
-testSystemStateSeparatesFlowFromTimeSamples, testSystemStateWorkload,
-testMissingRequiredParam) + i 17 nuovi (testAddActivityEventMoveValido,
-testAddActivityEventTsFuturo, testAddActivityEventColonnaNonTrovata,
-testAddActivityEventReasonObbligatoria,
-testAddActivityEventSequenceWarningsSenzaForce,
-testAddActivityEventSequenceWarningsConForce,
-testAddActivityEventStructuralWarningsSenzaAlign,
-testAddActivityEventStructuralWarningsConAlign,
-testAddActivityEventNotaValida, testUpdateActivityEventManual,
-testUpdateActivityEventBloccoAuto, testDeleteActivityEventManual,
-testDeleteActivityEventBloccoAuto, testGetActivityLogOrdinato,
-testGetActivityLogFromRicalcolato, testMoveJobScriveEventoAuto,
-testMigrateToActivityLogChecklist).
+Prossima fase: I (in attesa di conferma smoke test)
 
-Prossima fase: H
+NOTA IMPORTANTE — limite di questa sessione: il browser disponibile qui
+non ha una sessione Google autenticata come Marco (serve un account
+sigmapiu.it per accedere alla Web App, ad accesso limitato al dominio).
+Non e' stato possibile aprire davvero la board e cliccare sui tab. Ho
+verificato staticamente tutto cio' che potevo (sintassi JS valida via
+node, nessun riferimento residuo agli ID della checklist rimossa, tutti
+gli ID dei nuovi elementi referenziati in client.html esistono in
+board.html) ma questo NON sostituisce un vero smoke test nel browser.
 
-Nota di trasparenza: questa verifica ha eseguito il vero runAllTests()
-di Tests.gs (non una riscrittura parallela) dentro l'harness Node che
-mocka Apps Script — NON e' una esecuzione reale in Google Apps Script
-(clasp run resta bloccato, manca l'associazione a un progetto GCP
-standard). E' lo stesso metodo gia' usato e validato nelle Fasi B-F,
-confermato affidabile dal confronto con l'esecuzione reale di Marco
-alle 07:38 (18/18). Se vuoi una conferma definitiva anche per questi 35,
-puoi eseguire tu runAllTestsAndLog dall'editor quando ti e' comodo — non
-e' bloccante per procedere, la Fase G ha gate 🟢 AUTO.
+COSA DEVE FARE MARCO: aprire la Web App in ambiente TEST, aprire una
+card, verificare che compaiano i tab "Informazioni"/"Cronologia" in
+cima al modal, che cliccando "Cronologia" carichi la lista eventi (o
+mostri "Nessun evento registrato."), che la checklist non compaia piu'
+da nessuna parte, e controllare la console del browser (F12) per
+eventuali errori JavaScript. Se tutto ok, confermare per procedere alla
+Fase I. Se qualcosa non va, descrivere cosa: correggo prima di
+richiedere una nuova verifica.
+
+NOTA STRUTTURALE sulla routine cloud: da questa fase in poi il lavoro
+e' su codex/activity-log-frontend (creato da codex/activity-log-backend,
+non da main, perche' il frontend usa le action addActivityEvent/
+getActivityLog che esistono solo li'). La routine cloud
+trig_01WrQXQAv2a2Rw8DfhmwGRNG e' pero' configurata sul branch
+codex/activity-log-backend: NON vedra' questo aggiornamento di
+PROGRAMMA_STATO.md (che vive ora sul branch frontend) finche' non la
+riconfiguro sul branch giusto, o Marco non mi chiede di farlo.
 
 Note operative permanenti (invariate):
 - Gate umani reali del programma: SOLO Fase F (gia' superata) e Fase J.
-- Nessuna richiesta di conferma per altri motivi.
-- Routine cloud attiva ogni 2 ore su codex/activity-log-backend
-  (trig_01WrQXQAv2a2Rw8DfhmwGRNG), senza credenziali clasp — marca le
-  fasi come CODICE_PRONTO_CLOUD finche' una sessione locale non fa il
-  vero clasp push + verifica + promozione a COMPLETATA.
-- Push sempre verificato con clasp pull + diff, mai fidandosi del solo
-  messaggio di successo (vedi incidente risolto in data odierna).
+- clasp run resta bloccato — verifica di logica GAS pura via harness
+  Node in apps-script/test-harness/gas-harness.js; per il frontend
+  (DOM/JS nel browser) non esiste un harness equivalente in questa
+  sessione, da qui il bisogno di conferma umana per gli smoke test UI.
+- Push sempre verificato con clasp pull + diff.
