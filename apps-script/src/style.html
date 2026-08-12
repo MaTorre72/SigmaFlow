@@ -553,7 +553,6 @@
   }
 
   .priority-editor,
-  .checklist-panel,
   .rework-history {
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -585,13 +584,68 @@
     color: inherit;
   }
 
-  .checklist-panel h3 { margin: 0 0 8px; }
-  .checklist-list { display: grid; gap: 6px; }
-  .checklist-item { align-items: center; display: grid; gap: 8px; grid-template-columns: auto 1fr auto; }
-  .checklist-item input { min-height: auto; }
-  .checklist-item:has(input:checked) span { color: var(--muted); text-decoration: line-through; }
-  .checklist-item button { min-height: 28px; padding: 2px 8px; }
-  .checklist-composer { display: grid; gap: 8px; grid-template-columns: 1fr auto; margin-top: 10px; }
+  .modal-tabs {
+    display: flex;
+    gap: 8px;
+    grid-column: 1 / -1;
+    padding: 16px 24px 0;
+  }
+
+  .modal-activity-panel {
+    grid-column: 1 / -1;
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 24px;
+  }
+
+  .activity-log-status,
+  .activity-log-empty {
+    color: var(--muted);
+  }
+
+  .activity-log-row {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 10px;
+    grid-template-columns: auto auto auto 1fr auto;
+    padding: 10px 0;
+  }
+
+  .activity-log-ts {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .activity-log-badge {
+    align-items: center;
+    border-radius: 999px;
+    display: inline-flex;
+    font-size: 11px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+
+  .activity-log-badge-type {
+    background: #eef1f5;
+    color: var(--muted);
+  }
+
+  .activity-log-badge-auto {
+    background: #eef1f5;
+    color: var(--muted);
+  }
+
+  .activity-log-badge-manual {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .activity-log-actions button {
+    min-height: 28px;
+    padding: 2px 8px;
+  }
 
   .priority-editor label {
     grid-template-columns: 1fr auto;

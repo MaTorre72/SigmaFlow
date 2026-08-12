@@ -167,7 +167,9 @@
 
     document.getElementById('modal-create-button').addEventListener('click', saveCardFromModal);
     document.getElementById('modal-correct-apply').addEventListener('click', applyTimestampCorrection);
-    document.getElementById('modal-checklist-add').addEventListener('click', addChecklistItem);
+    document.querySelectorAll('.modal-tabs .nav-button').forEach(function(button) {
+      button.addEventListener('click', function() { setModalTab_(button.dataset.modalTab); });
+    });
     document.getElementById('modal-priority-class').addEventListener('change', updateLivePriorityBadge);
     document.getElementById('modal-assignee').addEventListener('change', handleEditableSelectChange);
     document.getElementById('modal-ambassador').addEventListener('change', handleEditableSelectChange);
@@ -556,12 +558,13 @@
     document.getElementById('card-modal-context').textContent = 'Modifica card';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Salva e chiudi';
-    renderChecklist(parseChecklist_(job.checklist_json));
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
     document.getElementById('modal-timestamp-correction').hidden = false;
     fillTimestampCorrectionFields(job);
+    document.querySelector('.modal-tabs').hidden = false;
+    setModalTab_('info');
     document.getElementById('card-modal').showModal();
   }
 
@@ -586,12 +589,26 @@
     document.getElementById('modal-rework-history').hidden = true;
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
-    renderChecklist([]);
     resetCustomValueFields();
     updateLivePriorityBadge();
     document.getElementById('modal-timestamp-correction').hidden = true;
+    // La Cronologia richiede un job_id gia' esistente: nascosta in creazione.
+    document.querySelector('.modal-tabs').hidden = true;
+    setModalTab_('info');
     document.getElementById('card-modal').showModal();
     document.getElementById('modal-title').focus();
+  }
+
+  function setModalTab_(tab) {
+    document.querySelectorAll('.modal-tabs .nav-button').forEach(function(button) {
+      button.classList.toggle('active', button.dataset.modalTab === tab);
+    });
+    document.getElementById('modal-tab-info-main').hidden = tab !== 'info';
+    document.getElementById('modal-tab-info-sidebar').hidden = tab !== 'info';
+    document.getElementById('modal-tab-activity').hidden = tab !== 'activity';
+    if (tab === 'activity') {
+      loadActivityLogForModal_();
+    }
   }
 
   function fillModalSelects() {
@@ -693,7 +710,10 @@
       description: document.getElementById('modal-description').value,
       assignee: document.getElementById('modal-assignee').value,
       ambassador: document.getElementById('modal-ambassador').value,
-      checklist_json: JSON.stringify(readChecklistFromDom_()),
+      // Non c'e' piu' una UI per la checklist (Fase H): si rimanda invariato
+      // il valore che la card aveva gia', invece di ricostruirlo da un DOM
+      // che non esiste piu'. Su una card nuova non esiste ancora: '[]'.
+      checklist_json: state.activeJob ? state.activeJob.checklist_json : '[]',
       tag: document.getElementById('modal-tag').value,
       size_class: document.getElementById('modal-size').value,
       impact: document.getElementById('modal-impact').value,
@@ -719,41 +739,6 @@
         }
       });
       return Promise.all(requests).then(function() { return payload; });
-    });
-  }
-
-  function parseChecklist_(value) {
-    try { var parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : []; } catch (err) { return []; }
-  }
-
-  function renderChecklist(items) {
-    var root = document.getElementById('modal-checklist');
-    root.innerHTML = '';
-    items.forEach(function(item) {
-      var row = document.createElement('label');
-      row.className = 'checklist-item';
-      row.innerHTML = '<input type="checkbox"><span></span><button type="button" aria-label="Rimuovi">x</button>';
-      row.querySelector('input').checked = coerceBool(item.done);
-      row.querySelector('span').textContent = item.text || '';
-      row.querySelector('button').onclick = function() { row.remove(); };
-      root.appendChild(row);
-    });
-  }
-
-  function addChecklistItem() {
-    var input = document.getElementById('modal-checklist-new');
-    var text = input.value.trim();
-    if (!text) { return; }
-    var items = readChecklistFromDom_();
-    items.push({ text: text, done: false });
-    renderChecklist(items);
-    input.value = '';
-    input.focus();
-  }
-
-  function readChecklistFromDom_() {
-    return Array.prototype.map.call(document.querySelectorAll('#modal-checklist .checklist-item'), function(row) {
-      return { text: row.querySelector('span').textContent, done: row.querySelector('input').checked };
     });
   }
 
@@ -834,6 +819,94 @@
     }
     root.hidden = false;
     root.innerHTML = '<h3>Storico rientri</h3><p>Rientro ' + escapeHtml(Math.max(1, Number(job.visit_number || 1) - 1)) + ' - causa: ' + escapeHtml(job.rework_cause || 'manual') + '</p>';
+  }
+
+  var ACTIVITY_TYPE_LABELS_ = { move: 'Spostamento', note: 'Nota', correction: 'Correzione' };
+
+  function columnLabelById_(id) {
+    var column = (state.columnMeta || []).filter(function(item) { return item.id === id; })[0];
+    return column ? column.label : (id || '-');
+  }
+
+  function formatEventTimestamp_(ts) {
+    var date = new Date(ts);
+    if (isNaN(date.getTime())) { return ts || ''; }
+    var pad = function(n) { return String(n).padStart(2, '0'); };
+    return pad(date.getDate()) + '/' + pad(date.getMonth() + 1) + '/' + date.getFullYear() + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+
+  function activityEventDescription_(event) {
+    if (event.type === 'move') {
+      return 'Da ' + columnLabelById_(event.from) + ' a ' + columnLabelById_(event.to);
+    }
+    if (event.type === 'correction') {
+      var reason = event.reason ? ' (' + event.reason + ')' : '';
+      return 'Campo ' + (event.field || '') + ': ' + (event.old || '-') + ' -> ' + (event.new || '-') + reason;
+    }
+    return event.note || '';
+  }
+
+  function loadActivityLogForModal_() {
+    if (!state.activeJob) { return; }
+    var list = document.getElementById('modal-activity-list');
+    list.innerHTML = '<p class="activity-log-status">Caricamento cronologia...</p>';
+    callApi('getActivityLog', { job_id: state.activeJob.job_id }).then(function(data) {
+      renderActivityLog_(data.log || []);
+    }).catch(function(error) {
+      list.innerHTML = '<p class="activity-log-status">Errore nel caricamento della cronologia.</p>';
+      showError(error);
+    });
+  }
+
+  function renderActivityLog_(events) {
+    var list = document.getElementById('modal-activity-list');
+    list.innerHTML = '';
+    if (!events.length) {
+      list.innerHTML = '<p class="activity-log-empty">Nessun evento registrato.</p>';
+      return;
+    }
+    events.forEach(function(event) {
+      list.appendChild(renderActivityLogRow_(event));
+    });
+  }
+
+  function renderActivityLogRow_(event) {
+    var row = document.createElement('div');
+    row.className = 'activity-log-row';
+
+    var ts = document.createElement('span');
+    ts.className = 'activity-log-ts';
+    ts.textContent = formatEventTimestamp_(event.ts);
+    row.appendChild(ts);
+
+    var typeBadge = document.createElement('span');
+    typeBadge.className = 'activity-log-badge activity-log-badge-type';
+    typeBadge.textContent = ACTIVITY_TYPE_LABELS_[event.type] || event.type;
+    row.appendChild(typeBadge);
+
+    var sourceBadge = document.createElement('span');
+    var isAuto = event.source === 'auto';
+    sourceBadge.className = 'activity-log-badge activity-log-badge-source ' + (isAuto ? 'activity-log-badge-auto' : 'activity-log-badge-manual');
+    sourceBadge.textContent = isAuto ? 'AUTO' : 'MANUALE';
+    row.appendChild(sourceBadge);
+
+    var description = document.createElement('span');
+    description.className = 'activity-log-description';
+    description.textContent = activityEventDescription_(event);
+    row.appendChild(description);
+
+    // Icone visibili solo sugli eventi manuali; non ancora funzionanti in
+    // questa fase (Fase H) — il click viene collegato in Fase I.
+    if (!isAuto) {
+      var actions = document.createElement('span');
+      actions.className = 'activity-log-actions';
+      actions.innerHTML =
+        '<button type="button" class="activity-log-edit" aria-label="Modifica evento">&#9998;</button>' +
+        '<button type="button" class="activity-log-delete" aria-label="Elimina evento">&#128465;</button>';
+      row.appendChild(actions);
+    }
+
+    return row;
   }
 
   function moveJob(jobId, status) {
