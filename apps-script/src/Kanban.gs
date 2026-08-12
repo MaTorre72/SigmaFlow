@@ -54,7 +54,12 @@ function routeAction_(params) {
     addJob: addJob,
     moveJob: moveJob,
     updateJob: updateJob,
+    addActivityEvent: addActivityEvent,
+    getActivityLog: getActivityLog,
+    updateActivityEvent: updateActivityEvent,
+    deleteActivityEvent: deleteActivityEvent,
     correctJobTimestamps: correctJobTimestamps,
+    migrateToActivityLog: migrateToActivityLog,
     deleteJob: deleteJob,
     updateColumnLabel: updateColumnLabel,
     addColumn: addColumn,
@@ -180,6 +185,21 @@ function addJob(params) {
     correction_log_json: '[]'
   };
 
+  // Evento automatico di creazione, stesso pattern dell'evento auto scritto
+  // da moveJob: from null perche' non esiste una colonna di provenienza.
+  // Senza questo, ogni nuova card nascerebbe con la Cronologia vuota anche
+  // se arrival_ts e' gia' valorizzato correttamente sul campo strutturato.
+  var creationEvent = {
+    id: generateActivityEventId_(),
+    ts: now,
+    type: 'move',
+    source: 'auto',
+    to: targetColumn.id,
+    from: null,
+    note: ''
+  };
+  job.activity_log_json = serializeActivityLog_([creationEvent]);
+
   sheet.appendRow(jobToRow_(job));
 
   refreshCaseVisitCount_(ss, caseId);
@@ -232,6 +252,28 @@ function moveJob(params) {
   job.status = status;
   writeJobToRow_(sheet, row, headers, job);
   refreshCaseVisitCount_(getSpreadsheet_(), job.case_id);
+
+  // Evento automatico per l'activity log: scrittura diretta (non passa da
+  // addActivityEvent) per evitare la doppia validazione su un movimento
+  // che il sistema ha gia' autorizzato spostando la card.
+  var autoEvent = {
+    id: generateActivityEventId_(),
+    ts: now,
+    type: 'move',
+    source: 'auto',
+    to: targetColumn.id,
+    from: sourceColumn.id,
+    note: ''
+  };
+  if (job.is_rework) {
+    autoEvent.is_rework = true;
+  }
+
+  var rawLog = sheet.getRange(row, headers.activity_log_json).getValue();
+  var log = parseActivityLog_(rawLog);
+  log.push(autoEvent);
+  log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+  sheet.getRange(row, headers.activity_log_json).setValue(serializeActivityLog_(log));
 
   return ok_({ job_id: params.job_id, status: status, job: job });
 }
@@ -292,6 +334,216 @@ function updateJob(params) {
 
   writeJobToRow_(sheet, row, headers, job);
   return ok_({ job_id: params.job_id, job: job });
+}
+
+// Costruisce l'evento candidato solo con i campi effettivamente forniti,
+// per non riempire il log di chiavi vuote/undefined.
+function buildActivityEventCandidate_(params, log) {
+  var candidate = {
+    id: generateActivityEventId_(),
+    ts: params.ts,
+    type: params.type,
+    source: 'manual',
+    from: computeFrom_(log, params.ts)
+  };
+  if (params.type === 'move') {
+    candidate.to = params.to;
+  }
+  if (params.type === 'correction') {
+    candidate.reason = params.reason;
+  }
+  ['note', 'field', 'old', 'new'].forEach(function(key) {
+    if (params[key] !== undefined) {
+      candidate[key] = params[key];
+    }
+  });
+  return candidate;
+}
+
+function addActivityEvent(params) {
+  var jobId = requireParam_(params, 'job_id');
+  requireParam_(params, 'type');
+  requireParam_(params, 'ts');
+
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Job non trovato: ' + jobId);
+  }
+
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  var log = parseActivityLog_(job.activity_log_json);
+  var candidate = buildActivityEventCandidate_(params, log);
+
+  var validation = validateSequence_(log, candidate);
+  if (validation.hardErrors.length) {
+    return ok_({ ok: false, hardErrors: validation.hardErrors });
+  }
+
+  if (validation.sequenceWarnings.length && !coerceBoolean_(params.force)) {
+    return ok_({ ok: false, requiresForce: true, warnings: validation.sequenceWarnings });
+  }
+
+  var structuralWarnings = checkStructuralAlignment_(job, candidate);
+  var alignFields = params.align_fields || {};
+  var uncoveredWarnings = structuralWarnings.filter(function(warning) {
+    return alignFields[warning.field] === undefined;
+  });
+  if (uncoveredWarnings.length) {
+    return ok_({ ok: false, alignmentRequired: true, structuralWarnings: structuralWarnings });
+  }
+
+  log.push(candidate);
+  log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+
+  Object.keys(alignFields).forEach(function(field) {
+    if (JOB_HEADERS.indexOf(field) !== -1) {
+      job[field] = alignFields[field];
+    }
+  });
+
+  job.activity_log_json = serializeActivityLog_(log);
+  writeJobToRow_(sheet, row, headers, job);
+
+  return ok_({ ok: true, job_id: jobId, event: candidate });
+}
+
+function getActivityLog(params) {
+  var jobId = requireParam_(params, 'job_id');
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Job non trovato: ' + jobId);
+  }
+
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  var log = parseActivityLog_(job.activity_log_json);
+
+  // Ricalcola "from" per ogni evento move al momento della lettura, cosi'
+  // resta coerente anche su dati migrati senza from o dopo modifiche/cancellazioni.
+  var recalculated = log.map(function(event) {
+    if (event.type !== 'move') {
+      return event;
+    }
+    var updated = Object.assign({}, event);
+    updated.from = computeFrom_(log, event.ts);
+    return updated;
+  });
+
+  return ok_({ job_id: jobId, log: recalculated });
+}
+
+function updateActivityEvent(params) {
+  var jobId = requireParam_(params, 'job_id');
+  var eventId = requireParam_(params, 'event_id');
+
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Job non trovato: ' + jobId);
+  }
+
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  var log = parseActivityLog_(job.activity_log_json);
+
+  var existing = log.filter(function(event) { return event.id === eventId; })[0];
+  if (!existing) {
+    throw new Error('Evento non trovato: ' + eventId);
+  }
+  if (existing.source === 'auto') {
+    throw new Error('EVENTO_AUTO_NON_MODIFICABILE');
+  }
+
+  var remaining = log.filter(function(event) { return event.id !== eventId; });
+
+  // Parte dall'evento esistente e sovrascrive solo i campi passati in
+  // params, poi ricalcola from sul log privato dell'evento in modifica.
+  var mergedParams = Object.assign({}, existing, params);
+  var candidate = buildActivityEventCandidate_(mergedParams, remaining);
+  candidate.id = existing.id;
+
+  var validation = validateSequence_(remaining, candidate);
+  if (validation.hardErrors.length) {
+    return ok_({ ok: false, hardErrors: validation.hardErrors });
+  }
+
+  if (validation.sequenceWarnings.length && !coerceBoolean_(params.force)) {
+    return ok_({ ok: false, requiresForce: true, warnings: validation.sequenceWarnings });
+  }
+
+  var structuralWarnings = checkStructuralAlignment_(job, candidate);
+  var alignFields = params.align_fields || {};
+  var uncoveredWarnings = structuralWarnings.filter(function(warning) {
+    return alignFields[warning.field] === undefined;
+  });
+  if (uncoveredWarnings.length) {
+    return ok_({ ok: false, alignmentRequired: true, structuralWarnings: structuralWarnings });
+  }
+
+  remaining.push(candidate);
+  remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+
+  Object.keys(alignFields).forEach(function(field) {
+    if (JOB_HEADERS.indexOf(field) !== -1) {
+      job[field] = alignFields[field];
+    }
+  });
+
+  job.activity_log_json = serializeActivityLog_(remaining);
+  writeJobToRow_(sheet, row, headers, job);
+
+  return ok_({ ok: true, job_id: jobId, event: candidate });
+}
+
+function deleteActivityEvent(params) {
+  var jobId = requireParam_(params, 'job_id');
+  var eventId = requireParam_(params, 'event_id');
+
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Job non trovato: ' + jobId);
+  }
+
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  var log = parseActivityLog_(job.activity_log_json);
+
+  var existing = log.filter(function(event) { return event.id === eventId; })[0];
+  if (!existing) {
+    throw new Error('Evento non trovato: ' + eventId);
+  }
+  if (existing.source === 'auto') {
+    throw new Error('EVENTO_AUTO_NON_ELIMINABILE');
+  }
+
+  var remaining = log.filter(function(event) { return event.id !== eventId; });
+
+  // Ricalcola "from" per gli eventi move rimasti, cosi' l'evento successivo
+  // a quello cancellato torna a puntare alla colonna di provenienza corretta.
+  var recalculated = remaining.map(function(event) {
+    if (event.type !== 'move') {
+      return event;
+    }
+    var updated = Object.assign({}, event);
+    updated.from = computeFrom_(remaining, event.ts);
+    return updated;
+  });
+
+  // Warning informativi (non bloccanti per la cancellazione): confronta
+  // l'ultimo evento move rimasto con i campi strutturati del job, per
+  // segnalare eventuali incoerenze introdotte dalla cancellazione.
+  var moves = recalculated.filter(function(event) { return event.type === 'move'; });
+  var lastMove = moves.length ? moves[moves.length - 1] : null;
+  var structuralWarnings = lastMove ? checkStructuralAlignment_(job, lastMove) : [];
+
+  job.activity_log_json = serializeActivityLog_(recalculated);
+  writeJobToRow_(sheet, row, headers, job);
+
+  return ok_({ job_id: jobId, event_id: eventId, structuralWarnings: structuralWarnings });
 }
 
 function correctJobTimestamps(params) {

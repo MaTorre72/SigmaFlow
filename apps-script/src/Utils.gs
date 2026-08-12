@@ -113,6 +113,14 @@ function suggestPriorityClass(score) {
   return 'p3_critical';
 }
 
+// Confronta due timestamp ISO come istanti reali (new Date), non come
+// stringhe: formati diversi (offset +02:00 vs Z vs assente, come nel caso
+// dei datetime-local del frontend) rendono il confronto lessicografico
+// tra stringhe inaffidabile. Restituisce <0, 0, >0 come Array.prototype.sort.
+function compareTs_(a, b) {
+  return new Date(a).getTime() - new Date(b).getTime();
+}
+
 function diffDays(tsStart, tsEnd) {
   if (!tsStart || !tsEnd) {
     return '';

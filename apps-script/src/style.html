@@ -499,6 +499,11 @@
     grid-template-columns: minmax(0, 65%) minmax(260px, 35%);
     min-height: 560px;
     position: relative;
+    /* Senza questo, le righe implicite della grid (tab nav, colonna
+       principale/laterale, pannello cronologia) si distendono per
+       riempire i 560px di min-height, spingendo tutto verso il basso
+       e facendo gonfiare a dismisura la barra dei tab. */
+    align-content: start;
   }
 
   .modal-close {
@@ -513,12 +518,15 @@
     display: grid;
     gap: 12px;
     padding: 24px;
+    /* Idem: senza questo i campi si distendono per riempire l'altezza
+       imposta dalla colonna piu' alta, invece di restare compatti in
+       cima con lo spazio in eccesso lasciato in fondo. */
+    align-content: start;
   }
 
   .modal-sidebar {
     background: #f6f8fa;
     border-left: 1px solid var(--line);
-    align-content: start;
   }
 
   .modal-title-input {
@@ -553,7 +561,6 @@
   }
 
   .priority-editor,
-  .checklist-panel,
   .rework-history {
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -585,13 +592,131 @@
     color: inherit;
   }
 
-  .checklist-panel h3 { margin: 0 0 8px; }
-  .checklist-list { display: grid; gap: 6px; }
-  .checklist-item { align-items: center; display: grid; gap: 8px; grid-template-columns: auto 1fr auto; }
-  .checklist-item input { min-height: auto; }
-  .checklist-item:has(input:checked) span { color: var(--muted); text-decoration: line-through; }
-  .checklist-item button { min-height: 28px; padding: 2px 8px; }
-  .checklist-composer { display: grid; gap: 8px; grid-template-columns: 1fr auto; margin-top: 10px; }
+  .modal-tabs {
+    display: flex;
+    gap: 8px;
+    grid-column: 1 / -1;
+    padding: 16px 24px 0;
+  }
+
+  .modal-activity-panel {
+    grid-column: 1 / -1;
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 24px;
+  }
+
+  .activity-log-status,
+  .activity-log-empty {
+    color: var(--muted);
+  }
+
+  .activity-log-row {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 10px;
+    grid-template-columns: auto auto auto 1fr auto;
+    padding: 10px 0;
+  }
+
+  .activity-log-ts {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .activity-log-badge {
+    align-items: center;
+    border-radius: 999px;
+    display: inline-flex;
+    font-size: 11px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+
+  .activity-log-badge-type {
+    background: #eef1f5;
+    color: var(--muted);
+  }
+
+  .activity-log-badge-auto {
+    background: #eef1f5;
+    color: var(--muted);
+  }
+
+  .activity-log-badge-manual {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .activity-log-actions button {
+    min-height: 28px;
+    padding: 2px 8px;
+  }
+
+  .activity-log-banner {
+    background: #fff1cc;
+    border-radius: 8px;
+    color: #7a5200;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+  }
+
+  .activity-log-banner p {
+    margin: 0;
+  }
+
+  .activity-log-banner p + p {
+    margin-top: 4px;
+  }
+
+  #modal-activity-add-button {
+    margin-top: 14px;
+  }
+
+  .activity-event-form {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 14px;
+  }
+
+  .activity-form-error {
+    background: #fdecec;
+    border-radius: 6px;
+    color: var(--danger);
+    padding: 8px 10px;
+  }
+
+  .activity-form-fields {
+    display: grid;
+    gap: 12px;
+  }
+
+  .activity-warning-list p,
+  .activity-alignment-list {
+    margin: 0 0 10px;
+  }
+
+  .activity-alignment-row {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    display: grid;
+    gap: 4px;
+    margin-bottom: 10px;
+    padding: 10px;
+  }
+
+  .activity-alignment-row label {
+    align-items: center;
+    display: inline-flex;
+    gap: 6px;
+    margin-right: 16px;
+    min-height: auto;
+  }
 
   .priority-editor label {
     grid-template-columns: 1fr auto;

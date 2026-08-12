@@ -42,18 +42,17 @@
 <dialog id="card-modal" class="card-modal">
   <form method="dialog" class="modal-shell">
     <button type="button" id="modal-close-button" class="modal-close" aria-label="Chiudi">x</button>
-    <section class="modal-main">
+    <nav class="modal-tabs">
+      <button type="button" class="nav-button active" data-modal-tab="info">Informazioni</button>
+      <button type="button" class="nav-button" data-modal-tab="activity">Cronologia</button>
+    </nav>
+    <section class="modal-main" id="modal-tab-info-main">
       <h2 id="card-modal-context" class="modal-context">Modifica card</h2>
       <input id="modal-client" class="modal-client-input" name="client" placeholder="Nome cliente">
       <input id="modal-title" class="modal-title-input" name="title" placeholder="Nome progetto">
       <textarea id="modal-description" name="description" rows="12" placeholder="Aggiungi note operative..."></textarea>
-      <section class="checklist-panel">
-        <h3>Checklist</h3>
-        <div id="modal-checklist" class="checklist-list"></div>
-        <div class="checklist-composer"><input id="modal-checklist-new" placeholder="Nuovo controllo o promemoria"><button id="modal-checklist-add" type="button">Aggiungi</button></div>
-      </section>
     </section>
-    <aside class="modal-sidebar">
+    <aside class="modal-sidebar" id="modal-tab-info-sidebar">
       <label>Assegnatario
         <select id="modal-assignee" name="assignee"></select>
       </label>
@@ -136,6 +135,90 @@
       <button type="button" id="modal-create-button" class="primary-button">Salva e chiudi</button>
       <button type="button" class="archive-button" disabled>Archivia</button>
     </aside>
+    <section id="modal-tab-activity" class="modal-activity-panel" hidden>
+      <div id="modal-activity-banner" class="activity-log-banner" hidden></div>
+      <div id="modal-activity-list" class="activity-log-list"></div>
+      <button type="button" id="modal-activity-add-button" class="secondary-button">Aggiungi evento</button>
+      <div id="modal-activity-form" class="activity-event-form" hidden>
+        <div id="modal-activity-form-error" class="activity-form-error" hidden></div>
+        <label>Data e ora
+          <input id="activity-form-ts" type="datetime-local">
+        </label>
+        <label>Tipo evento
+          <select id="activity-form-type">
+            <option value="move">Spostamento</option>
+            <option value="note">Nota</option>
+            <option value="correction">Correzione timestamp</option>
+          </select>
+        </label>
+        <div id="activity-form-move-fields" class="activity-form-fields">
+          <label>Verso colonna
+            <select id="activity-form-to"></select>
+          </label>
+          <label>Nota opzionale
+            <input id="activity-form-move-note" type="text" placeholder="Aggiungi una nota...">
+          </label>
+        </div>
+        <div id="activity-form-note-fields" class="activity-form-fields" hidden>
+          <label>Testo
+            <textarea id="activity-form-note-text" rows="3"></textarea>
+          </label>
+        </div>
+        <div id="activity-form-correction-fields" class="activity-form-fields" hidden>
+          <label>Campo da correggere
+            <select id="activity-form-correction-field">
+              <option value="arrival_ts">Data creazione (arrival_ts)</option>
+              <option value="start_ts">Data inizio (start_ts)</option>
+              <option value="done_ts">Data completamento (done_ts)</option>
+            </select>
+          </label>
+          <label>Nuovo valore
+            <input id="activity-form-correction-new" type="datetime-local">
+          </label>
+          <label>Motivo
+            <input id="activity-form-correction-reason" type="text" placeholder="Motivo della correzione">
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="activity-form-save" class="primary-button">Salva evento</button>
+          <button type="button" id="activity-form-cancel" class="secondary-button">Annulla</button>
+        </div>
+      </div>
+    </section>
+  </form>
+</dialog>
+
+<dialog id="activity-sequence-dialog" class="column-settings-modal">
+  <form method="dialog" class="column-settings-form">
+    <h2>Attenzione — la cronologia cambia</h2>
+    <div id="activity-sequence-warnings" class="activity-warning-list"></div>
+    <p>Vuoi procedere comunque?</p>
+    <div class="form-actions">
+      <button type="button" id="activity-sequence-cancel">Annulla</button>
+      <button type="button" id="activity-sequence-confirm" class="primary-button">Si, inserisci uguale</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="activity-alignment-dialog" class="column-settings-modal">
+  <form method="dialog" class="column-settings-form">
+    <h2>Allinea i campi strutturati</h2>
+    <div id="activity-alignment-list" class="activity-alignment-list"></div>
+    <div class="form-actions">
+      <button type="button" id="activity-alignment-cancel">Annulla tutto</button>
+      <button type="button" id="activity-alignment-confirm" class="primary-button">Conferma</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="activity-delete-dialog" class="column-settings-modal">
+  <form method="dialog" class="column-settings-form">
+    <h2>Eliminare questo evento dalla cronologia?</h2>
+    <p>L'operazione non puo' essere annullata.</p>
+    <div class="form-actions">
+      <button type="button" id="activity-delete-cancel">Annulla</button>
+      <button type="button" id="activity-delete-confirm" class="primary-button">Elimina</button>
+    </div>
   </form>
 </dialog>
 
