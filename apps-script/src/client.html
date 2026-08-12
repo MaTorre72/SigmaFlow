@@ -78,9 +78,13 @@
   }
 
   function bindNavigation() {
-    document.querySelectorAll('.nav-button').forEach(function(button) {
+    // Scoperto a .main-nav: i tab del modal card usano la stessa classe
+    // .nav-button, e senza questo scope questo handler intercettava anche
+    // i loro click, nascondendo view-board (e con esso il modal, che ci
+    // vive dentro) ogni volta che si cliccava "Informazioni"/"Cronologia".
+    document.querySelectorAll('.main-nav .nav-button').forEach(function(button) {
       button.addEventListener('click', function() {
-        document.querySelectorAll('.nav-button').forEach(function(item) {
+        document.querySelectorAll('.main-nav .nav-button').forEach(function(item) {
           item.classList.remove('active');
         });
         button.classList.add('active');
