@@ -1,11 +1,92 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 19:50
+Aggiornato: 2026-08-12 21:35
 
 Fase corrente: K
 Titolo: Ruolo `prep` per TO DO — gate incarico/prep/lavorazione
+Branch: `codex/activity-log-prep-role` (da `main`, commit 4b1076a)
 
-Stato: SBLOCCATA, in avvio. Entrambe le condizioni bloccanti risolte da
-Marco:
+Stato: CODICE COMPLETO E VERIFICATO SU TEST. In attesa del gate umano
+finale di Marco prima di valutare l'estensione a PROD (vedi sezione
+"Gate umano" in fondo).
+
+Nota su PROD scoperta durante la ricognizione: TO DO su PROD ha oggi
+ruolo `wip` (non `backlog` come si era visto su TEST — Marco aveva gia'
+sperimentato manualmente il cambio su TEST in precedenza, i due ambienti
+erano disallineati fra loro). La riassegnazione a `prep` va quindi fatta
+manualmente anche su PROD quando si decide di procedere, con lo stesso
+percorso usato qui su TEST (Impostazioni colonna, non `Constants.gs`).
+
+## Riepilogo implementazione (K1-K6)
+- K1: `SCHEMA_VERSION` 3->4, `'prep'` aggiunto a `COLUMN_ROLES`, TO DO in
+  `DEFAULT_COLUMNS` passato a `role: 'prep'` (fallback, non sufficiente
+  da solo per ambienti con `config.columns_json` gia' popolato — vedi
+  nota PROD sopra).
+- K2: campi additivi `incarico_ts`, `prep_ts` in coda a `JOB_HEADERS`.
+- K3: `moveJob` distingue ingresso in BACKLOG (`incarico_ts`), TO
+  DO/prep (`prep_ts`) e WIP (`start_ts`); il rientro da stand-by verso
+  prep non ringiovanisce piu' `start_ts`; il divieto di rientro diretto
+  da attesa a WIP resta invariato (ancorato all'id colonna).
+- K4: `checkStructuralAlignment_` propone anche `incarico_ts`/`prep_ts`
+  nel dialog di allineamento, con etichette leggibili.
+- K5: `currentWorkload_` conta `preparing`, esposto in dashboard come
+  "In preparazione".
+- K6: 4 nuovi test + assert aggiuntivo su `testAutomaticReworkFromStandBy`.
+  Suite completa: **39/39 passati**.
+
+Bug non previsto dall'addendum, trovato e corretto: la select "Tipo di
+colonna" in `board.html` aveva le opzioni cablate in HTML, senza
+`'prep'` — senza la correzione il nuovo ruolo non sarebbe stato
+assegnabile dall'interfaccia utente.
+
+## Verifica dal vivo su TEST
+- Codice pushato e confrontato file per file col live (clasp pull +
+  diff) — coincide.
+- TO DO riassegnato a ruolo `prep` su TEST tramite l'app (non tramite
+  codice), verificato che l'opzione "In preparazione" sia disponibile e
+  persista dopo reload.
+- Dashboard TEST: "In preparazione: 7", coerente col conteggio reale
+  della colonna TO DO.
+- Evento di spostamento manuale verso TO DO -> dialog di allineamento
+  propone correttamente "Data inizio preparazione (prep_ts)", non
+  start_ts. Confermato "Aggiorna" -> evento persistito e verificato
+  anche dopo reload completo della pagina.
+- Evento di spostamento manuale verso WIP (non-regressione) -> dialog
+  propone correttamente "Data inizio lavorazione (start_ts)" come prima
+  di Fase K, persistito correttamente.
+- Falsa pista investigata e chiusa: durante il primo giro di prove il
+  salvataggio dell'evento verso TO DO sembrava fallire silenziosamente
+  (nessun errore, ma l'evento non appariva). Riprodotto a fondo anche
+  offline con l'harness (dati seed realistici, stesso percorso di
+  migrazione schema) senza mai fallire — la causa e' risultata
+  instabilita' dello strumento di automazione browser usato per i test
+  (disconnessioni intermittenti dell'estensione, confermate dai log),
+  non un difetto di codice. Ripetendo la prova con calma dopo la
+  riconnessione, il salvataggio e' riuscito ed e' rimasto persistito
+  anche dopo reload completo. Nessuna modifica al codice necessaria per
+  questo punto.
+- Eventi di prova ripuliti dalla card usata per i test (Cliente 1) al
+  termine della verifica.
+
+## Gate umano (dall'addendum, non ancora dato da Marco)
+
+Da verificare tu stesso su TEST, poi scrivere "verificato, procedi" per
+sbloccare l'estensione a PROD:
+- [ ] una card che entra in TO DO riceve `prep_ts`, non `start_ts`
+- [ ] una card che entra in WIP riceve `start_ts` normalmente
+- [ ] una card riaperta da attesa verso TO DO mantiene il vecchio
+      `start_ts` (non "ringiovanito") — coperto da test automatico,
+      non ripetuto manualmente da Claude Code in questa sessione
+- [ ] il tentativo di riaprire una card direttamente in WIP resta
+      bloccato dall'interfaccia (invariato, coperto da test automatico)
+- [ ] la dashboard TEST mostra "In preparazione" con un conteggio
+      sensato
+
+Punti 1, 2 e 5 gia' osservati direttamente da Claude Code durante la
+verifica sopra; restano comunque nella lista perche' l'addendum chiede
+la conferma esplicita di Marco, non solo l'osservazione di Claude Code.
+
+Ex-condizioni bloccanti di avvio, entrambe risolte da Marco prima di
+iniziare il lavoro:
 
 1. Fase J considerata COMPLETATA ai fini del gate dell'addendum, dopo
    verifica di rischio richiesta esplicitamente da Marco. Scoperta
