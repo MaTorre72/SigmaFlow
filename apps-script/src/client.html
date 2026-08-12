@@ -840,6 +840,8 @@
   var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
   var STRUCTURAL_FIELD_LABELS_ = {
     arrival_ts: 'Data creazione (arrival_ts)',
+    incarico_ts: 'Data incarico (incarico_ts)',
+    prep_ts: 'Data inizio preparazione (prep_ts)',
     start_ts: 'Data inizio lavorazione (start_ts)',
     done_ts: 'Data completamento (done_ts)'
   };
@@ -1493,6 +1495,7 @@
     var workload = system.workloadMetrics || {};
     renderDl('workload-metrics', {
       'Lavoro pronto': valueOrDash(workload.ready),
+      'In preparazione': valueOrDash(workload.preparing),
       'Lavoro in corso': valueOrDash(workload.in_progress),
       'Lavoro che puo rientrare': valueOrDash(workload.can_return),
       'Lavori bloccati': valueOrDash(workload.blocked),

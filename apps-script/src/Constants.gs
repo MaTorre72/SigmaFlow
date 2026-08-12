@@ -2,7 +2,7 @@ var SIGMAFLOW = {
   TZ: 'Europe/Rome',
   PROP_SPREADSHEET_ID: 'SIGMAFLOW_SPREADSHEET_ID',
   PROP_SCHEMA_VERSION: 'SIGMAFLOW_SCHEMA_VERSION',
-  SCHEMA_VERSION: '3',
+  SCHEMA_VERSION: '4',
   DEFAULT_SPREADSHEET_ID: '15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g',
   DEFAULT_TEST_SPREADSHEET_ID: '1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU',
   PROP_TEST_SPREADSHEET_ID: 'SIGMAFLOW_TEST_SPREADSHEET_ID',
@@ -17,11 +17,11 @@ var SIGMAFLOW = {
     stand_by: 'wait_internal',
     in_review: 'todo'
   },
-  COLUMN_ROLES: ['backlog', 'wip', 'stand_by', 'done', 'neutral'],
+  COLUMN_ROLES: ['backlog', 'wip', 'stand_by', 'done', 'neutral', 'prep'],
   DEFAULT_COLUMNS: [
     { id: 'notes', label: 'NOTE', role: 'neutral', order: 1, color: '#E8E8E8' },
     { id: 'backlog', label: 'BACKLOG', role: 'backlog', order: 2, color: '#C8D8E8' },
-    { id: 'todo', label: 'TO DO', role: 'wip', order: 3, color: '#A8C4E0' },
+    { id: 'todo', label: 'TO DO', role: 'prep', order: 3, color: '#A8C4E0' },
     { id: 'wip', label: 'WIP', role: 'wip', order: 4, color: '#5B9BD5' },
     { id: 'wait_client', label: 'ATTESA CLIENTE', role: 'stand_by', order: 5, color: '#FFD966' },
     { id: 'wait_authority', label: 'ATTESA ENTI', role: 'stand_by', order: 6, color: '#F4B942' },

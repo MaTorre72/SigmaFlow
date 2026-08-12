@@ -30,7 +30,9 @@ var JOB_HEADERS = [
   'card_color',
   'checklist_json',
   'correction_log_json',
-  'activity_log_json'
+  'activity_log_json',
+  'incarico_ts',
+  'prep_ts'
 ];
 
 var CASE_HEADERS = [

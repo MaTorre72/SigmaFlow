@@ -285,6 +285,7 @@ function columnsFromConfig_(config) {
 function currentWorkload_(jobs, columnMap) {
   var result = {
     ready: 0,
+    preparing: 0,
     in_progress: 0,
     can_return: 0,
     blocked: 0,
@@ -295,6 +296,7 @@ function currentWorkload_(jobs, columnMap) {
   jobs.forEach(function(job) {
     var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
     if (column.role === 'backlog') { result.ready++; }
+    if (column.role === 'prep') { result.preparing++; }
     if (column.role === 'wip') { result.in_progress++; }
     if (column.role === 'stand_by') { result.blocked++; }
     if (column.role === 'done' && !coerceBoolean_(job.invoiced)) { result.can_return++; }

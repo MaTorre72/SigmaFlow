@@ -171,7 +171,11 @@ function runAllTests() {
     testGetActivityLogOrdinato,
     testGetActivityLogFromRicalcolato,
     testMoveJobScriveEventoAuto,
-    testMigrateToActivityLogChecklist
+    testMigrateToActivityLogChecklist,
+    testReworkFromStandByToBacklogKeepsStartTs,
+    testMoveToPrepSetsPrepTsNotStartTs,
+    testMoveToWipStillSetsStartTs,
+    testMoveToBacklogSetsIncaricoTs
   ];
 
   tests.forEach(function(testFn) {
@@ -283,6 +287,9 @@ function testAutomaticReworkFromStandBy() {
     var created = addJob({ title: 'Stand-by rework', size_class: 'M' }).data;
 
     moveJob({ job_id: created.job_id, status: 'wip' });
+    var beforeReturn = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    var startTsBeforeReturn = beforeReturn.start_ts;
+
     moveJob({ job_id: created.job_id, status: 'wait_client' });
     var returned = moveJob({ job_id: created.job_id, status: 'todo' });
 
@@ -293,6 +300,70 @@ function testAutomaticReworkFromStandBy() {
     assertEquals_(2, Number(job.visit_number), 'visit_number automatico');
     assertTrue_(coerceBoolean_(job.is_rework), 'is_rework automatico');
     assertEquals_('wait_client', job.rework_cause, 'causa rework automatica');
+    assertEquals_(startTsBeforeReturn, job.start_ts, 'start_ts non deve essere ringiovanito da un rientro in TO DO (prep)');
+  });
+}
+
+function testReworkFromStandByToBacklogKeepsStartTs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Stand-by rework verso backlog', size_class: 'M' }).data;
+
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    var beforeReturn = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    var startTsBeforeReturn = beforeReturn.start_ts;
+
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    var returned = moveJob({ job_id: created.job_id, status: 'backlog' });
+
+    assertTrue_(returned.success, 'moveJob da stand_by a backlog dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    assertEquals_('backlog', job.status, 'status dopo ritorno da stand_by a backlog');
+    assertEquals_(2, Number(job.visit_number), 'visit_number automatico');
+    assertTrue_(coerceBoolean_(job.is_rework), 'is_rework automatico');
+    assertEquals_('wait_client', job.rework_cause, 'causa rework automatica');
+    assertEquals_(startTsBeforeReturn, job.start_ts, 'start_ts non deve essere ringiovanito da un rientro in BACKLOG');
+  });
+}
+
+function testMoveToPrepSetsPrepTsNotStartTs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Ingresso in preparazione', size_class: 'S' }).data;
+
+    var moved = moveJob({ job_id: created.job_id, status: 'todo' });
+    assertTrue_(moved.success, 'moveJob verso todo (prep) dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    assertTrue_(Boolean(job.prep_ts), 'prep_ts valorizzato all\'ingresso in TO DO');
+    assertTrue_(!job.start_ts, 'start_ts NON deve valorizzarsi all\'ingresso in TO DO (prep)');
+  });
+}
+
+function testMoveToWipStillSetsStartTs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Ingresso in lavorazione', size_class: 'S' }).data;
+
+    var moved = moveJob({ job_id: created.job_id, status: 'wip' });
+    assertTrue_(moved.success, 'moveJob verso wip dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    assertTrue_(Boolean(job.start_ts), 'start_ts valorizzato all\'ingresso in WIP (non-regressione)');
+  });
+}
+
+function testMoveToBacklogSetsIncaricoTs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Ingresso in backlog', size_class: 'S' }).data;
+
+    var moved = moveJob({ job_id: created.job_id, status: 'backlog' });
+    assertTrue_(moved.success, 'moveJob verso backlog dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    assertTrue_(Boolean(job.incarico_ts), 'incarico_ts valorizzato all\'ingresso in BACKLOG');
   });
 }
 
@@ -533,6 +604,7 @@ function testSystemStateWorkload() {
     });
   }
   jobs.push({ job_id: 'READY', case_id: 'READY', status: 'backlog', arrival_ts: arrival, visit_number: 1 });
+  jobs.push({ job_id: 'PREP', case_id: 'PREP', status: 'todo', arrival_ts: arrival, visit_number: 1 });
   jobs.push({ job_id: 'WIP', case_id: 'WIP', status: 'wip', arrival_ts: arrival, visit_number: 1 });
   jobs.push({ job_id: 'WAIT', case_id: 'WAIT', status: 'wait_client', arrival_ts: arrival, visit_number: 1 });
 
@@ -544,6 +616,7 @@ function testSystemStateWorkload() {
   var state = buildSystemState_(jobs, config, now);
 
   assertEquals_(1, state.workloadMetrics.ready, 'lavoro pronto');
+  assertEquals_(1, state.workloadMetrics.preparing, 'lavoro in preparazione');
   assertEquals_(1, state.workloadMetrics.in_progress, 'lavoro in corso');
   assertEquals_(5, state.workloadMetrics.can_return, 'lavoro che puo rientrare');
   assertEquals_(1, state.workloadMetrics.waiting_client, 'attesa cliente');

@@ -171,6 +171,8 @@ function addJob(params) {
     description: params.description || '',
     due_date: params.due_date || '',
     arrival_ts: now,
+    incarico_ts: targetColumn.role === 'backlog' ? now : '',
+    prep_ts: targetColumn.role === 'prep' ? now : '',
     start_ts: targetColumn.role === 'wip' ? now : '',
     done_ts: '',
     invoiced: coerceBoolean_(params.invoiced),
@@ -225,11 +227,13 @@ function moveJob(params) {
     throw new Error('Il rientro diretto da una colonna di attesa a WIP non e consentito. Sposta prima il job in TO DO o in una colonna precedente.');
   }
 
-  if (sourceColumn.role === 'stand_by' && (targetColumn.role === 'wip' || targetColumn.role === 'backlog')) {
+  if (sourceColumn.role === 'stand_by' && (targetColumn.role === 'wip' || targetColumn.role === 'backlog' || targetColumn.role === 'prep')) {
     job.visit_number = Number(job.visit_number || 1) + 1;
     job.is_rework = true;
     job.rework_cause = sourceColumn.id;
-    job.start_ts = now;
+    if (targetColumn.role === 'wip') {
+      job.start_ts = now;
+    }
   }
 
   if (targetColumn.role === 'wip' && !job.start_ts) {
@@ -238,6 +242,14 @@ function moveJob(params) {
 
   if (targetColumn.role === 'backlog' && !job.arrival_ts) {
     job.arrival_ts = now;
+  }
+
+  if (targetColumn.role === 'backlog' && !job.incarico_ts) {
+    job.incarico_ts = now;
+  }
+
+  if (targetColumn.role === 'prep' && !job.prep_ts) {
+    job.prep_ts = now;
   }
 
   if (targetColumn.role === 'done') {
