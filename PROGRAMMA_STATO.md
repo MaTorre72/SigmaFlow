@@ -48,3 +48,10 @@ che il primissimo evento move mantenga il from originale invece di None.
 
 Push su Web App fatto (versione HEAD/dev). Commit e push del branch
 codex/activity-log-backend fatti.
+
+Conferma reale di Marco (2026-08-12 07:38, runAllTestsAndLog eseguito a
+mano dall'editor Apps Script, non da questa sessione): 18/18 test
+passati, 0 falliti, nessuna regressione. Prima verifica indipendente nel
+vero ambiente GAS di tutto il lavoro delle Fasi B-E fatto finora tramite
+harness locale — conferma che il metodo di verifica adottato in assenza
+di clasp run e' stato affidabile fin qui.
