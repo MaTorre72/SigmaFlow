@@ -1,9 +1,35 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 16:10
+Aggiornato: 2026-08-12 19:50
 
-Fase corrente: J
-Titolo: Deploy finale (gate umano)
-Stato: DEPLOY SU TEST VERIFICATO E CHIUSO. In attesa della decisione di Marco su merge/PROD e su una nuova fase di revisione del modello (vedi sezione dedicata sotto).
+Fase corrente: K
+Titolo: Ruolo `prep` per TO DO — gate incarico/prep/lavorazione
+
+Stato: SBLOCCATA, in avvio. Entrambe le condizioni bloccanti risolte da
+Marco:
+
+1. Fase J considerata COMPLETATA ai fini del gate dell'addendum, dopo
+   verifica di rischio richiesta esplicitamente da Marco. Scoperta
+   rilevante emersa dalla verifica: la Web App PROD reale usata dal team
+   (`docs/google-workspace-setup.md`, deployment pinnato
+   `AKfycbxKZMfSDbFMI7.../exec?env=prod`) e' ferma alla versione
+   "timestamps-fix", precedente a tutto il lavoro sull'Activity Log —
+   diversa dalla URL `/dev` usata per l'intero smoke test, che segue
+   sempre l'ultimo codice pushato. Quindi il merge di oggi NON e' mai
+   arrivato agli utenti reali di PROD: nessun rischio di disallineamento
+   tra codice nuovo e dati non migrati, perche' il codice nuovo su PROD
+   semplicemente non gira ancora. Il "deploy vero" (pubblicare una nuova
+   versione sul deployment pinnato PROD + migrazione dati) resta un passo
+   a se', non ancora programmato, da trattare come cutover reale quando
+   Marco decide — non una formalita' della Fase J.
+2. CLAUDE.md recuperato da `codex/activity-log-recon`, stesso
+   procedimento usato per `PROGRAMMA_ACTIVITY_LOG.md`.
+
+## Fase J (storico, chiuso)
+Nota storica: CLAUDE.md, richiesto in lettura dall'istruzione di avvio,
+non esisteva nel branch corrente (codex/activity-log-frontend) ne' in
+main prima del recupero sopra — esisteva solo su
+codex/activity-log-recon, come accadeva per PROGRAMMA_ACTIVITY_LOG.md
+prima del recupero manuale del 2026-08-12.
 
 Verifica di chiusura Fase J:
 - Codice live su TEST confrontato file per file con i sorgenti locali
@@ -13,8 +39,23 @@ Verifica di chiusura Fase J:
   timestamp" in client.html): ora committate (7e0e2f9).
 - Smoke test 12 punti della specifica frontend: 12/12 confermati, l'ultimo
   (punto 12, drag-and-drop) verificato a mano da Marco direttamente.
-- Merge su `main` e migrazione PROD restano SEMPRE una decisione di Marco,
-  mai automatica: nessuna azione presa in questa direzione.
+- Merge eseguito 2026-08-12: `codex/activity-log-frontend` -> `main`
+  (commit 8cb5c3d, merge --no-ff), dopo conferma esplicita di Marco che
+  ha scavalcato consapevolmente la regola "mai in autonomia" del
+  programma per questo solo passaggio. Contiene gia' tutto il lavoro di
+  `codex/activity-log-backend` (ne era discendente) e i contenuti di
+  `codex/activity-log-recon` (gia' copiati). Non sono stati fusi
+  separatamente backend/recon (ridondante) ne' timestamps-fix (gia' in
+  main). Suite test harness rilanciata sul codice unito: 35/35 passati
+  prima del push.
+- Migrazione PROD: NON eseguita e NON eseguibile con il codice attuale.
+  `migrateToActivityLog()` (ActivityLog.gs:166) rifiuta esplicitamente
+  qualunque ambiente diverso da TEST; non esiste una variante PROD (solo
+  `migrateActivityLogOnTest()`, che forza sempre TEST). Il blocco e'
+  intenzionale, non un dimenticanza. Per procedere serve prima scrivere
+  una funzione dedicata tipo `migrateActivityLogOnProd()` sul modello di
+  quella per TEST — decisione rimandata a quando Marco vorra' riprendere
+  il tema, non presa di riflesso in questa sessione.
 
 ## Fase I (storico)
 Stato: SMOKE TEST ESEGUITO IN AUTONOMIA (via Claude in Chrome, autorizzato da Marco) — 11/12 punti confermati su TEST, poi punto 12 confermato a mano da Marco
