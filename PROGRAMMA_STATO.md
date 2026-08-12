@@ -1,9 +1,35 @@
 # Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 16:10
+Aggiornato: 2026-08-12 19:50
 
-Fase corrente: J
-Titolo: Deploy finale (gate umano)
-Stato: MERGE SU MAIN ESEGUITO (autorizzato esplicitamente da Marco, che ha scelto "solo merge ora, PROD dopo"). Migrazione PROD NON eseguita, vedi nota tecnica sotto.
+Fase corrente: K
+Titolo: Ruolo `prep` per TO DO — gate incarico/prep/lavorazione
+
+Stato: SBLOCCATA, in avvio. Entrambe le condizioni bloccanti risolte da
+Marco:
+
+1. Fase J considerata COMPLETATA ai fini del gate dell'addendum, dopo
+   verifica di rischio richiesta esplicitamente da Marco. Scoperta
+   rilevante emersa dalla verifica: la Web App PROD reale usata dal team
+   (`docs/google-workspace-setup.md`, deployment pinnato
+   `AKfycbxKZMfSDbFMI7.../exec?env=prod`) e' ferma alla versione
+   "timestamps-fix", precedente a tutto il lavoro sull'Activity Log —
+   diversa dalla URL `/dev` usata per l'intero smoke test, che segue
+   sempre l'ultimo codice pushato. Quindi il merge di oggi NON e' mai
+   arrivato agli utenti reali di PROD: nessun rischio di disallineamento
+   tra codice nuovo e dati non migrati, perche' il codice nuovo su PROD
+   semplicemente non gira ancora. Il "deploy vero" (pubblicare una nuova
+   versione sul deployment pinnato PROD + migrazione dati) resta un passo
+   a se', non ancora programmato, da trattare come cutover reale quando
+   Marco decide — non una formalita' della Fase J.
+2. CLAUDE.md recuperato da `codex/activity-log-recon`, stesso
+   procedimento usato per `PROGRAMMA_ACTIVITY_LOG.md`.
+
+## Fase J (storico, chiuso)
+Nota storica: CLAUDE.md, richiesto in lettura dall'istruzione di avvio,
+non esisteva nel branch corrente (codex/activity-log-frontend) ne' in
+main prima del recupero sopra — esisteva solo su
+codex/activity-log-recon, come accadeva per PROGRAMMA_ACTIVITY_LOG.md
+prima del recupero manuale del 2026-08-12.
 
 Verifica di chiusura Fase J:
 - Codice live su TEST confrontato file per file con i sorgenti locali
