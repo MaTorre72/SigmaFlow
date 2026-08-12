@@ -185,6 +185,21 @@ function addJob(params) {
     correction_log_json: '[]'
   };
 
+  // Evento automatico di creazione, stesso pattern dell'evento auto scritto
+  // da moveJob: from null perche' non esiste una colonna di provenienza.
+  // Senza questo, ogni nuova card nascerebbe con la Cronologia vuota anche
+  // se arrival_ts e' gia' valorizzato correttamente sul campo strutturato.
+  var creationEvent = {
+    id: generateActivityEventId_(),
+    ts: now,
+    type: 'move',
+    source: 'auto',
+    to: targetColumn.id,
+    from: null,
+    note: ''
+  };
+  job.activity_log_json = serializeActivityLog_([creationEvent]);
+
   sheet.appendRow(jobToRow_(job));
 
   refreshCaseVisitCount_(ss, caseId);

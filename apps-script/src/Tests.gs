@@ -645,7 +645,7 @@ function testAddActivityEventSequenceWarningsSenzaForce() {
     assertTrue_(second.data.warnings.length > 0, 'warnings presenti');
 
     var log = getActivityLog({ job_id: jobId }).data.log;
-    assertEquals_(1, log.length, 'nessuna scrittura extra: resta un solo evento');
+    assertEquals_(2, log.length, 'nessuna scrittura extra: solo evento di creazione + primo move');
   });
 }
 
@@ -663,7 +663,7 @@ function testAddActivityEventSequenceWarningsConForce() {
 
     assertTrue_(forced.data.ok === true, 'con force:true dovrebbe riuscire');
     var log = getActivityLog({ job_id: jobId }).data.log;
-    assertEquals_(2, log.length, 'due eventi nel log dopo force');
+    assertEquals_(3, log.length, 'evento di creazione + due move nel log dopo force');
   });
 }
 
@@ -681,7 +681,7 @@ function testAddActivityEventStructuralWarningsSenzaAlign() {
     assertTrue_(result.data.structuralWarnings.length > 0, 'structuralWarnings presenti');
 
     var log = getActivityLog({ job_id: jobId }).data.log;
-    assertEquals_(0, log.length, 'nessuna scrittura senza align_fields');
+    assertEquals_(1, log.length, 'nessuna scrittura extra senza align_fields: resta solo l\'evento di creazione');
   });
 }
 
@@ -725,7 +725,7 @@ function testUpdateActivityEventManual() {
     assertTrue_(updated.data.ok === true, 'update dovrebbe riuscire');
     assertEquals_('nota corretta', updated.data.event.note, 'nota aggiornata');
     var log = getActivityLog({ job_id: jobId }).data.log;
-    assertEquals_(1, log.length, 'un solo evento nel log dopo update (sostituito, non duplicato)');
+    assertEquals_(2, log.length, 'evento di creazione + la nota aggiornata (sostituita, non duplicata)');
   });
 }
 
@@ -766,7 +766,7 @@ function testDeleteActivityEventManual() {
 
     assertTrue_(del.success, 'delete dovrebbe riuscire');
     var log = getActivityLog({ job_id: jobId }).data.log;
-    assertEquals_(2, log.length, 'due eventi rimasti dopo la cancellazione');
+    assertEquals_(3, log.length, 'evento di creazione + due move rimasti dopo la cancellazione');
     var remaining3 = log.filter(function(e) { return e.id === e3.data.event.id; })[0];
     assertEquals_(todoCol.id, remaining3.from, 'from dell\'evento successivo ricalcolato dopo la cancellazione');
   });
@@ -805,9 +805,9 @@ function testGetActivityLogOrdinato() {
 
     var log = getActivityLog({ job_id: jobId }).data.log;
 
-    assertEquals_(2, log.length, 'due eventi nel log');
-    assertEquals_(t1, log[0].ts, 'primo evento e\' il piu\' vecchio');
-    assertEquals_(t2, log[1].ts, 'secondo evento e\' il piu\' recente');
+    assertEquals_(3, log.length, 'evento di creazione + due move nel log');
+    assertEquals_(t1, log[0].ts, 'primo evento e\' il piu\' vecchio (precede anche l\'evento di creazione, creato con arrival_ts nel passato)');
+    assertEquals_(t2, log[1].ts, 'secondo evento e\' il successivo in ordine cronologico');
   });
 }
 
@@ -840,10 +840,13 @@ function testMoveJobScriveEventoAuto() {
     assertTrue_(moved.success, 'moveJob dovrebbe riuscire');
     var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
     var log = parseActivityLog_(job.activity_log_json);
-    assertEquals_(1, log.length, 'un evento nel log grezzo dopo moveJob');
-    assertEquals_('auto', log[0].source, 'source auto');
-    assertEquals_('backlog', log[0].from, 'from = backlog');
-    assertEquals_('todo', log[0].to, 'to = todo');
+    assertEquals_(2, log.length, 'evento di creazione + evento di move nel log grezzo');
+    assertEquals_('auto', log[0].source, 'evento di creazione e\' auto');
+    assertEquals_(null, log[0].from, 'evento di creazione: from null');
+    assertEquals_('backlog', log[0].to, 'evento di creazione: to backlog');
+    assertEquals_('auto', log[1].source, 'evento di move e\' auto');
+    assertEquals_('backlog', log[1].from, 'evento di move: from backlog');
+    assertEquals_('todo', log[1].to, 'evento di move: to todo');
   });
 }
 
