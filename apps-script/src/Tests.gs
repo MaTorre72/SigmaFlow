@@ -172,6 +172,7 @@ function runAllTests() {
     testGetActivityLogFromRicalcolato,
     testMoveJobScriveEventoAuto,
     testMigrateToActivityLogChecklist,
+    testMigrateToActivityLogBackfillEventoCreazione,
     testReworkFromStandByToBacklogKeepsStartTs,
     testMoveToPrepSetsPrepTsNotStartTs,
     testMoveToWipStillSetsStartTs,
@@ -948,6 +949,37 @@ function testMigrateToActivityLogChecklist() {
     assertTrue_(after.description.indexOf('--- Checklist migrata ---') !== -1, 'separatore presente');
     assertTrue_(after.description.indexOf('[x] Voce A') !== -1, 'voce completata con [x]');
     assertTrue_(after.description.indexOf('[ ] Voce B') !== -1, 'voce non completata con [ ]');
+  });
+}
+
+function testMigrateToActivityLogBackfillEventoCreazione() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Card senza log (come da seed)', size_class: 'M' }).data;
+
+    // Simula una card seedata prima dell'introduzione dell'evento di
+    // creazione automatico: log vuoto, arrival_ts pero' gia' presente.
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    var pastArrival = testTsMinutesAgo_(180);
+    job.arrival_ts = pastArrival;
+    job.activity_log_json = '[]';
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = migrateToActivityLog({ env: 'test' });
+
+    assertTrue_(result.success, 'migrazione dovrebbe riuscire');
+    assertEquals_(1, result.data.creation_events_backfilled, 'un evento di creazione ricostruito');
+
+    var log = getActivityLog({ job_id: created.job_id }).data.log;
+    assertEquals_(1, log.length, 'la card ha ora un evento in cronologia');
+    assertEquals_(null, log[0].from, 'l\'evento ricostruito e\' riconoscibile come evento di creazione (from null)');
+    assertEquals_(pastArrival, log[0].ts, 'la data dell\'evento ricostruito riprende arrival_ts');
+
+    var secondPass = migrateToActivityLog({ env: 'test' });
+    assertEquals_(0, secondPass.data.creation_events_backfilled, 'un secondo lancio della migrazione non duplica l\'evento gia\' presente');
   });
 }
 

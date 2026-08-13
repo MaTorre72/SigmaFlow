@@ -288,17 +288,7 @@ function initiativeGroups_(jobs) {
 }
 
 function columnsFromConfig_(config) {
-  if (config.columns_json) {
-    try {
-      var parsed = JSON.parse(config.columns_json);
-      if (parsed && parsed.length) {
-        return parsed;
-      }
-    } catch (err) {
-      // Usa la configurazione standard se il JSON non e valido.
-    }
-  }
-  return SIGMAFLOW.DEFAULT_COLUMNS;
+  return normalizeColumns_(config);
 }
 
 function currentWorkload_(jobs, columnMap) {

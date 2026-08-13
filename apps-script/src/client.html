@@ -772,13 +772,20 @@
 
   function renderReworkHistory(job) {
     var root = document.getElementById('modal-rework-history');
-    if (!coerceBool(job.is_rework) && Number(job.visit_number || 1) <= 1) {
+    var reworkCount = Math.max(0, Number(job.visit_number || 1) - 1);
+    if (!coerceBool(job.is_rework) && reworkCount <= 0) {
       root.hidden = true;
       root.innerHTML = '';
       return;
     }
+    // Solo un'indicazione informativa: il dettaglio di ogni passaggio
+    // (comprese le attese) e' gia' tutto visibile evento per evento piu'
+    // sotto, in cronologia — non serve ripeterlo qui.
     root.hidden = false;
-    root.innerHTML = '<h3>Storico rientri</h3><p>Rientro ' + escapeHtml(Math.max(1, Number(job.visit_number || 1) - 1)) + ' - causa: ' + escapeHtml(job.rework_cause || 'manual') + '</p>';
+    var label = reworkCount === 1 ? '1 rientro' : (reworkCount + ' rientri');
+    var lastCauseLabel = job.rework_cause ? columnLabelById_(job.rework_cause) : '';
+    root.innerHTML = '<p class="rework-history-note">' + escapeHtml(label) +
+      (lastCauseLabel ? ' — l\'ultimo da "' + escapeHtml(lastCauseLabel) + '"' : '') + '</p>';
   }
 
   var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
@@ -1360,8 +1367,8 @@
       'Lavoro pronto': valueOrDash(workload.ready),
       'In preparazione': valueOrDash(workload.preparing),
       'Lavoro in corso': valueOrDash(workload.in_progress),
-      'Lavoro che puo rientrare': valueOrDash(workload.can_return),
-      'Lavori bloccati': valueOrDash(workload.blocked),
+      'Concluso, non ancora fatturato': valueOrDash(workload.can_return),
+      'Lavoro in attesa (totale)': valueOrDash(workload.blocked),
       'In attesa di cliente': valueOrDash(workload.waiting_client),
       'In attesa di enti': valueOrDash(workload.waiting_authority),
       'Fermi per decisione interna': valueOrDash(workload.waiting_internal)

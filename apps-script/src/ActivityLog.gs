@@ -207,6 +207,7 @@ function migrateActivityLogData_(ss) {
     cards_processed: 0,
     corrections_migrated: 0,
     checklist_items_migrated: 0,
+    creation_events_backfilled: 0,
     cards_skipped: 0,
     errors: []
   };
@@ -223,6 +224,7 @@ function migrateActivityLogData_(ss) {
       summary.cards_processed++;
       summary.corrections_migrated += result.correctionsMigrated;
       summary.checklist_items_migrated += result.checklistItemsMigrated;
+      if (result.creationEventBackfilled) { summary.creation_events_backfilled++; }
       return jobToRow_(job);
     } catch (err) {
       summary.cards_skipped++;
@@ -243,6 +245,33 @@ function migrateActivityLogData_(ss) {
 function migrateSingleJobActivityLog_(job, migrationTs) {
   var log = parseActivityLog_(job.activity_log_json);
   var correctionsMigrated = 0;
+  var creationEventBackfilled = false;
+
+  // Ogni card deve avere un evento di creazione (from null) come primo
+  // riferimento in Cronologia, per dare all'utente un punto di partenza
+  // ("questo lavoro e' entrato molto tempo fa") e per permettere il
+  // calcolo di incarico_ts al primo, eventuale, rientro in BACKLOG. Le
+  // card seedate per i test o mai passate da addJob possono averne il
+  // log completamente vuoto: qui si sintetizza un evento di creazione
+  // usando arrival_ts (o, in mancanza, il momento della migrazione) e lo
+  // status attuale come colonna di destinazione — la migliore stima
+  // possibile a posteriori, non necessariamente la colonna reale
+  // d'origine se la card si e' gia' spostata da allora.
+  var hasCreationEvent = log.some(function(event) {
+    return event.type === 'move' && event.from === null;
+  });
+  if (!hasCreationEvent) {
+    log.push({
+      id: generateActivityEventId_(),
+      ts: job.arrival_ts || migrationTs,
+      type: 'move',
+      source: 'auto',
+      to: job.status || 'backlog',
+      from: null,
+      note: ''
+    });
+    creationEventBackfilled = true;
+  }
 
   var corrections = parseJsonArray_(job.correction_log_json);
   corrections.forEach(function(record) {
@@ -288,5 +317,5 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
     job.description = String(job.description || '') + '\n\n' + checklistMarker + '\n' + lines.join('\n');
   }
 
-  return { correctionsMigrated: correctionsMigrated, checklistItemsMigrated: checklistItemsMigrated };
+  return { correctionsMigrated: correctionsMigrated, checklistItemsMigrated: checklistItemsMigrated, creationEventBackfilled: creationEventBackfilled };
 }

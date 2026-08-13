@@ -278,7 +278,17 @@ function readColumnLabels_() {
 }
 
 function readColumns_() {
-  var config = readConfig_();
+  return normalizeColumns_(readConfig_());
+}
+
+// Normalizzazione e ordinamento delle colonne a partire da un oggetto
+// config gia' in mano (non rilegge il foglio): usata sia da readColumns_
+// (config dal foglio live) sia da columnsFromConfig_ in Model.gs (config
+// passato come parametro, anche sintetico nei test). Prima di questa
+// unificazione, columnsFromConfig_ restituiva l'array cosi' come salvato
+// in columns_json, senza ordinarlo per "order": la dashboard poteva quindi
+// mostrare colonne in un ordine diverso da quello reale della board.
+function normalizeColumns_(config) {
   var columns = [];
 
   if (config.columns_json) {
