@@ -105,7 +105,7 @@ function buildSystemState_(jobs, config, now) {
     ? queueMG1_(totalPassageRate, effectiveLoad, stats.mean, stats.secondMoment)
     : unstableQueue_();
   var workload = currentWorkload_(jobs, columnMap);
-  var points = pointsStatistics_(jobs, columnMap, since, now);
+  var points = pointsStatistics_(jobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
 
   return {
     dataQuality: dataQuality,
@@ -159,7 +159,18 @@ function buildSystemState_(jobs, config, now) {
   };
 }
 
-function pointsStatistics_(jobs, columnMap, since, now) {
+// Stesso ordine mostrato nella tendina "Assegnatario" della board
+// (boardOptions_ in Kanban.gs): valori salvati in assignees_json, poi in
+// coda gli eventuali assegnatari presenti solo sui job e non ancora
+// salvati nell'elenco — cosi' "Punti per assegnatario" in dashboard segue
+// lo stesso ordine, non quello (arbitrario) di comparizione nel foglio.
+function assigneeOrderFromConfig_(config, jobs) {
+  var values = parseJsonArray_(config.assignees_json);
+  jobs.forEach(function(job) { values.push(job.assignee); });
+  return orderedUniqueValues_(values);
+}
+
+function pointsStatistics_(jobs, columnMap, since, now, assigneeOrder) {
   var openJobs = jobs.filter(function(job) {
     var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
     return column.role !== 'done';
@@ -180,7 +191,7 @@ function pointsStatistics_(jobs, columnMap, since, now) {
     timeline: months,
     by_size: pointsBreakdown_(openJobs, 'size_class', ['XS', 'S', 'M', 'L', 'XL']),
     by_column: pointsByColumn_(jobs, columnMap),
-    by_assignee: pointsBreakdown_(openJobs, 'assignee')
+    by_assignee: pointsBreakdown_(openJobs, 'assignee', assigneeOrder)
   };
 }
 
