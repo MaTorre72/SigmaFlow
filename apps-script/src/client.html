@@ -1412,9 +1412,9 @@
     document.getElementById('points-open').textContent = metricValue(points.open_points, ' pt');
     document.getElementById('points-added').textContent = metricValue(points.added_points, ' pt');
     document.getElementById('points-completed').textContent = metricValue(points.completed_points, ' pt');
-    renderBreakdown('points-by-size', points.by_size || {}, false);
-    renderBreakdown('points-by-assignee', points.by_assignee || {}, false);
-    renderBreakdown('points-by-column', points.by_column || {}, true);
+    renderBreakdown('points-by-size', points.by_size || [], false);
+    renderBreakdown('points-by-assignee', points.by_assignee || [], false);
+    renderBreakdown('points-by-column', points.by_column || [], true);
     drawPointsTimeline(points.timeline || []);
     renderMonthlyLoad(points.timeline || []);
   }
@@ -1433,14 +1433,34 @@
     });
   }
 
-  function renderBreakdown(id, values, useLabel) {
-    var mapped = {};
-    Object.keys(values).forEach(function(key) {
-      var item = values[key] || {};
-      mapped[useLabel ? (item.label || key) : key] = valueOrDash(item.points) + ' pt - ' + valueOrDash(item.cards) + ' card';
+  // "values" e' un ARRAY (ordinato lato server), non un oggetto: l'ordine
+  // delle chiavi di un oggetto non e' garantito nell'attraversare il
+  // confine google.script.run, quello degli elementi di un array si'.
+  // Per questo si costruisce il <dl> direttamente qui invece di passare
+  // da renderDl (pensata per oggetti letterali client-side, dove
+  // l'ordine non e' un problema).
+  function renderBreakdown(id, rows, useLabel) {
+    var root = document.getElementById(id);
+    root.innerHTML = '';
+    var list = rows || [];
+    if (!list.length) {
+      var dt = document.createElement('dt');
+      dt.textContent = 'Nessun dato';
+      var dd = document.createElement('dd');
+      dd.textContent = '-';
+      root.appendChild(dt);
+      root.appendChild(dd);
+      return;
+    }
+    list.forEach(function(item) {
+      var label = useLabel ? (item.label || item.key) : item.key;
+      var dt = document.createElement('dt');
+      dt.textContent = label;
+      var dd = document.createElement('dd');
+      dd.textContent = valueOrDash(item.points) + ' pt - ' + valueOrDash(item.cards) + ' card';
+      root.appendChild(dt);
+      root.appendChild(dd);
     });
-    if (!Object.keys(mapped).length) { mapped['Nessun dato'] = '-'; }
-    renderDl(id, mapped);
   }
 
   function drawPointsTimeline(rows) {

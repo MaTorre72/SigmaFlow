@@ -224,15 +224,26 @@ function monthBuckets_(jobs, now, count) {
   return buckets;
 }
 
+// Restituisce un ARRAY (non un oggetto): l'ordine delle chiavi di un
+// oggetto JS non e' garantito nell'attraversare il confine
+// google.script.run tra server e client (a differenza dell'ordine degli
+// elementi di un array, sempre preservato) — usare un oggetto qui era la
+// causa della dashboard che mostrava taglie/colonne in un ordine diverso
+// da quello corretto calcolato lato server.
 function pointsBreakdown_(jobs, field, orderedKeys) {
   var result = {};
   jobs.forEach(function(job) {
     var key = String(job[field] || 'Non assegnato');
-    if (!result[key]) { result[key] = { cards: 0, points: 0 }; }
+    if (!result[key]) { result[key] = { key: key, label: key, cards: 0, points: 0 }; }
     result[key].cards++;
     result[key].points += jobPoints_(job);
   });
-  return orderedKeys ? reorderByKeys_(result, orderedKeys) : result;
+  var keys = Object.keys(result);
+  if (orderedKeys) {
+    keys = orderedKeys.filter(function(key) { return result[key] !== undefined; })
+      .concat(keys.filter(function(key) { return orderedKeys.indexOf(key) === -1; }));
+  }
+  return keys.map(function(key) { return result[key]; });
 }
 
 function pointsByColumn_(jobs, columnMap) {
@@ -240,30 +251,12 @@ function pointsByColumn_(jobs, columnMap) {
   jobs.forEach(function(job) {
     var status = normalizeStatus_(job.status);
     var column = columnMap[status] || { label: status };
-    if (!result[status]) { result[status] = { label: column.label || status, cards: 0, points: 0, order: Number(column.order || 0) }; }
+    if (!result[status]) { result[status] = { key: status, label: column.label || status, cards: 0, points: 0, order: Number(column.order || 0) }; }
     result[status].cards++;
     result[status].points += jobPoints_(job);
   });
-  var orderedKeys = Object.keys(result).sort(function(a, b) {
-    return result[a].order - result[b].order;
-  });
-  return reorderByKeys_(result, orderedKeys);
-}
-
-// Ricostruisce l'oggetto rispettando l'ordine di orderedKeys per le chiavi
-// conosciute, poi in coda le chiavi eventualmente non previste (es. valori
-// legacy) nell'ordine in cui sono gia' presenti — cosi' il client, che itera
-// con Object.keys(), mostra le voci nell'ordine giusto senza doverlo
-// ricalcolare lato frontend.
-function reorderByKeys_(map, orderedKeys) {
-  var ordered = {};
-  orderedKeys.forEach(function(key) {
-    if (map[key] !== undefined) { ordered[key] = map[key]; }
-  });
-  Object.keys(map).forEach(function(key) {
-    if (ordered[key] === undefined) { ordered[key] = map[key]; }
-  });
-  return ordered;
+  return Object.keys(result).map(function(key) { return result[key]; })
+    .sort(function(a, b) { return a.order - b.order; });
 }
 
 function sumJobPoints_(jobs) {

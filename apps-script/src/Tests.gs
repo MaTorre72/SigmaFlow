@@ -14,6 +14,23 @@ function generateTestDataset() {
   });
 }
 
+// Diagnostica temporanea per il problema di ordinamento in Dashboard
+// segnalato da Marco: esegui dall'editor Apps Script su TEST e incolla il
+// log. Confronta le colonne cosi' come le vede la board (readColumns_,
+// gia' corretto) con quelle cosi' come le vede la Dashboard
+// (columnsFromConfig_, che ora dovrebbe dare lo stesso risultato).
+function diagnosticaOrdineColonneTest() {
+  return withTestSpreadsheet_(function(ss) {
+    var config = readConfig_();
+    var daBoard = readColumns_().map(function(c) { return { id: c.id, label: c.label, order: c.order }; });
+    var daDashboard = columnsFromConfig_(config).map(function(c) { return { id: c.id, label: c.label, order: c.order }; });
+    var raw = config.columns_json;
+    var result = { columns_json_grezzo: raw, ordine_board: daBoard, ordine_dashboard: daDashboard };
+    console.log(JSON.stringify(result, null, 2));
+    return result;
+  });
+}
+
 function seedTestDataset_(ss, replace) {
   if (replace) { resetTestDatabase_(ss); }
   var jobsSheet = ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
