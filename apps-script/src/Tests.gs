@@ -173,6 +173,7 @@ function runAllTests() {
     testMoveJobScriveEventoAuto,
     testMigrateToActivityLogChecklist,
     testMigrateToActivityLogBackfillEventoCreazione,
+    testMigrateToActivityLogBackfillNonContraddiceSpostamentiReali,
     testReworkFromStandByToBacklogKeepsStartTs,
     testMoveToPrepSetsPrepTsNotStartTs,
     testMoveToWipStillSetsStartTs,
@@ -977,9 +978,50 @@ function testMigrateToActivityLogBackfillEventoCreazione() {
     assertEquals_(1, log.length, 'la card ha ora un evento in cronologia');
     assertEquals_(null, log[0].from, 'l\'evento ricostruito e\' riconoscibile come evento di creazione (from null)');
     assertEquals_(pastArrival, log[0].ts, 'la data dell\'evento ricostruito riprende arrival_ts');
+    assertEquals_('backlog', log[0].to, 'la card era (ed e\' rimasta) in backlog: l\'evento ricostruito punta li\'');
+
+    var jobAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(pastArrival, jobAfter.incarico_ts, 'incarico_ts si allinea da solo all\'evento ricostruito, non solo il log');
 
     var secondPass = migrateToActivityLog({ env: 'test' });
     assertEquals_(0, secondPass.data.creation_events_backfilled, 'un secondo lancio della migrazione non duplica l\'evento gia\' presente');
+  });
+}
+
+function testMigrateToActivityLogBackfillNonContraddiceSpostamentiReali() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Card con log parziale gia\' presente', size_class: 'M' }).data;
+
+    // Simula una card seedata SENZA evento di creazione ma con almeno un
+    // move reale gia' registrato (come capitava prima del backfill): il
+    // log non e' vuoto, ma non contiene comunque un evento con from null.
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.status = 'wip';
+    job.arrival_ts = testTsMinutesAgo_(300);
+    job.activity_log_json = JSON.stringify([{
+      id: 'evento-reale-preesistente',
+      ts: testTsMinutesAgo_(60),
+      type: 'move',
+      source: 'auto',
+      to: 'wip',
+      from: 'backlog',
+      note: ''
+    }]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = migrateToActivityLog({ env: 'test' });
+    assertTrue_(result.success, 'migrazione dovrebbe riuscire');
+    assertEquals_(1, result.data.creation_events_backfilled, 'un evento di creazione ricostruito');
+
+    var log = getActivityLog({ job_id: created.job_id }).data.log;
+    assertEquals_(2, log.length, 'evento ricostruito + evento reale preesistente');
+    var creationEvent = log.filter(function(e) { return e.from === null; })[0];
+    assertEquals_('backlog', creationEvent.to,
+      'l\'evento ricostruito deve puntare a dove la card si trovava PRIMA del primo move reale (backlog), non allo status attuale (wip) — altrimenti il log direbbe "creata in wip" seguito da uno spostamento "da backlog", contraddittorio');
   });
 }
 

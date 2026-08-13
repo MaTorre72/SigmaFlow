@@ -253,20 +253,29 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
   // calcolo di incarico_ts al primo, eventuale, rientro in BACKLOG. Le
   // card seedate per i test o mai passate da addJob possono averne il
   // log completamente vuoto: qui si sintetizza un evento di creazione
-  // usando arrival_ts (o, in mancanza, il momento della migrazione) e lo
-  // status attuale come colonna di destinazione — la migliore stima
-  // possibile a posteriori, non necessariamente la colonna reale
-  // d'origine se la card si e' gia' spostata da allora.
+  // usando arrival_ts (o, in mancanza, il momento della migrazione).
   var hasCreationEvent = log.some(function(event) {
     return event.type === 'move' && event.from === null;
   });
   if (!hasCreationEvent) {
+    // Colonna di destinazione dell'evento sintetico: se esistono gia'
+    // altri move nel log, la colonna corretta e' il "from" del piu'
+    // vecchio di questi (e' letteralmente da dove la card e' partita
+    // prima di quel movimento) — MAI job.status attuale, che riflette
+    // dove si trova ORA e produrrebbe un evento di creazione
+    // contraddittorio se la card si e' gia' spostata da allora (es.
+    // "creata in WIP" seguito da uno spostamento "da BACKLOG").
+    // Solo se non esiste alcun altro move nel log lo stato attuale
+    // coincide per forza con quello di partenza.
+    var existingMoves = log.filter(function(event) { return event.type === 'move'; })
+      .sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+    var backfillTo = existingMoves.length ? existingMoves[0].from : (job.status || 'backlog');
     log.push({
       id: generateActivityEventId_(),
       ts: job.arrival_ts || migrationTs,
       type: 'move',
       source: 'auto',
-      to: job.status || 'backlog',
+      to: backfillTo || job.status || 'backlog',
       from: null,
       note: ''
     });
@@ -300,6 +309,21 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
   });
 
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+
+  // Ricalcola i campi strutturati rileggendo tutto il log dall'inizio,
+  // nello stesso ordine cronologico in cui sono avvenuti: e' l'unico modo
+  // per tenerli coerenti quando il log e' stato completato con un evento
+  // di creazione ricostruito (che non passa da addActivityEvent, l'unica
+  // via che allinea i campi in tempo reale). Riusa la stessa logica di
+  // allineamento della scrittura live, cosi' il risultato e' identico a
+  // quello che si sarebbe ottenuto se gli eventi fossero stati registrati
+  // uno per uno nel tempo.
+  log.filter(function(event) { return event.type === 'move'; })
+    .sort(function(a, b) { return compareTs_(a.ts, b.ts); })
+    .forEach(function(moveEvent) {
+      applyStructuralAlignment_(job, checkStructuralAlignment_(job, moveEvent));
+    });
+
   job.activity_log_json = serializeActivityLog_(log);
 
   // La spec non lo dice esplicitamente per la checklist (a differenza delle
