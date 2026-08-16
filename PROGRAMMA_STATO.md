@@ -1,21 +1,59 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 17:20
+Aggiornato: 2026-08-16 18:15
 
-Fase corrente: Migrazione PROD — R3 pronta, in attesa che Marco la esegua
-Titolo: eseguiMigrazioneCompletaSuCopiaProd_ — vedi AUDIT_MIGRAZIONE_PROD.md v2
+Fase corrente: Migrazione PROD — R3 eseguita con successo, in attesa
+della verifica a campione di Marco (R4)
+Titolo: eseguiMigrazioneCompletaSuCopiaProd — vedi AUDIT_MIGRAZIONE_PROD.md v2
 
-## R0/R1 confermati, R3 pronta (2026-08-16 17:20)
+## R0-R3 completati (2026-08-16)
 
 Marco ha creato la copia reale di PROD ("Backup di SigmaFlow Database",
-id `1xUMWhAK8tovUU_gHEqizi9WDoqxTULzzfaygAfYL3FI`) e confermato di
-procedere con R3. Scritto `eseguiMigrazioneCompletaSuCopiaProd_()`
-(wrapper senza argomenti, id e nome hardcoded come due valori
-indipendenti confermati separatamente da Marco — stesso pattern di
-`migrateVisiteFromHistoryOnTest`), pushato su TEST e verificato
-(clasp pull + diff, identico). **Non eseguita** — in attesa che Marco
-la lanci dall'editor Apps Script e incolli il risultato per la
-revisione congiunta prima di qualunque passo successivo (R4/R5, poi
-eventualmente P4-P8 per PROD vero).
+id `1xUMWhAK8tovUU_gHEqizi9WDoqxTULzzfaygAfYL3FI`, R0) e confermato di
+procedere con R3.
+
+**Bug trovato e corretto dopo il primo tentativo di Marco**: il wrapper
+`eseguiMigrazioneCompletaSuCopiaProd_` (con underscore finale) non
+compariva nel menu "Esegui" dell'editor — Apps Script nasconde di
+proposito dal menu le funzioni con underscore finale (convenzione
+"privata"), esattamente l'opposto di quanto serve a un wrapper pensato
+per essere cliccato. Rinominata `eseguiMigrazioneCompletaSuCopiaProd`
+(senza), stesso pattern gia' corretto di
+`migrateActivityLogOnTest`/`migrateVisiteFromHistoryOnTest`. Pushato e
+riverificato.
+
+**R3 eseguita da Marco, esito pulito**:
+
+```
+cards_processed: 50, corrections_migrated: 0, checklist_items_migrated: 11,
+creation_events_backfilled: 50, cards_skipped: 0, errors: []
+columns_json: corrected=true, todo: wip -> prep
+schema_alignment: success=true
+migrazione_visite: jobs_processed=50, jobs_without_log=0,
+  visite_written=50, coherence_warnings=[]
+```
+
+Tutte le 50 card reali processate, **zero errori, zero card saltate,
+zero warning di incoerenza**. `columns_json` corretto esattamente come
+previsto dall'audit (sez. 2.1). `creation_events_backfilled=50` =
+`cards_processed` conferma che PROD non aveva mai avuto
+`activity_log_json` (atteso, coerente con l'audit).
+
+**Nota positiva emersa**: il wrapper apre lo spreadsheet per ID
+diretto (`SpreadsheetApp.openById`), non tramite
+`SIGMAFLOW_TEST_SPREADSHEET_ID` — i passi R1/R5 dell'audit (puntare/
+ripristinare quella property) non sono stati necessari con questo
+approccio, un rischio in meno rispetto al piano originale (nessun
+momento in cui TEST e la copia di PROD potessero essere confusi tramite
+quella property condivisa).
+
+## Prossimo passo — R4, verifica a campione (di Marco)
+
+Chiesto a Marco di scegliere 3-5 casi reali che conosce bene (uno con
+rientri/rework, uno semplice, uno vecchio) e confrontare il risultato
+su `jobs`/`visite` con quanto ricorda della storia vera — stesso
+controllo gia' fatto sui dati demo di TEST durante L1-L5. In attesa
+della sua risposta prima di qualunque passo P4-P8 (deploy/migrazione
+su PROD vero) — nessuna azione su PROD vero fin qui, solo sulla copia.
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6); `AUDIT_MIGRAZIONE_PROD.md` v2 (sez. 4-5) per la migrazione PROD
 
