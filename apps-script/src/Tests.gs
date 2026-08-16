@@ -146,6 +146,7 @@ function runAllTests() {
     testPriorityHelpers,
     testPriorityUpdate,
     testCardColor,
+    testUpdateJobInvoicedTogglesIncaricoChiusoTs,
     testAmbassadorAndChecklist,
     testEditableOptions,
     testDynamicColumnsAndOptions,
@@ -696,6 +697,27 @@ function testCardColor() {
     assertEquals_('#DDEBF7', created.job.card_color, 'colore in creazione');
     var updated = updateJob({ job_id: created.job_id, card_color: '#E2F0D9' });
     assertEquals_('#E2F0D9', updated.data.job.card_color, 'colore aggiornato');
+  });
+}
+
+// La casella "Chiuso" (ex "Fatturato") attiva/svuota incarico_chiuso_ts
+// alla spunta, non solo il booleano invoiced — richiesto da Marco dopo
+// aver scoperto che la vecchia casella non registrava nessuna data.
+function testUpdateJobInvoicedTogglesIncaricoChiusoTs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Chiusura incarico' }).data;
+    assertTrue_(!created.job.incarico_chiuso_ts, 'incarico_chiuso_ts vuoto alla creazione');
+
+    var closed = updateJob({ job_id: created.job_id, invoiced: true });
+    assertTrue_(Boolean(closed.data.job.incarico_chiuso_ts), 'incarico_chiuso_ts valorizzato alla spunta di "Chiuso"');
+
+    var closedTs = closed.data.job.incarico_chiuso_ts;
+    var closedAgain = updateJob({ job_id: created.job_id, invoiced: true });
+    assertEquals_(closedTs, closedAgain.data.job.incarico_chiuso_ts, 'nessun re-stamp se invoiced era gia\' true (non e\' una transizione)');
+
+    var reopened = updateJob({ job_id: created.job_id, invoiced: false });
+    assertTrue_(!reopened.data.job.incarico_chiuso_ts, 'incarico_chiuso_ts svuotato togliendo la spunta');
   });
 }
 

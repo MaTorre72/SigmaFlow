@@ -530,7 +530,16 @@ function updateJob(params) {
   }
 
   if (params.invoiced !== undefined) {
-    job.invoiced = coerceBoolean_(params.invoiced);
+    // La casella "Chiuso" (ex "Fatturato", nome cambiato su richiesta di
+    // Marco) attiva/svuota incarico_chiuso_ts alla spunta — il campo
+    // manuale di chiusura definitiva dell'incarico gia' presente in
+    // schema dalla Fase L1 (DESIGN_modello_caso_visita.md, sez. 3),
+    // indipendente da qualunque movimento sulla board.
+    var newInvoiced = coerceBoolean_(params.invoiced);
+    if (newInvoiced !== coerceBoolean_(job.invoiced)) {
+      job.incarico_chiuso_ts = newInvoiced ? nowIso_() : '';
+    }
+    job.invoiced = newInvoiced;
   }
 
   var priorityChanged = params.impact !== undefined || params.manageability !== undefined || params.priority_class !== undefined;
