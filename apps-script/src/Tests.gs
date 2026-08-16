@@ -150,6 +150,8 @@ function runAllTests() {
     testEditableOptions,
     testDynamicColumnsAndOptions,
     testMetrics,
+    testGetMetricsUsesVisiteNotJobFields,
+    testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite,
     testSystemStateInsufficientData,
     testDataQualityThresholds,
     testSystemStateSeparatesFlowFromTimeSamples,
@@ -842,19 +844,78 @@ function testMetrics() {
 
 function testSystemStateInsufficientData() {
   var now = new Date();
-  var state = buildSystemState_([{
+  var jobs = [{
     job_id: 'JOB-TEST-1',
     case_id: 'CASE-TEST-1',
     status: 'backlog',
     arrival_ts: nowIso_(),
     visit_number: 1
-  }], SIGMAFLOW.DEFAULT_CONFIG, now);
+  }];
+  var visite = [{
+    job_id: 'JOB-TEST-1',
+    numero_visita: 1,
+    apertura_ts: nowIso_()
+  }];
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
   assertEquals_('low', state.dataQuality.level, 'qualita dati insufficiente');
   assertEquals_('unknown', state.systemStatus.code, 'stato non stimabile');
   assertEquals_(null, state.capacityMetrics.effective_load, 'carico non stimabile');
   assertEquals_(null, state.timeMetrics.average_service_days, 'tempo medio non stimabile');
-  assertEquals_(null, buildSystemState_([], SIGMAFLOW.DEFAULT_CONFIG, now).reworkMetrics.initiatives_with_rework, 'rientri non stimabili senza iniziative');
+  assertEquals_(null, buildSystemState_([], [], SIGMAFLOW.DEFAULT_CONFIG, now).reworkMetrics.initiatives_with_rework, 'rientri non stimabili senza iniziative');
+}
+
+// Fase L4: prova diretta che getMetrics legge il tempo di servizio da
+// 'visite' e non piu' dal campo service_time_d su 'jobs' — il job ha un
+// valore "decoy" chiaramente diverso su jobs, il tempo vero (10 giorni)
+// e' solo su visite (start_ts/consegna_ts).
+function testGetMetricsUsesVisiteNotJobFields() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = appendCompletedJob_(ss, {
+      title: 'Decoy su jobs',
+      size_class: 'M',
+      service_time_d: 999,
+      lead_time_d: 15,
+      wait_time_d: 999,
+      visit_number: 1
+    });
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+    var row = findRowById_(sheet, 'job_id', jobId);
+    var headers = getHeaderMap_(sheet);
+    var now = new Date();
+    var start = Utilities.formatDate(new Date(now.getTime() - 10 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+    var consegna = Utilities.formatDate(now, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+    sheet.getRange(row, headers.start_ts).setValue(start);
+    sheet.getRange(row, headers.consegna_ts).setValue(consegna);
+
+    var metrics = getMetrics();
+    assertTrue_(metrics.success, 'getMetrics dovrebbe riuscire');
+    assertEquals_(10, metrics.data.E_S, 'E_S deve riflettere i 10 giorni di visite, non i 999 decoy su jobs');
+  });
+}
+
+// Fase L4: workloadMetrics/pointsMetrics restano su 'jobs', invariati —
+// devono funzionare correttamente anche con 'visite' completamente
+// vuota (nessuna riga), a differenza delle metriche di governo.
+function testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [
+    { job_id: 'A', case_id: 'A', status: 'backlog', arrival_ts: arrival, visit_number: 1, size_points: 5 },
+    { job_id: 'B', case_id: 'B', status: 'wip', arrival_ts: arrival, visit_number: 1, size_points: 8 },
+    { job_id: 'C', case_id: 'C', status: 'done', arrival_ts: arrival, done_ts: nowIso_(), visit_number: 1, size_points: 3, invoiced: false }
+  ];
+  var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, {
+    columns_json: JSON.stringify(SIGMAFLOW.DEFAULT_COLUMNS)
+  });
+
+  var state = buildSystemState_(jobs, [], config, now);
+
+  assertEquals_(1, state.workloadMetrics.ready, 'ready calcolato da jobs anche senza visite');
+  assertEquals_(1, state.workloadMetrics.in_progress, 'in_progress calcolato da jobs anche senza visite');
+  assertEquals_(3, state.pointsMetrics.completed_points, 'punti completati (C, size_points 3) calcolati da jobs anche senza visite');
 }
 
 function testDataQualityThresholds() {
@@ -875,8 +936,17 @@ function testSystemStateSeparatesFlowFromTimeSamples() {
     done_ts: nowIso_(),
     visit_number: 1
   }];
+  // consegna_ts presente ma senza start_ts: il tempo di servizio non e'
+  // calcolabile (visitServiceTimeDays_ ritorna 0), la visita deve comunque
+  // contare come "completata" ai fini del flusso, non del campione tempi.
+  var visite = [{
+    job_id: 'JOB-DONE-NO-TIME',
+    numero_visita: 1,
+    apertura_ts: arrival,
+    consegna_ts: nowIso_()
+  }];
 
-  var state = buildSystemState_(jobs, SIGMAFLOW.DEFAULT_CONFIG, now);
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
   assertEquals_(1, state.flowMetrics.completed_initiatives, 'uscite conteggiate anche senza tempo valido');
   assertEquals_(0, state.timeMetrics.completed_samples, 'campioni tempo esclusi se mancanti');
@@ -904,12 +974,26 @@ function testSystemStateWorkload() {
   jobs.push({ job_id: 'WIP', case_id: 'WIP', status: 'wip', arrival_ts: arrival, visit_number: 1 });
   jobs.push({ job_id: 'WAIT', case_id: 'WAIT', status: 'wait_client', arrival_ts: arrival, visit_number: 1 });
 
+  // Le 5 visite "chiuse" corrispondenti ai job JOB-DONE-0..4: start_ts =
+  // stesso istante di arrival_ts (2 giorni fa) e consegna_ts = adesso,
+  // cosi' visitServiceTimeDays_ torna 2 come il vecchio service_time_d.
+  var visite = [];
+  for (var v = 0; v < 5; v++) {
+    visite.push({
+      job_id: 'JOB-DONE-' + v,
+      numero_visita: v === 0 ? 2 : 1,
+      apertura_ts: arrival,
+      start_ts: arrival,
+      consegna_ts: nowIso_()
+    });
+  }
+
   var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, {
     columns_json: JSON.stringify(SIGMAFLOW.DEFAULT_COLUMNS),
     observation_window_days: 30,
     team_size: 4
   });
-  var state = buildSystemState_(jobs, config, now);
+  var state = buildSystemState_(jobs, visite, config, now);
 
   assertEquals_(1, state.workloadMetrics.ready, 'lavoro pronto');
   assertEquals_(1, state.workloadMetrics.preparing, 'lavoro in preparazione');
@@ -1473,6 +1557,27 @@ function appendCompletedJob_(ss, data) {
     data.rework_cause || '',
     ''
   ]);
+
+  // Fase L4: le metriche leggono da 'visite', non piu' dai campi
+  // derivati su 'jobs' — start_ts/consegna_ts qui producono lo stesso
+  // service_time_d passato in data, via visitServiceTimeDays_.
+  ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE).appendRow([
+    jobId,
+    data.visit_number || 1,
+    arrivalIso,
+    '',
+    '',
+    startIso,
+    now,
+    '',
+    '',
+    0,
+    0,
+    0,
+    data.rework_cause || ''
+  ]);
+
+  return jobId;
 }
 
 function assertHeaders_(sheet, expected) {

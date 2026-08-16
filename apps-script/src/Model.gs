@@ -1,22 +1,36 @@
 function getMetrics() {
   var config = readConfig_();
   var jobs = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-  return ok_(calculateMetrics_(jobs, config, new Date()));
+  var visite = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+  return ok_(calculateMetrics_(jobs, visite, config, new Date()));
 }
 
-function calculateMetrics_(jobs, config, now) {
+// Fase L4 (DESIGN_modello_caso_visita.md, sez. 10-11): le metriche di
+// governo e di dettaglio leggono da 'visite' (la vera unita' che "fa
+// coda", non il caso) invece che dai campi derivati su 'jobs'. 'jobs'
+// resta necessario solo per unire anagrafica non presente su 'visite'
+// (size_class) e per le metriche di stato-corrente (workload, punti),
+// esplicitamente NON toccate da questa sotto-fase.
+//
+// Nota operativa (decisione esplicita di Marco): 'visite' e' popolata
+// solo per i job toccati da uno spostamento dopo il deploy della Fase
+// L2 (piu' il bootstrap minimo di ensureOpenVisit_) — la materializzazione
+// storica completa e' L5, non ancora eseguita. Fino ad allora il
+// cruscotto su TEST mostrera' campioni parziali per lo storico non
+// ancora migrato: comportamento accettato consapevolmente, non un bug.
+function calculateMetrics_(jobs, visite, config, now) {
   var windowDays = Number(config.observation_window_days || 30);
   var since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
-  var observed = jobs.filter(function(job) {
-    return job.arrival_ts && new Date(job.arrival_ts) >= since;
+  var jobsById = indexBy_(jobs, 'job_id');
+
+  var observed = visite.filter(function(visit) {
+    return visit.apertura_ts && new Date(visit.apertura_ts) >= since;
   });
-  var completed = observed.filter(function(job) {
-    return isDoneStatus_(job.status) && numberJobField_(job, 'service_time_d', ['service_time_h']) > 0;
+  var completed = observed.filter(function(visit) {
+    return visit.consegna_ts && visitServiceTimeDays_(visit) > 0;
   });
 
-  var serviceTimes = completed.map(function(job) {
-    return numberJobField_(job, 'service_time_d', ['service_time_h']);
-  });
+  var serviceTimes = completed.map(visitServiceTimeDays_);
 
   var lambda = observed.length / windowDays;
   var stats = sampleStats_(serviceTimes);
@@ -44,15 +58,17 @@ function calculateMetrics_(jobs, config, now) {
     rework: rework,
     stability: stability,
     distributions: {
-      size_counts: countBy_(observed, 'size_class'),
-      lead_time_by_size: leadTimeBySize_(completed)
+      size_counts: countBy_(observed.map(function(visit) {
+        return { size_class: (jobsById[visit.job_id] || {}).size_class };
+      }), 'size_class'),
+      lead_time_by_size: leadTimeBySize_(completed, jobsById)
     }
   };
-  result.systemState = buildSystemState_(jobs, config, now);
+  result.systemState = buildSystemState_(jobs, visite, config, now);
   return result;
 }
 
-function buildSystemState_(jobs, config, now) {
+function buildSystemState_(jobs, visite, config, now) {
   var windowDays = Math.max(1, Number(config.observation_window_days || 30));
   var teamSize = Math.max(1, Number(config.team_size || 1));
   var since = new Date(now.getTime() - windowDays * 864e5);
@@ -62,23 +78,21 @@ function buildSystemState_(jobs, config, now) {
     columnMap[column.id] = column;
   });
 
-  var observed = jobs.filter(function(job) {
-    return job.arrival_ts && new Date(job.arrival_ts) >= since;
+  var observed = visite.filter(function(visit) {
+    return visit.apertura_ts && new Date(visit.apertura_ts) >= since;
   });
-  var completed = jobs.filter(function(job) {
-    return job.done_ts && new Date(job.done_ts) >= since;
+  var completed = visite.filter(function(visit) {
+    return visit.consegna_ts && new Date(visit.consegna_ts) >= since;
   });
-  var completedSamples = completed.filter(function(job) {
-    return numberJobField_(job, 'service_time_d', ['service_time_h']) > 0;
+  var completedSamples = completed.filter(function(visit) {
+    return visitServiceTimeDays_(visit) > 0;
   });
   var initiatives = initiativeGroups_(observed);
   var completedInitiatives = initiativeGroups_(completed);
   var initiativeList = Object.keys(initiatives).map(function(key) { return initiatives[key]; });
   var completedList = Object.keys(completedInitiatives).map(function(key) { return completedInitiatives[key]; });
   var reworked = initiativeList.filter(function(item) { return item.reentries > 0; });
-  var serviceTimes = completedSamples.map(function(job) {
-    return numberJobField_(job, 'service_time_d', ['service_time_h']);
-  });
+  var serviceTimes = completedSamples.map(visitServiceTimeDays_);
   var stats = sampleStats_(serviceTimes);
   var enoughCompleted = completedSamples.length >= 5 && stats.mean > 0;
 
@@ -280,13 +294,20 @@ function jobPoints_(job) {
   return SIGMAFLOW.SIZE_POINTS[job.size_class || 'M'] || SIGMAFLOW.SIZE_POINTS.M;
 }
 
-function initiativeGroups_(jobs) {
-  return jobs.reduce(function(groups, job) {
-    var key = job.case_id || job.job_id;
+// Fase L4: raggruppa le VISITE per caso (job_id — il caso non ha piu'
+// bisogno di un case_id separato per questo, essendo 'visite' gia'
+// indicizzata sul caso) e tiene il massimo numero_visita-1 osservato,
+// stesso significato di prima ("quante volte questa iniziativa e'
+// rientrata, per come osservato in questa finestra") ma sulla fonte
+// corretta (ogni riga di 'visite' e' un'iterazione reale, non piu' un
+// job duplicato per ogni rientro come nel vecchio markRework).
+function initiativeGroups_(visite) {
+  return visite.reduce(function(groups, visit) {
+    var key = visit.job_id;
     if (!groups[key]) {
       groups[key] = { id: key, reentries: 0 };
     }
-    groups[key].reentries = Math.max(groups[key].reentries, Math.max(0, Number(job.visit_number || 1) - 1));
+    groups[key].reentries = Math.max(groups[key].reentries, Math.max(0, Number(visit.numero_visita || 1) - 1));
     return groups;
   }, {});
 }
@@ -460,13 +481,16 @@ function queueMG1_(lambda, rho, meanServiceDays, secondMoment) {
 }
 
 function reworkMetrics_(completed, lambda, teamSize, mu, secondMoment) {
-  var reworked = completed.filter(function(job) {
-    return coerceBoolean_(job.is_rework) || Number(job.visit_number) > 1;
+  // 'completed' e' ora un array di visite (Fase L4): una visita e' essa
+  // stessa un rientro se numero_visita > 1 — non serve piu' un flag
+  // is_rework separato, la posizione nella sequenza lo dice gia'.
+  var reworked = completed.filter(function(visit) {
+    return Number(visit.numero_visita || 1) > 1;
   });
 
   var p1 = completed.length ? reworked.length / completed.length : 0;
-  var r = reworked.length ? reworked.reduce(function(sum, job) {
-    return sum + Math.max(0, Number(job.visit_number || 1) - 1);
+  var r = reworked.length ? reworked.reduce(function(sum, visit) {
+    return sum + Math.max(0, Number(visit.numero_visita || 1) - 1);
   }, 0) / reworked.length : 0;
   var expectedVisits = 1 + p1 * r;
   var lambdaEffective = lambda * expectedVisits;
@@ -501,18 +525,22 @@ function stabilityMetrics_(rho, rhoEffective, cs2) {
   };
 }
 
-function leadTimeBySize_(jobs) {
+// Fase L4: 'visite' non ha size_class (e' anagrafica del caso, non della
+// visita) — jobsById fa da join per etichettare ciascuna visita con la
+// taglia del proprio caso.
+function leadTimeBySize_(visite, jobsById) {
   var groups = {};
   ['XS', 'S', 'M', 'L', 'XL'].forEach(function(size) {
     groups[size] = [];
   });
 
-  jobs.forEach(function(job) {
+  visite.forEach(function(visit) {
+    var job = jobsById[visit.job_id] || {};
     var size = job.size_class || 'M';
     if (!groups[size]) {
       groups[size] = [];
     }
-    var leadTimeDays = numberJobField_(job, 'lead_time_d', ['lead_time_h']);
+    var leadTimeDays = visitLeadTimeDays_(visit);
     if (leadTimeDays > 0) {
       groups[size].push(leadTimeDays);
     }
@@ -538,21 +566,34 @@ function countBy_(rows, field) {
   }, {});
 }
 
-function numberJobField_(job, primary, aliases) {
-  if (job[primary] !== undefined && job[primary] !== '') {
-    return Number(job[primary]) || 0;
-  }
+function indexBy_(rows, key) {
+  var map = {};
+  rows.forEach(function(row) {
+    map[row[key]] = row;
+  });
+  return map;
+}
 
-  aliases = aliases || [];
-  for (var i = 0; i < aliases.length; i++) {
-    if (job[aliases[i]] !== undefined && job[aliases[i]] !== '') {
-      if (aliases[i].slice(-2) === '_h' && primary.slice(-2) === '_d') {
-        return (Number(job[aliases[i]]) || 0) / 24;
-      }
-      return Number(job[aliases[i]]) || 0;
-    }
+// Tempo di servizio della visita (DESIGN_modello_caso_visita.md, sez. 5):
+// consegna_ts - start_ts, oppure chiusura_ts - start_ts se la visita si
+// e' chiusa su un rientro senza mai raggiungere done.
+function visitServiceTimeDays_(visit) {
+  if (visit.start_ts && visit.consegna_ts) {
+    return diffDays(visit.start_ts, visit.consegna_ts);
   }
+  if (visit.start_ts && visit.chiusura_ts && !visit.consegna_ts) {
+    return diffDays(visit.start_ts, visit.chiusura_ts);
+  }
+  return 0;
+}
 
+// Tempo dall'apertura alla consegna della visita (include attesa
+// incarico/preparazione, non solo lavorazione) — analogo di lead_time_d
+// a livello di visita invece che di caso.
+function visitLeadTimeDays_(visit) {
+  if (visit.apertura_ts && visit.consegna_ts) {
+    return diffDays(visit.apertura_ts, visit.consegna_ts);
+  }
   return 0;
 }
 
