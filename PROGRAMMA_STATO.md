@@ -1,9 +1,21 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 17:15
+Aggiornato: 2026-08-16 17:20
 
-Fase corrente: Migrazione PROD — R2 completata (orchestratrice scritta
-e testata), in attesa di revisione prima di R3 (copia reale di PROD)
-Titolo: eseguiMigrazioneCompleta_ — vedi AUDIT_MIGRAZIONE_PROD.md v2
+Fase corrente: Migrazione PROD — R3 pronta, in attesa che Marco la esegua
+Titolo: eseguiMigrazioneCompletaSuCopiaProd_ — vedi AUDIT_MIGRAZIONE_PROD.md v2
+
+## R0/R1 confermati, R3 pronta (2026-08-16 17:20)
+
+Marco ha creato la copia reale di PROD ("Backup di SigmaFlow Database",
+id `1xUMWhAK8tovUU_gHEqizi9WDoqxTULzzfaygAfYL3FI`) e confermato di
+procedere con R3. Scritto `eseguiMigrazioneCompletaSuCopiaProd_()`
+(wrapper senza argomenti, id e nome hardcoded come due valori
+indipendenti confermati separatamente da Marco — stesso pattern di
+`migrateVisiteFromHistoryOnTest`), pushato su TEST e verificato
+(clasp pull + diff, identico). **Non eseguita** — in attesa che Marco
+la lanci dall'editor Apps Script e incolli il risultato per la
+revisione congiunta prima di qualunque passo successivo (R4/R5, poi
+eventualmente P4-P8 per PROD vero).
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6); `AUDIT_MIGRAZIONE_PROD.md` v2 (sez. 4-5) per la migrazione PROD
 
