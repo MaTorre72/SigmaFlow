@@ -1,8 +1,8 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 14:05
+Aggiornato: 2026-08-16 14:40
 
-Fase corrente: L3
-Titolo: Modello caso/visita — ActivityLog.gs, allineamento sulla visita aperta
+Fase corrente: L4
+Titolo: Modello caso/visita — Model.gs, metriche di governo da 'visite'
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
 
@@ -218,14 +218,76 @@ del drag) resta un problema di UX/performance del frontend, non
 affrontato qui — questo fix elimina solo il sintomo nella Cronologia,
 non il ritardo percepito nel drag-and-drop.
 
+Marco ha verificato L2/L3 su TEST (Cronologia coerente, self-move senza
+traccia) e confermato di procedere con L4 nella stessa sessione.
+
+## Decisione esplicita di Marco su L4 (precondizione bloccante)
+
+Prima di scrivere codice ho segnalato un problema: `visite` non ha
+ancora lo storico completo (la materializzazione e' L5, non ancora
+eseguita) — spostare subito le metriche di governo a leggere da
+`visite` avrebbe fatto apparire il cruscotto TEST con campioni
+sparsi/incompleti per la stragrande maggioranza dei job storici (solo
+quelli toccati da uno spostamento dopo il deploy di L2 hanno righe
+`visite`, via bootstrap). Ho chiesto a Marco come procedere; ha scelto
+esplicitamente: **procedere subito con L4, accettando la dashboard
+degradata su TEST fino a L5**. Questa e' quindi una regressione VISIBILE
+E ATTESA sul cruscotto TEST, non un bug, fino a quando L5 non
+materializza lo storico.
+
+## L4 — lavoro svolto (Model.gs)
+
+`calculateMetrics_`/`buildSystemState_` ora derivano osservati,
+completati, tempi di servizio e indicatori di rework da `visite`
+(`apertura_ts`, `consegna_ts`, `start_ts`/`chiusura_ts`,
+`numero_visita`) invece che dai campi derivati su `jobs`
+(`arrival_ts`/`service_time_d`/`is_rework`/`visit_number`) — coerente
+con sez. 10-11 del documento ("la visita e' la vera unita' che fa
+coda"). `workloadMetrics`/`pointsMetrics` restano **invariati** su
+`jobs`, come richiesto esplicitamente (`currentWorkload_`/
+`pointsStatistics_` non toccate).
+
+Adattate `initiativeGroups_`/`reworkMetrics_`/`leadTimeBySize_` alla
+nuova fonte (`job_id`/`numero_visita` al posto di
+`case_id`/`visit_number`); aggiunti `indexBy_` (join `visite`→`jobs`
+per `size_class`, assente su `visite`), `visitServiceTimeDays_` (sez. 5:
+`consegna_ts - start_ts`, o `chiusura_ts - start_ts` se la visita si
+chiude senza mai raggiungere `done`), `visitLeadTimeDays_`
+(`apertura_ts → consegna_ts`, analogo di `lead_time_d` a livello di
+visita). Rimossa `numberJobField_` (diventata morta — l'aliasing
+`_d`/`_h` non serve piu', i campi di `visite` sono gia' puliti).
+
+**Nessun cambiamento allo shape dell'output JSON** di `getMetrics()`:
+`client.html`/`dashboard.html` verificati, non richiedono modifiche
+(confermato leggendo `renderMetrics`/`loadMetrics` in `client.html`).
+
+Test esistenti (`testMetrics`, `testSystemStateInsufficientData`,
+`testSystemStateSeparatesFlowFromTimeSamples`,
+`testSystemStateWorkload`) adattati per costruire anche l'array
+`visite` sintetico accanto a `jobs` (`buildSystemState_` e' ora a 4
+argomenti: `jobs, visite, config, now`). `appendCompletedJob_` (helper
+di test) estesa per scrivere anche la riga `visite` corrispondente.
+
+2 nuovi test dedicati che provano concretamente lo spostamento della
+fonte dati, non solo che i numeri combacino per coincidenza:
+- `testGetMetricsUsesVisiteNotJobFields` — un job con `service_time_d`
+  "decoy" chiaramente sbagliato su `jobs`, il tempo vero solo su
+  `visite`: verifica che `E_S` rifletta `visite`, non il decoy.
+- `testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite` — `workloadMetrics`/
+  `pointsMetrics` corretti anche con `visite` completamente vuota.
+
+**57/57 test passati**. Push su TEST eseguito e verificato (13/13
+identici).
+
 ## Prossimo passo
 
-1. **Gate umano**: Marco riverifica su TEST che le correzioni in
-   Cronologia producano ora una sequenza `from`/`to` coerente e che i
-   rilasci ripetuti sulla stessa colonna non lascino piu' traccia, poi
-   decide se procedere a L4 (`Model.gs`: metriche di governo lette da
-   `visite`) — sessione separata. Se la lentezza della board resta un
-   problema, va trattata come richiesta a parte (non e' nel programma
-   Activity Log / caso-visita).
+1. **Gate umano**: Marco verifica su TEST che il cruscotto mostri le
+   metriche attese — **ricordando che per lo storico non ancora
+   toccato da uno spostamento sotto il nuovo codice i numeri saranno
+   parziali/bassi fino a L5** (non un bug, gia' concordato sopra).
+2. Se conferma, prossimo passo e' **L5** (migrazione storica +
+   rimozione dei campi duplicati da `JOB_HEADERS`) — l'unico passo
+   irreversibile del programma, richiede un gate umano esplicito
+   *prima* di qualunque rimozione, solo su TEST. Sessione separata.
 
 Nessuna scrittura su PROD.
