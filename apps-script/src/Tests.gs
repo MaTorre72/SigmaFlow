@@ -179,6 +179,7 @@ function runAllTests() {
     testMoveToPrepSetsPrepTsNotStartTs,
     testMoveToWipStillSetsStartTs,
     testMoveToBacklogSetsIncaricoTs,
+    testMoveJobToSameColumnIsNoOp,
     testVisitWipToWipDoesNotOpenNewVisit,
     testVisitStandByReentryOpensNewVisit,
     testVisitDoneReentryTreatedLikeStandBy,
@@ -384,6 +385,33 @@ function testMoveToBacklogSetsIncaricoTs() {
 }
 
 // --- Fase L2: modello caso/visita, regola di apertura/chiusura (sez. 2/4) ---
+
+// Segnalato da Marco: la board a volte non da' un feedback immediato del
+// drag, l'utente rilascia la card piu' volte e capita di "spostarla" nella
+// colonna in cui si trova gia'. Non deve produrre nessun evento in
+// Cronologia (sarebbe solo rumore, "X -> X").
+function testMoveJobToSameColumnIsNoOp() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Self-move', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var before = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    var logBefore = parseActivityLog_(before.activity_log_json);
+    var visiteBefore = readVisiteForJob_(ss, created.job_id);
+
+    var moved = moveJob({ job_id: created.job_id, status: 'wip' });
+    assertTrue_(moved.success, 'moveJob verso la stessa colonna non deve fallire');
+
+    var after = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    var logAfter = parseActivityLog_(after.activity_log_json);
+    var visiteAfter = readVisiteForJob_(ss, created.job_id);
+
+    assertEquals_(logBefore.length, logAfter.length, 'nessun evento aggiunto in Cronologia per uno spostamento verso la stessa colonna');
+    assertEquals_(visiteBefore.length, visiteAfter.length, 'nessuna nuova visita per uno spostamento verso la stessa colonna');
+    assertEquals_(visiteBefore[0].start_ts, visiteAfter[0].start_ts, 'la visita esistente (dal primo, vero spostamento) non viene toccata dal self-move successivo');
+  });
+}
 
 function testVisitWipToWipDoesNotOpenNewVisit() {
   withTestSpreadsheet_(function(ss) {

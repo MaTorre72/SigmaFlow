@@ -219,6 +219,17 @@ function moveJob(params) {
   var headers = getHeaderMap_(sheet);
   var now = nowIso_();
   var job = readJobFromRow_(sheet, row, headers);
+
+  // Spostamento verso la colonna in cui la card si trova gia': nessun
+  // cambiamento reale, quindi nessun evento in Cronologia (sarebbe solo
+  // fuorviante, "X -> X" senza alcun significato) e nessun tocco a
+  // gate/visite. Capita spesso quando la board non da' un feedback
+  // visivo immediato del drag: l'utente rilascia la card piu' volte
+  // pensando che non si sia spostata (segnalato da Marco in collaudo).
+  if (normalizeStatus_(job.status) === status) {
+    return ok_({ job_id: params.job_id, status: status, job: job });
+  }
+
   var columns = readColumns_();
   var sourceColumn = findColumn_(columns, job.status) || { id: job.status, role: 'neutral' };
   var targetColumn = findColumn_(columns, status);
