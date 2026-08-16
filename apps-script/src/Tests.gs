@@ -177,7 +177,14 @@ function runAllTests() {
     testReworkFromStandByToBacklogKeepsStartTs,
     testMoveToPrepSetsPrepTsNotStartTs,
     testMoveToWipStillSetsStartTs,
-    testMoveToBacklogSetsIncaricoTs
+    testMoveToBacklogSetsIncaricoTs,
+    testVisitWipToWipDoesNotOpenNewVisit,
+    testVisitStandByReentryOpensNewVisit,
+    testVisitDoneReentryTreatedLikeStandBy,
+    testDoneCannotReturnDirectlyToWip,
+    testVisitConsegnaTsSetOnDoneWithoutClosingVisit,
+    testVisitAccumulatesWaitTimeOnStandByExit,
+    testVisitStandByToStandByDoesNotOpenNewVisit
   ];
 
   tests.forEach(function(testFn) {
@@ -201,6 +208,7 @@ function testSetupSchema() {
     resetTestDatabase_(ss);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS), JOB_HEADERS);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.CASES), CASE_HEADERS);
+    assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE), VISITE_HEADERS);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG), CONFIG_HEADERS);
   });
 }
@@ -366,6 +374,138 @@ function testMoveToBacklogSetsIncaricoTs() {
 
     var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
     assertTrue_(Boolean(job.incarico_ts), 'incarico_ts valorizzato all\'ingresso in BACKLOG');
+  });
+}
+
+// --- Fase L2: modello caso/visita, regola di apertura/chiusura (sez. 2/4) ---
+
+function testVisitWipToWipDoesNotOpenNewVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Wip verso wip', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var moved = moveJob({ job_id: created.job_id, status: 'wip' });
+    assertTrue_(moved.success, 'moveJob wip->wip dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'wip->wip non deve aprire una nuova visita');
+    assertEquals_(1, Number(visite[0].numero_visita), 'numero_visita resta 1');
+    assertTrue_(!visite[0].chiusura_ts, 'la visita resta aperta');
+  });
+}
+
+function testVisitStandByReentryOpensNewVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Ciclo attesa-rientro', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    var returned = moveJob({ job_id: created.job_id, status: 'backlog' });
+
+    assertTrue_(returned.success, 'moveJob da stand_by a backlog dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'il rientro da attesa deve aprire una nuova visita');
+
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    var opened = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
+
+    assertTrue_(Boolean(closed.chiusura_ts), 'la visita 1 deve risultare chiusa');
+    assertEquals_('wait_client', closed.chiusura_tipo, 'chiusura_tipo = colonna di provenienza');
+    assertTrue_(Boolean(opened.apertura_ts), 'la visita 2 deve avere apertura_ts');
+    assertTrue_(Boolean(opened.incarico_ts), 'la visita 2 deve avere incarico_ts (destinazione backlog)');
+    assertEquals_('wait_client', opened.rework_cause, 'rework_cause = chiusura_tipo della visita precedente');
+  });
+}
+
+function testVisitDoneReentryTreatedLikeStandBy() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro da done', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'done' });
+    var returned = moveJob({ job_id: created.job_id, status: 'todo' });
+
+    assertTrue_(returned.success, 'moveJob da done a todo (prep) dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'il rientro da done deve aprire una nuova visita, come da stand_by');
+
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    var opened = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
+
+    assertEquals_('done', closed.chiusura_tipo, 'chiusura_tipo = done');
+    assertTrue_(Boolean(closed.consegna_ts), 'consegna_ts della visita 1 resta valorizzato');
+    assertTrue_(Boolean(opened.prep_ts), 'la visita 2 deve avere prep_ts (destinazione todo/prep)');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(2, Number(job.visit_number), 'visit_number su jobs incrementato anche per rientro da done');
+  });
+}
+
+function testDoneCannotReturnDirectlyToWip() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro da done vietato verso wip', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'done' });
+
+    var failed = false;
+    try {
+      moveJob({ job_id: created.job_id, status: 'wip' });
+    } catch (err) {
+      failed = err.message.indexOf('non e consentito') !== -1;
+    }
+    assertTrue_(failed, 'rientro diretto da done a WIP dovrebbe fallire, come da stand_by');
+  });
+}
+
+function testVisitConsegnaTsSetOnDoneWithoutClosingVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Consegna senza chiusura visita', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    var done = moveJob({ job_id: created.job_id, status: 'done' });
+
+    assertTrue_(done.success, 'moveJob verso done dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'l\'ingresso in done non apre una nuova visita');
+    assertTrue_(Boolean(visite[0].consegna_ts), 'consegna_ts valorizzato al primo ingresso in done');
+    assertTrue_(!visite[0].chiusura_ts, 'la visita resta aperta: puo\' ancora rientrare');
+  });
+}
+
+function testVisitAccumulatesWaitTimeOnStandByExit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Accumulo attesa cliente', size_class: 'S' });
+    moveJob({ job_id: jobId, status: 'wip' });
+    moveJob({ job_id: jobId, status: 'wait_client' });
+    Utilities.sleep(1000);
+    moveJob({ job_id: jobId, status: 'backlog' });
+
+    var visite = readVisiteForJob_(ss, jobId);
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    assertTrue_(Number(closed.t_cliente_d) >= 0, 't_cliente_d valorizzato numericamente sull\'uscita da ATTESA CLIENTE');
+  });
+}
+
+function testVisitStandByToStandByDoesNotOpenNewVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Attesa verso altra attesa', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    var moved = moveJob({ job_id: created.job_id, status: 'wait_authority' });
+
+    assertTrue_(moved.success, 'spostamento tra due colonne di attesa dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'spostamento tra due stand_by non apre una nuova visita');
+    assertTrue_(!visite[0].chiusura_ts, 'la visita resta aperta');
+    assertTrue_(Number(visite[0].t_cliente_d) >= 0, 't_cliente_d aggiornato sull\'uscita dalla prima attesa');
   });
 }
 
@@ -1072,12 +1212,20 @@ function withTestSpreadsheet_(callback) {
 function resetTestDatabase_(ss) {
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
 
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS), JOB_HEADERS);
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.CASES), CASE_HEADERS);
+  clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE), VISITE_HEADERS);
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG), CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+}
+
+function readVisiteForJob_(ss, jobId) {
+  return readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE)).filter(function(visit) {
+    return visit.job_id === jobId;
+  });
 }
 
 function clearDataRows_(sheet, headers) {

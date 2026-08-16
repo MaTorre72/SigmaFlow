@@ -44,6 +44,17 @@ var SIGMAFLOW = {
     XL: 20
   },
   REWORK_CAUSES: ['wait_client', 'wait_authority', 'wait_internal', 'manual'],
+  // Fase L2 (DESIGN_modello_caso_visita.md, sez. 4): mappa l'id della
+  // colonna di attesa lasciata al campo accumulatore sulla visita aperta.
+  // Stesso insieme fisso di id gia' assunto da REWORK_CAUSES sopra — una
+  // colonna stand_by con un id diverso da questi tre non alimenta nessun
+  // accumulatore (limite noto, da rivedere se in futuro si aggiungono
+  // colonne di attesa personalizzate).
+  WAIT_ACCUMULATOR_FIELDS: {
+    wait_client: 't_cliente_d',
+    wait_authority: 't_ente_d',
+    wait_internal: 't_interno_d'
+  },
   SCENARIOS: {
     optimistic: {
       label: 'Scenario ottimistico',

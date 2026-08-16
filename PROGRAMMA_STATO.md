@@ -1,91 +1,121 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-15 12:30
+Aggiornato: 2026-08-16 10:15
 
-Fase corrente: L1
-Titolo: Modello caso/visita — Ricognizione + schema additivo
-Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`, commit da56212)
+Fase corrente: L2
+Titolo: Modello caso/visita — moveJob, regola di apertura/chiusura visita
+Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
 
 Stato: IN_ATTESA_GATE_UMANO
 
-Fase J e Fase K: chiuse per decisione di Marco. Nota tecnica: nessuna
-delle due e' stata mersa su `main` (12 commit di differenza,
-verificato) — resta una decisione/azione separata ed esplicita di
-Marco, non presa da Claude Code in questa sessione.
+Fase J e Fase K: chiuse. L1: chiusa, gate umano confermato da Marco
+("verificato, tutto ok" sul foglio `visite` su TEST) prima di avviare L2.
 
-## Audit obbligatorio pre-L1 (eseguito, riportato, confermato da Marco)
+## L1 — riepilogo (chiuso)
 
-1. Nomi/ruoli colonna (`Constants.gs`): `COLUMN_ROLES` include `prep`
-   (Fase K); `DEFAULT_COLUMNS` con `todo` su ruolo `prep`. Confermato.
-2. `JOB_HEADERS`/`CASE_HEADERS` (`Schema.gs`): contenuto esatto riportato
-   e confermato — `incarico_ts`/`prep_ts` gia' presenti da Fase K,
-   `CASE_HEADERS` a 7 campi invariato dalla ricognizione originale.
-3. Guardia anti-reingresso-WIP e ramo rework in `moveJob`
-   ([Kanban.gs:225-236](apps-script/src/Kanban.gs:225)): confermati nella
-   forma attuale. Divergenza segnalata (non bloccante per L1, rilevante
-   per L2): il guardia copre solo provenienza `stand_by`, il documento
-   (par. 2) vuole l'estensione anche a `done` — verra' gestita in L2.
-4. `markRework`: ancora in `routeAction_`, confermato **non richiamata**
-   da `client.html` (nessun match). `refreshCaseVisitCount_`: non e' una
-   route API, e' un helper interno chiamato da `moveJob`/`addJob` ad ogni
-   spostamento/creazione — attivo, non "scollegato dal frontend" nello
-   stesso senso di `markRework` (il frontend lo attiva indirettamente).
+Schema additivo: foglio `visite` nuovo e separato (`VISITE_HEADERS`,
+sez. 9.2), `cases`/`CASE_HEADERS`/`refreshCaseVisitCount_` invariati,
+`incarico_chiuso_ts` aggiunto a `JOB_HEADERS`, `SCHEMA_VERSION` 4->5.
+Push su TEST verificato con `clasp pull` + diff (13/13 file identici).
+Dettaglio completo nella cronologia del branch (commit `da56212`,
+`cedf8fd`).
 
-**Correzione di Marco al piano originale**: NON ridefinire `CASE_HEADERS`
-sul foglio `cases` esistente — `refreshCaseVisitCount_` gira ad ogni
-`moveJob`/`addJob` e scriverebbe su colonne inesistenti nel momento
-stesso del cambio intestazione, rompendo ogni spostamento sulla board.
-Creato invece un foglio **nuovo e separato** `visite`. `cases`,
-`CASE_HEADERS` e `refreshCaseVisitCount_` restano completamente
-invariati e funzionanti — ignorati, non rotti. La dismissione di
-`cases` e delle funzioni collegate sara' un passo separato, successivo,
-quando `visite` sara' comprovata (non prima di L5+).
+## L2 — lavoro svolto (da verificare su TEST, poi gate umano)
 
-## Lavoro svolto in L1 (additivo, verificato)
+Ricognizione mirata su `Kanban.gs` prima di scrivere: confermato che il
+guardia anti-reingresso-WIP copriva solo provenienza `stand_by` (non
+`done`) e che il ramo di marcatura rework copriva anch'esso solo
+`stand_by`, esattamente come segnalato nell'audit L1.
 
-- `Constants.gs`: `SIGMAFLOW.SHEETS.VISITE = 'visite'`,
-  `SCHEMA_VERSION` 4 -> 5.
-- `Schema.gs`: nuovo `VISITE_HEADERS` secondo la sezione 9.2 del
-  documento di design — `job_id`, `numero_visita` (identita' composta,
-  nessun id sintetico aggiunto), `apertura_ts`, `incarico_ts`,
-  `prep_ts`, `start_ts`, `consegna_ts`, `chiusura_ts`, `chiusura_tipo`,
-  `t_cliente_d`, `t_ente_d`, `t_interno_d`, `rework_cause`. Registrato in
-  `setupSigmaFlow` con lo stesso pattern di jobs/cases/config
-  (`ensureSheet_`).
-- `Schema.gs`: aggiunto `incarico_chiuso_ts` in coda a `JOB_HEADERS`
-  (chiusura definitiva manuale del caso, indipendente dalla board).
-  **Nessun campo rimosso** da `JOB_HEADERS` — la rimozione dei campi
-  duplicati (`incarico_ts`, `prep_ts`, `start_ts`, `done_ts`,
-  `service_time_d`, `lead_time_d`, `wait_time_d`, `is_rework`,
-  `rework_cause`, `visit_number`) e' prevista solo in L5, dopo che
-  L2-L4 avranno dimostrato che la lettura da `visite` funziona.
+Implementata la regola di apertura/chiusura visita (sez. 2 del
+documento di design) in `moveJob` (`Kanban.gs`):
+
+- **Guardia anti-reingresso-WIP esteso**: ora blocca il rientro diretto
+  a WIP sia da `stand_by` sia da `done` (prima solo da `stand_by`).
+  Normalizzato a confrontare `targetColumn.role === 'wip'` invece del
+  solo id letterale `'wip'`, per coerenza con il resto del codice.
+- **Chiusura/apertura visita**: qualunque spostamento con provenienza
+  `stand_by` o `done` verso `backlog` o `prep` chiude la visita aperta
+  (`chiusura_ts`, `chiusura_tipo` = colonna di provenienza) e ne apre
+  una nuova (`apertura_ts` = ora, `rework_cause` = `chiusura_tipo`
+  della precedente). Uno spostamento tra due colonne di attesa diverse,
+  o l'ingresso in `done`, non apre/chiude nulla — la visita resta
+  aperta.
+- **`consegna_ts`**: si valorizza al primo ingresso in una colonna di
+  ruolo `done` entro la visita aperta; non la chiude (la card puo'
+  ancora rientrare).
+- **Accumulatori per tipo** (`t_cliente_d`/`t_ente_d`/`t_interno_d`):
+  incrementati ad ogni uscita da una colonna `stand_by`, qualunque sia
+  la destinazione, cercando l'ingresso nella colonna lasciata
+  all'indietro nel log (stesso principio di `computeFrom_`, non
+  toccato). Mappa fissa colonna->campo aggiunta in `Constants.gs`
+  (`SIGMAFLOW.WAIT_ACCUMULATOR_FIELDS`), sugli stessi tre id gia'
+  assunti da `REWORK_CAUSES`.
+- **Scrittura su `visite` in aggiunta a `jobs`**: la mutazione in-place
+  esistente su `jobs` (start_ts/incarico_ts/prep_ts/done_ts/ecc.) resta
+  invariata, non ancora rimossa (previsto solo in L5). `visite` si
+  aggiorna in parallelo.
+- **Bootstrap visita mancante**: i job creati prima di questa sessione
+  non hanno ancora una riga in `visite` (la materializzazione storica e'
+  L5, non ancora eseguita). Per non bloccare gli spostamenti nel
+  frattempo, `moveJob` crea al volo una visita aperta minima se non ne
+  trova una per il job — verra' sovrascritta dalla migrazione storica
+  autorevole di L5. **Assunzione non esplicitata nel documento di
+  design, segnalata qui per visibilita': da confermare o correggere.**
+- `ensureCurrentSchema_()` aggiunto in testa a `moveJob` (mancava,
+  presente solo in `getBoard()`): garantisce che il foglio `visite`
+  esista anche se `moveJob` viene chiamato senza un caricamento board
+  precedente.
+
+**Esplicitamente fuori scope in questa sotto-fase** (non implementato):
+l'avviso "incarico risulta chiuso" (sez. 3) quando si sposta verso
+lavoro attivo un caso con `incarico_chiuso_ts` gia' valorizzato — non
+elencato tra i punti che L2 doveva coprire (guardia esteso, regola
+apertura/chiusura, accumulatori, consegna_ts) e richiederebbe una
+modifica frontend non prevista in questa sessione.
+
+`addJob`, `ActivityLog.gs`, `Model.gs`: non toccati, come richiesto.
+
+## Test dedicati aggiunti (Tests.gs)
+
+7 nuovi test, tutti verificati con l'harness Node (48/48 passati,
+nessuna regressione sui 41 preesistenti):
+
+- `testVisitWipToWipDoesNotOpenNewVisit` — wip->wip non apre nulla
+- `testVisitStandByReentryOpensNewVisit` — ciclo attesa->rientro apre
+  una nuova visita, con chiusura_tipo/rework_cause coerenti
+- `testVisitDoneReentryTreatedLikeStandBy` — rientro da done trattato
+  come da stand_by (chiude/apre visita, visit_number su jobs coerente)
+- `testDoneCannotReturnDirectlyToWip` — guardia esteso verificato
+- `testVisitConsegnaTsSetOnDoneWithoutClosingVisit` — consegna_ts si
+  valorizza senza chiudere la visita
+- `testVisitAccumulatesWaitTimeOnStandByExit` — accumulatore per tipo
+  si aggiorna sull'uscita da un'attesa
+- `testVisitStandByToStandByDoesNotOpenNewVisit` — spostamento tra due
+  attese diverse non apre una nuova visita, accumulatore comunque
+  aggiornato
+
+`resetTestDatabase_` esteso per creare/pulire anche il foglio `visite`
+tra un test e l'altro (mancava, avrebbe lasciato righe residue).
 
 ## Verifica
 
-- Harness offline: creato un foglio TEST sintetico via `setupSigmaFlow()`
-  — foglio `visite` creato con le 13 intestazioni esatte attese; foglio
-  `cases` verificato bit-per-bit invariato (le 7 colonne originali,
-  nessuna modifica); `jobs` verificato con `incarico_chiuso_ts`
-  presente.
-- Suite test completa: **41/41 passati**, nessuna regressione.
-- Push su TEST: **eseguito con successo** (dopo che Marco ha rifatto il
-  login `clasp`). Verificato con `clasp pull` in directory isolata +
-  diff riga per riga contro i sorgenti locali per tutti i 13 file
-  (`ActivityLog.gs`, `Constants.gs`, `Kanban.gs`, `Model.gs`,
-  `Schema.gs`, `Utils.gs`, `Tests.gs`, `appsscript.json`, `board.html`,
-  `client.html`, `dashboard.html`, `index.html`, `style.html`) —
-  **identici**, nessuna divergenza. Lo schema v5 con il foglio `visite`
-  e `incarico_chiuso_ts` e' ora live sul progetto Apps Script TEST.
+- Suite test completa: **48/48 passati** (41 preesistenti + 7 nuovi),
+  nessuna regressione.
+- Push su TEST: **non ancora eseguito in questa sotto-fase** — da fare
+  dopo la review di questo aggiornamento, con la stessa prassi di
+  sempre (`clasp push -f` + `clasp pull` isolato + diff).
 
 ## Prossimo passo
 
-1. **Gate umano**: Marco verifica sul foglio Google TEST che
-   `setupSigmaFlow()` (o il primo caricamento della board, che triggera
-   `ensureCurrentSchema_`) abbia creato il foglio `visite` con le
-   intestazioni corrette e che `cases` sia rimasto intatto, poi conferma
-   esplicitamente prima di procedere a L2 (`moveJob`: regola di
-   apertura/chiusura visita) — L2 e' una sessione Claude Code separata,
-   non questa.
+1. Push su TEST + verifica `clasp pull`/diff.
+2. **Gate umano**: Marco verifica su TEST che gli spostamenti sulla
+   board si comportino come atteso (in particolare: rientro da
+   `done`/`stand_by` verso `backlog`/`prep` blocca ancora la card come
+   prima visivamente, ma ora apre una nuova riga in `visite`), e
+   **decide sull'assunzione di bootstrap segnalata sopra** (visita
+   creata al volo per i job pre-esistenti) prima di procedere a L3
+   (`ActivityLog.gs`: allineamento sulla visita aperta) — sessione
+   Claude Code separata, non questa.
 
-Nessuna scrittura su PROD. Nessuna modifica a `moveJob`, `ActivityLog.gs`
-o `Model.gs` in questa sessione, come richiesto.
+Nessuna scrittura su PROD.

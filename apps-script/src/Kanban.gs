@@ -208,6 +208,7 @@ function addJob(params) {
 }
 
 function moveJob(params) {
+  ensureCurrentSchema_();
   var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var row = findRowById_(sheet, 'job_id', requireParam_(params, 'job_id'));
   if (row < 0) {
@@ -222,17 +223,26 @@ function moveJob(params) {
   var sourceColumn = findColumn_(columns, job.status) || { id: job.status, role: 'neutral' };
   var targetColumn = findColumn_(columns, status);
 
-  if (sourceColumn.role === 'stand_by' && targetColumn.id === 'wip') {
-    throw new Error('Il rientro diretto da una colonna di attesa a WIP non e consentito. Sposta prima il job in TO DO o in una colonna precedente.');
+  // Il rientro da un'attesa o da completato verso WIP e' sempre vietato:
+  // deve passare prima da TO DO/BACKLOG, che e' anche il punto in cui si
+  // apre la nuova visita (sez. 2 di DESIGN_modello_caso_visita.md).
+  var sourceClosesTowardActive = sourceColumn.role === 'stand_by' || sourceColumn.role === 'done';
+
+  if (sourceClosesTowardActive && targetColumn.role === 'wip') {
+    throw new Error('Il rientro diretto da una colonna di attesa o da completato a WIP non e consentito. Sposta prima il job in TO DO o in una colonna precedente.');
   }
 
-  if (sourceColumn.role === 'stand_by' && (targetColumn.role === 'wip' || targetColumn.role === 'backlog' || targetColumn.role === 'prep')) {
+  // Regola caso/visita (sez. 2): chiusura della visita aperta + apertura
+  // della successiva su qualunque spostamento con provenienza stand_by/done
+  // e destinazione backlog/prep. Uno spostamento tra due colonne di attesa
+  // diverse, o l'ingresso in done, non apre/chiude nulla — vedi
+  // updateVisiteForMove_ per gli accumulatori e consegna_ts.
+  var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
+
+  if (closesVisit) {
     job.visit_number = Number(job.visit_number || 1) + 1;
     job.is_rework = true;
     job.rework_cause = sourceColumn.id;
-    if (targetColumn.role === 'wip') {
-      job.start_ts = now;
-    }
   }
 
   if (targetColumn.role === 'wip' && !job.start_ts) {
@@ -282,11 +292,178 @@ function moveJob(params) {
 
   var rawLog = sheet.getRange(row, headers.activity_log_json).getValue();
   var log = parseActivityLog_(rawLog);
+
+  // Modello caso/visita (Fase L2): scrive su 'visite' in aggiunta alla
+  // mutazione in-place su 'jobs' sopra (non ancora rimossa, resta per
+  // compatibilita' fino a L5). Usa il log COSI' COM'E' PRIMA di appendere
+  // l'evento di questo stesso spostamento: la ricerca dell'ingresso nella
+  // colonna di attesa lasciata (sez. 4) deve guardare solo eventi
+  // realmente precedenti a "now".
+  updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
+
   log.push(autoEvent);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
   sheet.getRange(row, headers.activity_log_json).setValue(serializeActivityLog_(log));
 
   return ok_({ job_id: params.job_id, status: status, job: job });
+}
+
+// Modello caso/visita (DESIGN_modello_caso_visita.md, sez. 2-4): aggiorna
+// il foglio 'visite' in occasione di uno spostamento. Non tocca 'jobs'.
+function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now) {
+  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (!visiteSheet) {
+    // Non dovrebbe succedere dopo ensureCurrentSchema_() in testa a
+    // moveJob: se succede comunque, non si blocca lo spostamento sulla
+    // board per un problema di sola derivazione metriche.
+    return;
+  }
+
+  var opened = ensureOpenVisit_(visiteSheet, job, now);
+  var activeVisit = opened.visit;
+  var activeRow = opened.row;
+
+  // Sez. 4: gli accumulatori per tipo si incrementano ad ogni USCITA da
+  // una colonna stand_by, qualunque sia la destinazione (un'altra attesa,
+  // backlog/prep, o done) — quindi anche quando closesVisit e' false.
+  if (sourceColumn.role === 'stand_by') {
+    accumulateWaitTime_(activeVisit, sourceColumn, log, now);
+  }
+
+  if (closesVisit) {
+    activeVisit.chiusura_ts = now;
+    activeVisit.chiusura_tipo = sourceColumn.id;
+    writeVisitToRow_(visiteSheet, activeRow, activeVisit);
+
+    activeVisit = {
+      job_id: job.job_id,
+      numero_visita: Number(job.visit_number || 1),
+      apertura_ts: now,
+      incarico_ts: '',
+      prep_ts: '',
+      start_ts: '',
+      consegna_ts: '',
+      chiusura_ts: '',
+      chiusura_tipo: '',
+      t_cliente_d: 0,
+      t_ente_d: 0,
+      t_interno_d: 0,
+      rework_cause: sourceColumn.id
+    };
+    appendVisitRow_(visiteSheet, activeVisit);
+    activeRow = visiteSheet.getLastRow();
+  }
+
+  // Stessa regola "prima volta" gia' in uso per i campi su jobs, applicata
+  // qui alla visita attiva: essendo ogni visita una riga nuova, non serve
+  // un reset esplicito come nella derivazione a runtime superata (il bug
+  // descritto in BUGFIX_derivazione_gate_dal_log.md) — la visita nasce
+  // gia' vuota.
+  if (targetColumn.role === 'backlog' && !activeVisit.incarico_ts) {
+    activeVisit.incarico_ts = now;
+  }
+  if (targetColumn.role === 'prep' && !activeVisit.prep_ts) {
+    activeVisit.prep_ts = now;
+  }
+  if (targetColumn.role === 'wip' && !activeVisit.start_ts) {
+    activeVisit.start_ts = now;
+  }
+  if (targetColumn.role === 'done' && !activeVisit.consegna_ts) {
+    // Si valorizza al primo ingresso in done, entro questa visita: non
+    // chiude la visita da sola (sez. 3), la card puo' ancora rientrare.
+    activeVisit.consegna_ts = now;
+  }
+
+  writeVisitToRow_(visiteSheet, activeRow, activeVisit);
+}
+
+// Se non esiste ancora una visita aperta per questo caso (job creato
+// prima della Fase L, o migrazione storica L5 non ancora eseguita), ne
+// crea una minima al volo per non bloccare lo spostamento: la
+// materializzazione storica di L5 e' autorevole e la sovrascrivera'.
+function ensureOpenVisit_(visiteSheet, job, now) {
+  var row = findOpenVisitRow_(visiteSheet, job.job_id);
+  if (row > 0) {
+    return { row: row, visit: readVisitFromRow_(visiteSheet, row) };
+  }
+
+  var visit = {
+    job_id: job.job_id,
+    numero_visita: Number(job.visit_number || 1),
+    apertura_ts: job.arrival_ts || now,
+    incarico_ts: job.incarico_ts || '',
+    prep_ts: job.prep_ts || '',
+    start_ts: job.start_ts || '',
+    consegna_ts: job.done_ts || '',
+    chiusura_ts: '',
+    chiusura_tipo: '',
+    t_cliente_d: 0,
+    t_ente_d: 0,
+    t_interno_d: 0,
+    rework_cause: job.rework_cause || ''
+  };
+  appendVisitRow_(visiteSheet, visit);
+  return { row: visiteSheet.getLastRow(), visit: visit };
+}
+
+function findOpenVisitRow_(sheet, jobId) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { return -1; }
+  var headers = getHeaderMap_(sheet);
+  var values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][headers.job_id - 1] === jobId && !values[i][headers.chiusura_ts - 1]) {
+      return i + 2;
+    }
+  }
+  return -1;
+}
+
+function readVisitFromRow_(sheet, row) {
+  var headers = getHeaderMap_(sheet);
+  var values = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var visit = {};
+  Object.keys(headers).forEach(function(header) {
+    visit[header] = normalizeCell_(values[headers[header] - 1]);
+  });
+  return visit;
+}
+
+function writeVisitToRow_(sheet, row, visit) {
+  var values = VISITE_HEADERS.map(function(header) {
+    return visit[header] === undefined ? '' : visit[header];
+  });
+  sheet.getRange(row, 1, 1, VISITE_HEADERS.length).setValues([values]);
+}
+
+function appendVisitRow_(sheet, visit) {
+  sheet.appendRow(VISITE_HEADERS.map(function(header) {
+    return visit[header] === undefined ? '' : visit[header];
+  }));
+}
+
+// Sez. 4: durata della permanenza appena conclusa nella colonna stand_by
+// che si sta lasciando, sommata all'accumulatore per tipo corrispondente.
+// L'ingresso in quella colonna si trova ripercorrendo il log all'indietro
+// (stesso principio di computeFrom_ in ActivityLog.gs, qui applicato alla
+// colonna specifica invece che "l'ultimo move in assoluto").
+function accumulateWaitTime_(visit, sourceColumn, log, now) {
+  var field = SIGMAFLOW.WAIT_ACCUMULATOR_FIELDS[sourceColumn.id];
+  if (!field) { return; }
+  var enteredTs = lastEntryTsForColumn_(log, sourceColumn.id, now);
+  if (!enteredTs) { return; }
+  visit[field] = Number(visit[field] || 0) + Number(diffDays(enteredTs, now) || 0);
+}
+
+function lastEntryTsForColumn_(log, columnId, beforeTs) {
+  var candidates = log.filter(function(event) {
+    return event.type === 'move' && event.to === columnId && compareTs_(event.ts, beforeTs) < 0;
+  });
+  if (!candidates.length) { return null; }
+  var latest = candidates.reduce(function(best, event) {
+    return (!best || compareTs_(event.ts, best.ts) > 0) ? event : best;
+  }, null);
+  return latest.ts;
 }
 
 function updateJob(params) {
