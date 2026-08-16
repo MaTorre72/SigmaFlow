@@ -698,6 +698,23 @@ function eseguiMigrazioneCompletaSuCopiaProd() {
   return eseguiMigrazioneCompleta_(ss, { confermaNome: 'Backup di SigmaFlow Database' });
 }
 
+// P5 (AUDIT_MIGRAZIONE_PROD.md v2, sez. 5): stessa identica funzione
+// gia' collaudata in R3 su "Backup di SigmaFlow Database" (copia reale
+// di PROD), qui puntata sul foglio PROD vero — id e nome confermati da
+// Marco in sessione il 2026-08-16, DEFAULT_SPREADSHEET_ID in
+// Constants.gs. Da eseguire solo su richiesta esplicita separata, mai
+// da questa sessione: nessuna riga di questo file scrive su PROD finche'
+// Marco stesso non clicca "Esegui" su questa funzione nell'editor.
+//
+// Nome SENZA underscore finale apposta (promemoria di Marco): le
+// funzioni con "_" alla fine sono nascoste dal menu "Esegui"
+// dell'editor Apps Script, stesso motivo per cui
+// eseguiMigrazioneCompletaSuCopiaProd non ne ha uno.
+function eseguiMigrazioneCompletaSuProd() {
+  var ss = SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
+  return eseguiMigrazioneCompleta_(ss, { confermaNome: 'SigmaFlow Database' });
+}
+
 // Corregge il ruolo della colonna che DEFAULT_COLUMNS assegna a 'prep'
 // (oggi 'todo'/TO DO) se sul foglio live risulta ancora un ruolo
 // diverso (tipicamente 'wip', stato pre-Fase-K) — trovato concretamente
