@@ -89,16 +89,59 @@ Su conferma esplicita di Marco per entrambe le richieste sopra:
 Commit `00e79f0`. Push su TEST eseguito e verificato (13/13 file
 identici via `clasp pull` isolato + diff).
 
+## Prossimi miglioramenti raccolti da Marco (2026-08-16, fuori scope da questa migrazione)
+
+Vedi `AUDIT_MIGRAZIONE_PROD.md` §8bis per il dettaglio: frontend
+lentissimo, ricostruzione date reali delle card di PROD, pulizia di
+vecchi campi non usati (`notes` gia' rimovibile, `checklist_json`/
+`correction_log_json` solo dopo che la migrazione reale li ha
+consumati), migliore allineamento della dashboard alla dispensa FSC.
+
+## R5-P4-P5 preparazione migrazione PROD vera (2026-08-16 21:22)
+
+Marco ha dato il via libera a completare la migrazione PROD vera e la
+messa in produzione ("voglio tutto online in produzione"). Passi fatti
+in questa sessione, verso `AUDIT_MIGRAZIONE_PROD.md` §5:
+
+- **R5 chiuso**: Marco ha confermato `SIGMAFLOW_TEST_SPREADSHEET_ID`
+  gia' ripristinato al TEST originale (non piu' sulla copia "Backup di
+  SigmaFlow Database").
+- **P4 deciso**: Marco aggiorna il deployment ESISTENTE (non uno
+  nuovo), quello con URL
+  `.../AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod`
+  (`@18 - timestamps-fix`, il piu' recente per numero — confermato, non
+  solo dedotto). Verificato che il rischio §0.1 (property di schema
+  condivisa) non richiede gestione a parte: `eseguiMigrazioneCompleta_`
+  chiama `setupSigmaFlow()` direttamente, bypassando da sola il
+  controllo `ensureCurrentSchema_()` che potrebbe saltare l'allineamento
+  per errore.
+- **Ordine deciso per non lasciare una finestra di codice-nuovo/dati-
+  vecchi live**: 1) migrare i dati veri (funzione sotto, dall'editor,
+  gira sempre contro HEAD indipendentemente dal deployment pubblicato)
+  2) verifica di Marco (P6) 3) solo allora aggiornare il deployment
+  esistente perche' serva il codice nuovo 4) comunicazione team (P8).
+- **`eseguiMigrazioneCompletaSuProd()`** scritta (ActivityLog.gs): stesso
+  pattern di `eseguiMigrazioneCompletaSuCopiaProd` (id e nome del foglio
+  scritti come due valori indipendenti, controllo automatico se non
+  corrispondono, nome senza underscore finale per restare visibile nel
+  menu Esegui). Punta a `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`
+  (`15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g`), `confermaNome:
+  'SigmaFlow Database'` — id e nome confermati da Marco in chat, mai
+  letti/aperti autonomamente da questa sessione. **Non ancora eseguita
+  da nessuno**: nessun accesso di esecuzione disponibile a Claude Code
+  (solo `clasp push`/`pull`), e comunque nessuna scrittura su PROD senza
+  gate umano esplicito — tocca a Marco cliccare "Esegui" nell'editor.
+
+**68/68 test passati**. Commit `dc93351`. Push su TEST eseguito e
+verificato (13/13 file identici via `clasp pull` isolato + diff).
+
 ## Prossimo passo
 
-Verifica di Marco sulla board/dashboard live di TEST dopo il prossimo
-caricamento, in particolare provando il bottone "Genera dati demo" per
-controllare a occhio la board/dashboard con le nuove `visite` popolate.
-Punti secondari non ancora fatti (bassa priorita', non richiesti
-esplicitamente): `AUDIT_MIGRAZIONE_PROD.md` §8 va aggiornato per
-riflettere che la dismissione di `cases` e' ormai COMPLETATA (non piu'
-"rimandata"). Resta aperta la decisione su P4-P8 dell'audit PROD
-(deploy + migrazione su PROD vero), non affrontata in questa sessione.
+**Gate umano, P5**: Marco esegue `eseguiMigrazioneCompletaSuProd()`
+dall'editor Apps Script sul foglio PROD vero. Poi P6 (verifica sui casi
+campione reali, stesso giudizio gia' fatto per R4). Solo dopo: aggiornare
+il deployment `@18` con la versione HEAD corrente, poi P8 (comunicazione
+al team). Nessuna decisione ancora presa sul merge dei branch a `main`.
 
 ---
 
