@@ -102,14 +102,14 @@ tra un test e l'altro (mancava, avrebbe lasciato righe residue).
 
 - Suite test completa: **48/48 passati** (41 preesistenti + 7 nuovi),
   nessuna regressione.
-- Push su TEST: **non ancora eseguito in questa sotto-fase** — da fare
-  dopo la review di questo aggiornamento, con la stessa prassi di
-  sempre (`clasp push -f` + `clasp pull` isolato + diff).
+- Push su TEST: **eseguito e verificato**. `clasp pull` in directory
+  isolata + diff riga per riga contro i sorgenti locali per tutti i 13
+  file — **identici**, nessuna divergenza. La logica L2 e' ora live sul
+  progetto Apps Script TEST.
 
 ## Prossimo passo
 
-1. Push su TEST + verifica `clasp pull`/diff.
-2. **Gate umano**: Marco verifica su TEST che gli spostamenti sulla
+1. **Gate umano**: Marco verifica su TEST che gli spostamenti sulla
    board si comportino come atteso (in particolare: rientro da
    `done`/`stand_by` verso `backlog`/`prep` blocca ancora la card come
    prima visivamente, ma ora apre una nuova riga in `visite`), e
