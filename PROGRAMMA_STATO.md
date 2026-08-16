@@ -135,13 +135,37 @@ in questa sessione, verso `AUDIT_MIGRAZIONE_PROD.md` §5:
 **68/68 test passati**. Commit `dc93351`. Push su TEST eseguito e
 verificato (13/13 file identici via `clasp pull` isolato + diff).
 
+## P5 eseguita su PROD vero (2026-08-16 21:25)
+
+Marco ha eseguito `eseguiMigrazioneCompletaSuProd()` dall'editor Apps
+Script. Esito:
+
+```
+step1_backfill_activity_log: cards_processed 50, checklist_items_migrated 11,
+  creation_events_backfilled 50, corrections_migrated 0, errors: []
+step2_columns_json: corrected true, column_id 'todo', from_role 'wip' -> 'prep'
+step3_schema_alignment: success true
+step4_migrazione_visite: jobs_processed 50, jobs_without_log 0,
+  visite_written 50, coherence_warnings: []
+```
+
+Numeri identici (50 card, stessa correzione columns_json, 50 visite, 0
+coherence warnings) a quanto gia' verificato in R3/R4 sulla copia
+"Backup di SigmaFlow Database" — i dati reali di PROD non sono cambiati
+nel frattempo (coerente col team fermo, nessuna sorpresa). PROD vero e'
+ora nello schema corrente (`visite` popolata, `case_id`/campi duplicati
+rimossi da `jobs` come effetto automatico dello step3, vedi discussione
+sessione precedente su questo).
+
 ## Prossimo passo
 
-**Gate umano, P5**: Marco esegue `eseguiMigrazioneCompletaSuProd()`
-dall'editor Apps Script sul foglio PROD vero. Poi P6 (verifica sui casi
-campione reali, stesso giudizio gia' fatto per R4). Solo dopo: aggiornare
-il deployment `@18` con la versione HEAD corrente, poi P8 (comunicazione
-al team). Nessuna decisione ancora presa sul merge dei branch a `main`.
+**P6**: verifica di Marco sui casi campione reali (stesso giudizio gia'
+espresso per R4 — dato che l'esito e' identico alla prova sulla copia,
+puo' valere la stessa conclusione, ma la conferma esplicita resta sua).
+Solo dopo: aggiornare il deployment `@18` con la versione HEAD corrente
+(perche' il codice nuovo diventi quello servito dall'URL pubblico), poi
+P8 (comunicazione al team). Nessuna decisione ancora presa sul merge dei
+branch a `main`.
 
 ---
 
