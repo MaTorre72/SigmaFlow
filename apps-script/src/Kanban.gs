@@ -59,6 +59,7 @@ function routeAction_(params) {
     updateActivityEvent: updateActivityEvent,
     deleteActivityEvent: deleteActivityEvent,
     migrateToActivityLog: migrateToActivityLog,
+    migrateVisiteFromHistory: migrateVisiteFromHistory,
     deleteJob: deleteJob,
     updateColumnLabel: updateColumnLabel,
     addColumn: addColumn,

@@ -387,3 +387,210 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
 
   return { correctionsMigrated: correctionsMigrated, checklistItemsMigrated: checklistItemsMigrated, creationEventBackfilled: creationEventBackfilled };
 }
+
+// Fase L5 (DESIGN_modello_caso_visita.md, sez. 7): materializzazione UNA
+// TANTUM delle visite storiche per ogni caso esistente, leggendo l'intero
+// activity_log_json e applicando la stessa regola di apertura/chiusura
+// gia' live in moveJob/updateVisiteForMove_ (sez. 2), non piu' "derivazione
+// a runtime ad ogni lettura" come nel documento precedente
+// (BUGFIX_derivazione_gate_dal_log.md). Sovrascrive qualunque riga
+// 'visite' preesistente: i bootstrap minimi creati da L2/L3 per i job
+// toccati prima di questa migrazione sono provvisori, questa e' la
+// ricostruzione autorevole. Solo TEST, mai PROD senza gate umano
+// esplicito separato.
+
+// Azione Web App: stesso pattern di migrateToActivityLog.
+function migrateVisiteFromHistory(params) {
+  params = params || {};
+  if (normalizeEnv_(params.env) !== 'test') {
+    throw new Error('La migrazione storica delle visite e\' consentita solo in ambiente TEST.');
+  }
+  return ok_(migrateVisiteFromHistory_(getSpreadsheet_()));
+}
+
+// Versione eseguibile direttamente dall'editor Apps Script, stesso
+// motivo/pattern di migrateActivityLogOnTest.
+function migrateVisiteFromHistoryOnTest() {
+  return withTestSpreadsheet_(function(ss) {
+    return migrateVisiteFromHistory_(ss);
+  });
+}
+
+function migrateVisiteFromHistory_(ss) {
+  var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var visiteSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  var jobs = readTable_(jobsSheet);
+
+  var summary = {
+    jobs_processed: 0,
+    jobs_without_log: 0,
+    visite_written: 0,
+    job_fields_realigned: 0,
+    coherence_warnings: []
+  };
+
+  if (!jobs.length) {
+    return summary;
+  }
+
+  var allVisite = [];
+  var jobRows = jobs.map(function(job) {
+    var result = computeVisiteFromLog_(job);
+    if (!result.visite.length) {
+      summary.jobs_without_log++;
+      return jobToRow_(job);
+    }
+
+    summary.jobs_processed++;
+    result.warnings.forEach(function(warning) {
+      summary.coherence_warnings.push(warning);
+    });
+    allVisite = allVisite.concat(result.visite);
+
+    // Riallinea anche i campi derivati su jobs (non ancora rimossi, L5
+    // fase 2) alla visita APERTA risultante dalla ricostruzione — la
+    // stessa correzione motivata dal documento bugfix originale (Card
+    // A/Card B), applicata ora con la derivazione corretta invece che
+    // con quella superata basata su 'from'.
+    var lastVisit = result.visite[result.visite.length - 1];
+    var before = JSON.stringify([job.incarico_ts, job.prep_ts, job.start_ts, job.done_ts, job.visit_number, job.rework_cause]);
+    syncJobFieldsFromVisit_(job, lastVisit);
+    var after = JSON.stringify([job.incarico_ts, job.prep_ts, job.start_ts, job.done_ts, job.visit_number, job.rework_cause]);
+    if (before !== after) {
+      summary.job_fields_realigned++;
+    }
+
+    return jobToRow_(job);
+  });
+
+  jobsSheet.getRange(2, 1, jobRows.length, JOB_HEADERS.length).setValues(jobRows);
+
+  visiteSheet.clear();
+  visiteSheet.getRange(1, 1, 1, VISITE_HEADERS.length).setValues([VISITE_HEADERS]);
+  visiteSheet.setFrozenRows(1);
+  if (allVisite.length) {
+    var rows = allVisite.map(function(visit) {
+      return VISITE_HEADERS.map(function(header) {
+        return visit[header] === undefined ? '' : visit[header];
+      });
+    });
+    visiteSheet.getRange(2, 1, rows.length, VISITE_HEADERS.length).setValues(rows);
+  }
+  summary.visite_written = allVisite.length;
+
+  return summary;
+}
+
+// Ricostruisce la sequenza di visite di un caso dall'intero log,
+// applicando in ordine cronologico la stessa regola di sez. 2. A
+// differenza del vecchio checkStructuralAlignment_/replay (che leggeva
+// il campo 'from' memorizzato, potenzialmente contraddittorio — vedi
+// "Card A" nel documento bugfix: creazione con to=wip ma un evento
+// successivo che dichiara from=backlog mai realmente visitato), questa
+// funzione NON legge mai 'from': ricostruisce la sequenza delle colonne
+// esclusivamente dal 'to' di ogni evento, in ordine. Un log come quello
+// della Card A non puo' quindi produrre un'incoerenza qui: si usa la
+// sequenza reale dei 'to', il campo 'from' (eventualmente sbagliato)
+// e' semplicemente ignorato.
+function computeVisiteFromLog_(job) {
+  var log = parseActivityLog_(job.activity_log_json).filter(function(event) {
+    return event.type === 'move';
+  });
+
+  var result = { visite: [], warnings: [] };
+  if (!log.length) {
+    return result;
+  }
+
+  var columns = readColumns_();
+  var currentVisit = null;
+  var currentColumnId = null;
+  var visitNumber = 0;
+
+  function openVisit(ts, reworkCause) {
+    visitNumber++;
+    currentVisit = {
+      job_id: job.job_id,
+      numero_visita: visitNumber,
+      apertura_ts: ts,
+      incarico_ts: '',
+      prep_ts: '',
+      start_ts: '',
+      consegna_ts: '',
+      chiusura_ts: '',
+      chiusura_tipo: '',
+      t_cliente_d: 0,
+      t_ente_d: 0,
+      t_interno_d: 0,
+      rework_cause: reworkCause || ''
+    };
+    result.visite.push(currentVisit);
+  }
+
+  openVisit(log[0].ts, '');
+
+  log.forEach(function(event, index) {
+    var sourceColumn = currentColumnId ? (findColumn_(columns, currentColumnId) || { id: currentColumnId, role: 'neutral' }) : null;
+    var targetColumn = findColumn_(columns, event.to) || { id: event.to, role: 'neutral' };
+    var sourceClosesTowardActive = index > 0 && sourceColumn && (sourceColumn.role === 'stand_by' || sourceColumn.role === 'done');
+
+    if (sourceClosesTowardActive && sourceColumn.role === 'stand_by') {
+      accumulateWaitTime_(currentVisit, sourceColumn, log.slice(0, index), event.ts);
+    }
+
+    if (sourceClosesTowardActive && targetColumn.role === 'wip') {
+      // Nello storico non dovrebbe esistere (il guardia in moveJob lo
+      // impedisce dal vivo): se compare, e' una correzione manuale che
+      // lo ha aggirato o un dato precedente all'introduzione del
+      // guardia. Si segnala, non si corregge automaticamente (stesso
+      // principio del documento bugfix: report, non correzione cieca).
+      result.warnings.push({
+        job_id: job.job_id,
+        code: 'RIENTRO_DIRETTO_A_WIP',
+        ts: event.ts,
+        from: sourceColumn.id,
+        message: 'Rientro diretto da "' + sourceColumn.id + '" a WIP rilevato nello storico (evento del ' + event.ts + '), normalmente impedito dal guardia in moveJob.'
+      });
+    }
+
+    if (sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep')) {
+      currentVisit.chiusura_ts = event.ts;
+      currentVisit.chiusura_tipo = sourceColumn.id;
+      openVisit(event.ts, sourceColumn.id);
+    }
+
+    if (targetColumn.role === 'backlog' && !currentVisit.incarico_ts) {
+      currentVisit.incarico_ts = event.ts;
+    }
+    if (targetColumn.role === 'prep' && !currentVisit.prep_ts) {
+      currentVisit.prep_ts = event.ts;
+    }
+    if (targetColumn.role === 'wip' && !currentVisit.start_ts) {
+      currentVisit.start_ts = event.ts;
+    }
+    if (targetColumn.role === 'done' && !currentVisit.consegna_ts) {
+      currentVisit.consegna_ts = event.ts;
+    }
+
+    currentColumnId = event.to;
+  });
+
+  return result;
+}
+
+// Allinea i campi derivati su jobs (non ancora rimossi) alla visita
+// APERTA risultante dalla ricostruzione — stesso principio del bootstrap
+// di L2/allineamento di L3, applicato qui in blocco su tutto lo storico.
+function syncJobFieldsFromVisit_(job, lastVisit) {
+  job.incarico_ts = lastVisit.incarico_ts || '';
+  job.prep_ts = lastVisit.prep_ts || '';
+  job.start_ts = lastVisit.start_ts || '';
+  job.done_ts = lastVisit.consegna_ts || '';
+  job.visit_number = lastVisit.numero_visita;
+  job.is_rework = lastVisit.numero_visita > 1;
+  job.rework_cause = lastVisit.rework_cause || '';
+
+  job.service_time_d = (job.start_ts && job.done_ts) ? diffDays(job.start_ts, job.done_ts) : '';
+  job.lead_time_d = (job.arrival_ts && job.done_ts) ? diffDays(job.arrival_ts, job.done_ts) : '';
+  job.wait_time_d = (job.arrival_ts && job.start_ts) ? diffDays(job.arrival_ts, job.start_ts) : '';
+}

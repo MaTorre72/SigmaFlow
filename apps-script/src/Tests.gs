@@ -177,6 +177,10 @@ function runAllTests() {
     testMigrateToActivityLogChecklist,
     testMigrateToActivityLogBackfillEventoCreazione,
     testMigrateToActivityLogBackfillNonContraddiceSpostamentiReali,
+    testComputeVisiteFromLogWipToWipKeepsFirstStartTs,
+    testComputeVisiteFromLogStandByReentryOpensNewVisit,
+    testComputeVisiteFromLogFlagsIllegalDirectReentryToWip,
+    testMigrateVisiteFromHistoryEndToEnd,
     testReworkFromStandByToBacklogKeepsStartTs,
     testMoveToPrepSetsPrepTsNotStartTs,
     testMoveToWipStillSetsStartTs,
@@ -1433,6 +1437,108 @@ function testMigrateToActivityLogBackfillNonContraddiceSpostamentiReali() {
     var creationEvent = log.filter(function(e) { return e.from === null; })[0];
     assertEquals_('backlog', creationEvent.to,
       'l\'evento ricostruito deve puntare a dove la card si trovava PRIMA del primo move reale (backlog), non allo status attuale (wip) — altrimenti il log direbbe "creata in wip" seguito da uno spostamento "da backlog", contraddittorio');
+  });
+}
+
+// --- Fase L5: materializzazione storica delle visite dal log ---
+
+// Caso "Card B" del documento bugfix: un evento wip -> wip (stessa
+// colonna, nessuna vera attesa nel mezzo) non deve spostare start_ts
+// dal primo ingresso — criterio di accettazione esplicito del documento.
+function testComputeVisiteFromLogWipToWipKeepsFirstStartTs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var job = {
+      job_id: 'JOB-CARD-B',
+      activity_log_json: JSON.stringify([
+        { id: '1', ts: '2026-06-25T09:00:00+02:00', type: 'move', source: 'auto', to: 'wip', from: null },
+        { id: '2', ts: '2026-08-13T09:00:00+02:00', type: 'move', source: 'manual', to: 'wip', from: 'wip' }
+      ])
+    };
+
+    var result = computeVisiteFromLog_(job);
+
+    assertEquals_(1, result.visite.length, 'wip->wip non deve aprire una nuova visita');
+    assertEquals_('2026-06-25T09:00:00+02:00', result.visite[0].start_ts, 'start_ts deve restare il PRIMO ingresso in wip, non l\'ultimo (bug Card B)');
+  });
+}
+
+// Rientro legittimo da attesa: deve aprire una nuova visita e aggiornare
+// correttamente i gate — criterio di accettazione esplicito del documento
+// bugfix ("comportamento invariato per il caso legittimo").
+function testComputeVisiteFromLogStandByReentryOpensNewVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var job = {
+      job_id: 'JOB-REENTRY',
+      activity_log_json: JSON.stringify([
+        { id: '1', ts: '2026-01-01T09:00:00+02:00', type: 'move', to: 'backlog', from: null },
+        { id: '2', ts: '2026-01-02T09:00:00+02:00', type: 'move', to: 'wip', from: 'backlog' },
+        { id: '3', ts: '2026-01-05T09:00:00+02:00', type: 'move', to: 'wait_client', from: 'wip' },
+        { id: '4', ts: '2026-01-10T09:00:00+02:00', type: 'move', to: 'backlog', from: 'wait_client' },
+        { id: '5', ts: '2026-01-11T09:00:00+02:00', type: 'move', to: 'wip', from: 'backlog' }
+      ])
+    };
+
+    var result = computeVisiteFromLog_(job);
+
+    assertEquals_(2, result.visite.length, 'il rientro da attesa deve aprire una nuova visita');
+    assertEquals_('2026-01-02T09:00:00+02:00', result.visite[0].start_ts, 'start_ts visita 1');
+    assertEquals_('wait_client', result.visite[0].chiusura_tipo, 'chiusura_tipo visita 1');
+    assertEquals_('2026-01-11T09:00:00+02:00', result.visite[1].start_ts, 'start_ts visita 2 = nuovo ingresso in wip dopo il rientro');
+    assertEquals_('wait_client', result.visite[1].rework_cause, 'rework_cause visita 2 = chiusura_tipo della precedente');
+  });
+}
+
+// Un rientro diretto da attesa a WIP non dovrebbe esistere nello storico
+// (il guardia in moveJob lo impedisce dal vivo), ma se compare (dato
+// precedente al guardia, o corretto manualmente aggirandolo) va
+// segnalato, non corretto automaticamente — stesso principio del
+// documento bugfix ("report, non correzione cieca").
+function testComputeVisiteFromLogFlagsIllegalDirectReentryToWip() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var job = {
+      job_id: 'JOB-ILLEGAL',
+      activity_log_json: JSON.stringify([
+        { id: '1', ts: '2026-01-01T09:00:00+02:00', type: 'move', to: 'wip', from: null },
+        { id: '2', ts: '2026-01-02T09:00:00+02:00', type: 'move', to: 'wait_client', from: 'wip' },
+        { id: '3', ts: '2026-01-03T09:00:00+02:00', type: 'move', to: 'wip', from: 'wait_client' }
+      ])
+    };
+
+    var result = computeVisiteFromLog_(job);
+
+    assertEquals_(1, result.warnings.length, 'un rientro diretto illegale nello storico deve produrre un warning');
+    assertEquals_('RIENTRO_DIRETTO_A_WIP', result.warnings[0].code, 'codice warning corretto');
+    assertEquals_(1, result.visite.length, 'nessuna nuova visita aperta (wip non e\' backlog/prep)');
+  });
+}
+
+// Migrazione end-to-end: sovrascrive le righe 'visite' gia' scritte da
+// L2/L3 (bootstrap/live) con la ricostruzione autorevole, e riallinea i
+// campi derivati su jobs.
+function testMigrateVisiteFromHistoryEndToEnd() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Storia da migrare', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    moveJob({ job_id: created.job_id, status: 'backlog' });
+
+    var beforeCount = readVisiteForJob_(ss, created.job_id).length;
+    assertTrue_(beforeCount > 0, 'precondizione: qualche riga visite gia\' presente da L2 (bootstrap/live)');
+
+    var summary = migrateVisiteFromHistory_(ss);
+    assertEquals_(1, summary.jobs_processed, 'un job processato');
+    assertEquals_(0, summary.coherence_warnings.length, 'nessun warning per uno storico regolare');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'due visite ricostruite (rientro da attesa)');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(2, Number(job.visit_number), 'visit_number su jobs riallineato dalla migrazione');
+    assertTrue_(coerceBoolean_(job.is_rework), 'is_rework su jobs riallineato dalla migrazione');
   });
 }
 
