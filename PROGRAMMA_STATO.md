@@ -1,12 +1,44 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 18:52
+Aggiornato: 2026-08-16 19:05
 
-Fase corrente: Migrazione PROD — R3 rieseguita su copia fresca con il
-fix del fallback date, esito pulito confermato da Marco. In attesa
-della verifica a campione (R4)
-Titolo: eseguiMigrazioneCompletaSuCopiaProd — vedi AUDIT_MIGRAZIONE_PROD.md v2
+Fase corrente: Migrazione PROD — R4 chiusa, in attesa di decisione su
+P4-P8 (deploy/migrazione su PROD vero)
+Titolo: R0-R4 completate su copia di PROD — vedi AUDIT_MIGRAZIONE_PROD.md v2
 
-## R3 rieseguita su copia fresca, fix confermato (2026-08-16 18:48)
+## R4 chiusa (2026-08-16 19:05)
+
+Marco ha condiviso un caso concreto (`JOB-20260708-W0TO`) con
+cronologia reale tenuta solo come note testuali datate in
+`description` (mai movimenti tracciati sulla board). Confermato: il
+risultato della migrazione per quel caso e' corretto rispetto a cosa il
+sistema puo' sapere (un solo evento sintetico, `arrival_ts` originale
+preservato) — non e' un bug, e' il limite gia' previsto (Marco: "la
+cronologia sarebbe tutta da ricostruire" via email/note, lavoro futuro
+separato).
+
+**Marco ha scelto esplicitamente**: considerare R4 sufficiente cosi'
+com'e' e chiudere la verifica a campione. I casi con storia solo
+testuale restano un limite noto, da affrontare nella futura
+ricostruzione memoria — non bloccano la chiusura di questa fase.
+
+**Riepilogo R0-R4 (copia di PROD "Backup di SigmaFlow Database")**:
+schema allineato, 50/50 card con `activity_log_json` ricostruito senza
+errori, `columns_json` corretto (`todo`: `wip`->`prep`), `visite`
+materializzata per tutti i 50 casi, 0 `coherence_warnings`. Fallback
+data-da-`job_id` verificato e confermato coerente da Marco su dati
+reali.
+
+## Prossimo passo — da decidere con Marco
+
+L'audit (`AUDIT_MIGRAZIONE_PROD.md` v2, sez. 5) prevede dopo R4: P4
+(decisione su deployment — nuova versione vs aggiornamento
+dell'esistente, gestione della Script Property condivisa) fino a P8
+(comunicazione al team). Nessuna di queste azioni riguarda PROD vero
+finora — **nessuna scrittura su PROD e' mai avvenuta**, solo sulla
+copia. Da riprendere quando Marco decide di procedere verso PROD vero
+(sessione separata, gate esplicito come sempre).
+
+## Cronologia precedente (R3 rieseguita su copia fresca, fix confermato, 2026-08-16 18:48)
 
 Marco ha ripristinato il foglio "Backup di SigmaFlow Database" allo
 stato pre-migrazione (dati vecchi ricopiati, foglio `visite` eliminato)
