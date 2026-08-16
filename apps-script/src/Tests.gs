@@ -17,14 +17,12 @@ function generateTestDataset() {
 function seedTestDataset_(ss, replace) {
   if (replace) { resetTestDatabase_(ss); }
   var jobsSheet = ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
-  var casesSheet = ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
   var sizes = ['XS', 'S', 'M', 'L', 'XL'];
   var assignees = ['Alessandra', 'Giovanni D', 'Marco', 'Altro'];
   var tags = ['AIA', 'VIA', 'rifiuti', 'acque', 'aria', 'suolo'];
   var statuses = ['backlog', 'backlog', 'todo', 'todo', 'wip', 'wip', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done', 'done', 'done', 'done'];
   var colors = SIGMAFLOW.CARD_COLORS;
   var jobRows = [];
-  var caseRows = [];
   var now = new Date();
 
   for (var i = 0; i < 60; i++) {
@@ -75,12 +73,10 @@ function seedTestDataset_(ss, replace) {
       card_color: colors[(i % (colors.length - 1)) + 1]
     };
     jobRows.push(jobToRow_(job));
-    caseRows.push([caseId, job.title, job.client, visit, status !== 'done', arrival, done]);
   }
 
   jobsSheet.getRange(jobsSheet.getLastRow() + 1, 1, jobRows.length, JOB_HEADERS.length).setValues(jobRows);
-  casesSheet.getRange(casesSheet.getLastRow() + 1, 1, caseRows.length, CASE_HEADERS.length).setValues(caseRows);
-  return { jobs: jobRows.length, cases: caseRows.length, replace: replace };
+  return { jobs: jobRows.length, replace: replace };
 }
 
 function testIsoDaysAgo_(now, days) {
@@ -228,9 +224,9 @@ function testSetupSchema() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS), JOB_HEADERS);
-    assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.CASES), CASE_HEADERS);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE), VISITE_HEADERS);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG), CONFIG_HEADERS);
+    assertTrue_(!ss.getSheetByName(SIGMAFLOW.SHEETS.CASES), 'foglio cases dismesso, non deve piu\' esistere');
   });
 }
 
@@ -254,10 +250,6 @@ function testAddJob() {
     assertEquals_('backlog', jobs[0].status, 'status iniziale');
     assertEquals_(5, Number(jobs[0].size_points), 'size_points S');
     assertEquals_('p4_assess', jobs[0].priority_class, 'priority_class default');
-
-    var cases = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.CASES));
-    assertEquals_(1, cases.length, 'cases dovrebbe contenere una riga');
-    assertEquals_(1, Number(cases[0].total_visits), 'total_visits caso');
   });
 }
 
@@ -1618,9 +1610,15 @@ function setupOldProdShapedSheet_(ss) {
   jobsSheet.appendRow(['JOB-OLD-2', 'CASE-OLD-2', 1, 'Caso storico 2', 'Cliente storico 2', '', 'done', 'Giovanni', 'acque', 'S', 5, 'p4_assess', false, 1, 1, 1, '', '', '2026-01-10T09:00:00+02:00', '2026-01-12T09:00:00+02:00', '2026-01-20T09:00:00+02:00', true, 8, 10, 2, false, '', '', '', '[]', '[]']);
   jobsSheet.setFrozenRows(1);
 
+  // CASE_HEADERS non esiste piu' nel codice (foglio 'cases' dismesso):
+  // qui e' un valore storico inline, solo per simulare lo schema PROD
+  // di prima della dismissione — la migrazione deve rimuoverlo (vedi
+  // removeCasesSheet_, verificato sotto in
+  // testEseguiMigrazioneCompletaEndToEndOnOldSchemaData).
+  var oldCaseHeaders = ['case_id', 'title', 'client', 'total_visits', 'is_open', 'created_ts', 'closed_ts'];
   var casesSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CASES) || ss.insertSheet(SIGMAFLOW.SHEETS.CASES);
   casesSheet.clear();
-  casesSheet.appendRow(CASE_HEADERS);
+  casesSheet.appendRow(oldCaseHeaders);
   casesSheet.appendRow(['CASE-OLD-1', 'Caso storico 1', 'Cliente storico', 1, true, '2026-01-01T09:00:00+02:00', '']);
   casesSheet.appendRow(['CASE-OLD-2', 'Caso storico 2', 'Cliente storico 2', 1, false, '2026-01-10T09:00:00+02:00', '2026-01-20T09:00:00+02:00']);
   casesSheet.setFrozenRows(1);
@@ -1710,6 +1708,7 @@ function testEseguiMigrazioneCompletaEndToEndOnOldSchemaData() {
     var visiteSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
     assertTrue_(Boolean(visiteSheet), 'foglio visite creato da step3');
     assertHeaders_(visiteSheet, VISITE_HEADERS, 'visite deve avere lo schema corrente');
+    assertTrue_(!ss.getSheetByName(SIGMAFLOW.SHEETS.CASES), 'foglio cases (schema pre-dismissione) rimosso da step3');
 
     assertEquals_(2, summary.step4_migrazione_visite.jobs_processed, 'step4: entrambi i job hanno ora un log da cui ricostruire');
     assertTrue_(summary.step4_migrazione_visite.visite_written > 0, 'step4: righe visite scritte');
@@ -1772,12 +1771,11 @@ function withTestSpreadsheet_(callback) {
 
 function resetTestDatabase_(ss) {
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
-  ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
+  removeCasesSheet_(ss);
 
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS), JOB_HEADERS);
-  clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.CASES), CASE_HEADERS);
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE), VISITE_HEADERS);
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG), CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
@@ -1806,16 +1804,6 @@ function appendCompletedJob_(ss, data) {
 
   var caseId = generateId_('C');
   var jobId = generateId_('J');
-
-  ss.getSheetByName(SIGMAFLOW.SHEETS.CASES).appendRow([
-    caseId,
-    data.title,
-    'Cliente test',
-    data.visit_number || 1,
-    false,
-    arrivalIso,
-    now
-  ]);
 
   // Usa jobToRow_ (mappa per nome di intestazione, come il codice di
   // produzione) invece di un array posizionale: dopo L5 parte 2/2

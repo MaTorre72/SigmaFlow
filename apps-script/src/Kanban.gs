@@ -50,7 +50,6 @@ function routeAction_(params) {
   var action = requireParam_(params, 'action');
   var routes = {
     getBoard: getBoard,
-    addCase: addCase,
     addJob: addJob,
     moveJob: moveJob,
     updateJob: updateJob,
@@ -123,29 +122,11 @@ function getBoard() {
   });
 }
 
-function addCase(params) {
-  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.CASES);
-  var caseId = generateId_('C');
-  var now = nowIso_();
-
-  sheet.appendRow([
-    caseId,
-    requireParam_(params, 'title'),
-    params.client || '',
-    0,
-    true,
-    now,
-    ''
-  ]);
-
-  return ok_({ case_id: caseId });
-}
-
 function addJob(params) {
   var ss = getSpreadsheet_();
   var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var title = requireParam_(params, 'title');
-  var caseId = params.case_id || createImplicitCase_(ss, title, params.client);
+  var caseId = params.case_id || createImplicitCase_();
   var sizeClass = params.size_class || 'M';
   var status = validateColumnId_(params.status || firstColumnIdByRole_('backlog'));
   var now = nowIso_();
@@ -218,7 +199,6 @@ function addJob(params) {
     });
   }
 
-  refreshCaseVisitCount_(ss, caseId);
   return ok_({ job_id: job.job_id, case_id: caseId, job: job });
 }
 
@@ -271,8 +251,6 @@ function moveJob(params) {
 
   job.status = status;
   writeJobToRow_(sheet, row, headers, job);
-  refreshCaseVisitCount_(getSpreadsheet_(), job.case_id);
-
   // Evento automatico per l'activity log: scrittura diretta (non passa da
   // addActivityEvent) per evitare la doppia validazione su un movimento
   // che il sistema ha gia' autorizzato spostando la card.
@@ -844,17 +822,13 @@ function correctJobTimestamps(params) {
 }
 
 function deleteJob(params) {
-  var ss = getSpreadsheet_();
-  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var row = findRowById_(sheet, 'job_id', requireParam_(params, 'job_id'));
   if (row < 0) {
     throw new Error('Job non trovato: ' + params.job_id);
   }
 
-  var headers = getHeaderMap_(sheet);
-  var caseId = sheet.getRange(row, headers.case_id).getValue();
   sheet.deleteRow(row);
-  refreshCaseVisitCount_(ss, caseId);
   return ok_({ job_id: params.job_id });
 }
 
@@ -987,37 +961,13 @@ function markRework(params) {
   });
 }
 
-function createImplicitCase_(ss, title, client) {
-  var result = addCase({ title: title || 'Nuovo caso', client: client || '' });
-  return result.data.case_id;
-}
-
-function refreshCaseVisitCount_(ss, caseId) {
-  if (!caseId) {
-    return;
-  }
-
-  var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-  var caseJobs = jobs.filter(function(job) {
-    return job.case_id === caseId;
-  });
-
-  var casesSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CASES);
-  var row = findRowById_(casesSheet, 'case_id', caseId);
-  if (row < 0) {
-    return;
-  }
-
-  var headers = getHeaderMap_(casesSheet);
-  casesSheet.getRange(row, headers.total_visits).setValue(caseJobs.length);
-
-  var open = caseJobs.some(function(job) {
-    return !isDoneStatus_(job.status);
-  });
-  casesSheet.getRange(row, headers.is_open).setValue(open);
-  if (!open && caseJobs.length > 0) {
-    casesSheet.getRange(row, headers.closed_ts).setValue(nowIso_());
-  }
+// Genera solo l'id: il foglio 'cases' e' stato dismesso (total_visits/
+// is_open erano ridondanti con quanto gia' derivabile da 'visite'/
+// 'jobs', mai letti dal frontend) — il "caso" resta un concetto valido
+// (job_id + case_id, piu' casi = stesso case_id), solo senza piu' una
+// riga propria da mantenere allineata ad ogni spostamento.
+function createImplicitCase_() {
+  return generateId_('C');
 }
 
 function markRowAsRework_(sheet, row, headers, cause) {

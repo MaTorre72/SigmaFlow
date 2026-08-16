@@ -35,22 +35,16 @@ var JOB_HEADERS = [
   'incarico_chiuso_ts'
 ];
 
-var CASE_HEADERS = [
-  'case_id',
-  'title',
-  'client',
-  'total_visits',
-  'is_open',
-  'created_ts',
-  'closed_ts'
-];
-
+// Foglio 'cases' dismesso su richiesta di Marco, dopo che 'visite' si e'
+// dimostrata affidabile in L1-L5 e sulla migrazione PROD (R0-R4):
+// total_visits/is_open erano ridondanti con MAX(numero_visita)/l'ultimo
+// stato derivabile da 'visite', mai letti dal frontend (verificato).
+// Vedi removeCasesSheet_ sotto per la rimozione automatica sui fogli
+// esistenti. CASE_HEADERS rimossa: nessun altro codice la referenzia.
+//
 // Fase L (modello caso/visita, DESIGN_modello_caso_visita.md sez. 6.1 e
-// 9.2): foglio nuovo e separato da 'cases'. 'cases'/CASE_HEADERS restano
-// invariati e in uso (refreshCaseVisitCount_ continua a scrivervi) finche'
-// 'visite' non sara' comprovata — la dismissione e' un passo separato
-// successivo (L5+), non questa sotto-fase. Identita' della riga:
-// job_id + numero_visita (composta, nessun campo aggiuntivo introdotto
+// 9.2): foglio 'visite', nuovo e separato. Identita' della riga: job_id
+// + numero_visita (composta, nessun campo aggiuntivo introdotto
 // rispetto a quanto elencato nel documento).
 // rientro_ts/rientro_da (rinominati da chiusura_ts/chiusura_tipo su
 // richiesta di Marco: il vecchio nome si confondeva con
@@ -101,10 +95,24 @@ function renameVisiteChiusuraFields_(ss) {
   }
 }
 
+// Dismissione una tantum del foglio 'cases' (non piu' in JOB_HEADERS/
+// nessuna scrittura da codice dopo questa sotto-fase): elimina il
+// foglio se esiste ancora. Idempotente — se gia' assente, non fa nulla.
+// A differenza della rinomina di rientro_ts/rientro_da (che preserva
+// dati spostandoli su un nuovo nome), qui non c'e' nulla da preservare:
+// total_visits/is_open sono gia' ricavabili da 'visite'/'jobs', la
+// rimozione e' pulizia, non migrazione di dati.
+function removeCasesSheet_(ss) {
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CASES);
+  if (sheet) {
+    ss.deleteSheet(sheet);
+  }
+}
+
 function setupSigmaFlow() {
   var ss = getSpreadsheet_();
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
-  ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
+  removeCasesSheet_(ss);
   renameVisiteChiusuraFields_(ss);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
