@@ -640,6 +640,23 @@ function eseguiMigrazioneCompleta_(ss, params) {
   }
 }
 
+// R3 (AUDIT_MIGRAZIONE_PROD.md v2, sez. 5): esecuzione eseguibile con un
+// click dall'editor Apps Script (stesso pattern di
+// migrateVisiteFromHistoryOnTest), sulla copia reale di PROD confermata
+// da Marco in sessione il 2026-08-16 ("Backup di SigmaFlow Database").
+//
+// ID e nome sono scritti qui come due valori INDIPENDENTI apposta: id
+// preso dal messaggio di Marco, nome confermato separatamente a parola
+// sua. Se in futuro questo foglio venisse duplicato/rinominato e l'id
+// puntasse altrove per errore, confermaNome non corrisponderebbe piu' e
+// la funzione si fermerebbe da sola — lo stesso principio del controllo
+// in eseguiMigrazioneCompleta_, non un'auto-conferma (ss.getName() con
+// se stesso sarebbe sempre vera, inutile come controllo).
+function eseguiMigrazioneCompletaSuCopiaProd_() {
+  var ss = SpreadsheetApp.openById('1xUMWhAK8tovUU_gHEqizi9WDoqxTULzzfaygAfYL3FI');
+  return eseguiMigrazioneCompleta_(ss, { confermaNome: 'Backup di SigmaFlow Database' });
+}
+
 // Corregge il ruolo della colonna che DEFAULT_COLUMNS assegna a 'prep'
 // (oggi 'todo'/TO DO) se sul foglio live risulta ancora un ruolo
 // diverso (tipicamente 'wip', stato pre-Fase-K) — trovato concretamente
