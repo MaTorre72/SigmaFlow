@@ -170,6 +170,7 @@ function runAllTests() {
     testDeleteActivityEventBloccoAuto,
     testGetActivityLogOrdinato,
     testGetActivityLogFromRicalcolato,
+    testGetActivityLogFromResolvesTiedTimestamps,
     testMoveJobScriveEventoAuto,
     testMigrateToActivityLogChecklist,
     testMigrateToActivityLogBackfillEventoCreazione,
@@ -1151,6 +1152,39 @@ function testGetActivityLogOrdinato() {
     assertEquals_(3, log.length, 'evento di creazione + due move nel log');
     assertEquals_(t1, log[0].ts, 'primo evento e\' il piu\' vecchio (precede anche l\'evento di creazione, creato con arrival_ts nel passato)');
     assertEquals_(t2, log[1].ts, 'secondo evento e\' il successivo in ordine cronologico');
+  });
+}
+
+// Bug segnalato da Marco durante il collaudo L3: due eventi move con lo
+// STESSO timestamp esatto (facile dall'input datetime-local, precisione
+// al minuto) finivano entrambi per calcolare lo stesso 'from', invece di
+// incatenarsi tra loro (es. "WIP -> WIP" o "TO DO -> TO DO" in
+// Cronologia invece della sequenza reale). Vedi commento su
+// recalculateMoveFrom_/computeFromForCandidate_ in ActivityLog.gs.
+function testGetActivityLogFromResolvesTiedTimestamps() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Timestamp identici', size_class: 'M' });
+    var columns = readColumns_();
+    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var prepCol = columns.filter(function(c) { return c.role === 'prep'; })[0];
+    var tiedTs = testTsMinutesAgo_(60);
+
+    var first = addActivityEvent({ job_id: jobId, type: 'move', ts: tiedTs, to: wipCol.id });
+    assertTrue_(first.data.ok === true, 'primo move dovrebbe riuscire');
+    var second = addActivityEvent({ job_id: jobId, type: 'move', ts: tiedTs, to: prepCol.id });
+    assertTrue_(second.data.ok === true, 'secondo move con timestamp identico dovrebbe riuscire senza richiedere force');
+
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    var wipEvent = log.filter(function(e) { return e.to === wipCol.id; })[0];
+    var prepEvent = log.filter(function(e) { return e.to === prepCol.id; })[0];
+
+    // testAddJobWithPastArrival_ corregge solo il campo arrival_ts del job,
+    // non il ts dell'evento di creazione nel log (resta "adesso"): rispetto
+    // ai due eventi di test (60 min fa), l'evento di creazione e' quindi
+    // cronologicamente SUCCESSIVO, non precedente — wipEvent.from e' null.
+    assertEquals_(null, wipEvent.from, 'il primo dei due eventi a parita\' di timestamp non ha alcun move precedente in questo fixture: from null');
+    assertEquals_(wipCol.id, prepEvent.from, 'il secondo evento a parita\' di timestamp deve incatenarsi al primo (from = wip), non ripetere lo stesso from (null)');
   });
 }
 

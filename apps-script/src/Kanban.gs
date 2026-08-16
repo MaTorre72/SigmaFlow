@@ -540,9 +540,9 @@ function buildActivityEventCandidate_(params, log) {
     id: generateActivityEventId_(),
     ts: params.ts,
     type: params.type,
-    source: 'manual',
-    from: computeFrom_(log, params.ts)
+    source: 'manual'
   };
+  candidate.from = computeFromForCandidate_(log, candidate);
   if (params.type === 'move') {
     candidate.to = params.to;
   }
@@ -658,14 +658,7 @@ function getActivityLog(params) {
 
   // Ricalcola "from" per ogni evento move al momento della lettura, cosi'
   // resta coerente anche su dati migrati senza from o dopo modifiche/cancellazioni.
-  var recalculated = log.map(function(event) {
-    if (event.type !== 'move') {
-      return event;
-    }
-    var updated = Object.assign({}, event);
-    updated.from = computeFrom_(log, event.ts);
-    return updated;
-  });
+  var recalculated = recalculateMoveFrom_(log);
 
   return ok_({ job_id: jobId, log: recalculated });
 }
@@ -748,14 +741,7 @@ function deleteActivityEvent(params) {
 
   // Ricalcola "from" per gli eventi move rimasti, cosi' l'evento successivo
   // a quello cancellato torna a puntare alla colonna di provenienza corretta.
-  var recalculated = remaining.map(function(event) {
-    if (event.type !== 'move') {
-      return event;
-    }
-    var updated = Object.assign({}, event);
-    updated.from = computeFrom_(remaining, event.ts);
-    return updated;
-  });
+  var recalculated = recalculateMoveFrom_(remaining);
 
   // La cancellazione puo' rendere l'ultimo campo strutturato alimentato
   // dall'evento cancellato non piu' rappresentativo: si riallinea in

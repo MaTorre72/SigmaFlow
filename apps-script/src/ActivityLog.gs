@@ -35,22 +35,66 @@ function serializeActivityLog_(events) {
   return JSON.stringify(events);
 }
 
-// Calcola la colonna di provenienza (from) di un evento 'move' guardando
-// l'ultimo evento 'move' con timestamp precedente a insertedTs.
-function computeFrom_(events, insertedTs) {
-  var previousMoves = events.filter(function(event) {
-    return event.type === 'move' && compareTs_(event.ts, insertedTs) < 0;
+// Ricalcola 'from' per ogni evento 'move' di un log GIA' completo (nessun
+// evento da inserire), scorrendolo in ordine e propagando il 'to'
+// dell'evento move precedente. Il log va gia' ordinato per ts (come
+// restituito da parseActivityLog_): a parita' di timestamp esatto,
+// l'ordine risultante e' quello dell'array (Array.prototype.sort e'
+// stabile), non un confronto indipendente evento per evento.
+//
+// Sostituisce il vecchio computeFrom_(events, insertedTs), che calcolava
+// il from di OGNI evento cercando "l'ultimo evento con ts < insertedTs"
+// indipendentemente dagli altri: con due eventi allo STESSO timestamp
+// esatto (facile da ottenere: il campo data/ora della Cronologia in
+// client.html ha precisione al minuto, isoToDatetimeLocal_ tronca i
+// secondi), nessuno dei due risultava "prima" dell'altro, ed entrambi
+// finivano per calcolare lo stesso from guardando solo l'evento distinto
+// precedente — producendo in Cronologia coppie come "WIP -> WIP" o
+// "TO DO -> TO DO" invece della sequenza reale. Bug segnalato da Marco
+// durante il collaudo della Fase L3, presente pero' fin dalla Fase G
+// (introduzione dell'activity log), non causato dal modello caso/visita.
+function recalculateMoveFrom_(events) {
+  var lastTo = null;
+  return events.map(function(event) {
+    if (event.type !== 'move') {
+      return event;
+    }
+    var updated = Object.assign({}, event);
+    updated.from = lastTo;
+    lastTo = event.to;
+    return updated;
   });
+}
 
-  if (!previousMoves.length) {
-    return null;
+// Stessa correzione applicata alla scrittura di un evento nuovo/modificato
+// (addActivityEvent/updateActivityEvent, tramite buildActivityEventCandidate_):
+// il candidato non e' ancora nell'array, quindi non puo' riusare
+// recalculateMoveFrom_ cosi' com'e'. Lo si inserisce in coda a 'events'
+// (gia' ordinato) e si ordina in modo stabile per ts: a parita' di
+// timestamp con un evento gia' esistente, il candidato — appena
+// aggiunto/modificato dall'utente — e' considerato il piu' recente dei
+// due, una convenzione deterministica ragionevole in assenza di
+// un'informazione di ordine esplicita tra eventi identici nel tempo.
+function computeFromForCandidate_(events, candidate) {
+  var merged = events.concat([candidate]);
+  var ordered = merged
+    .map(function(event, index) { return { event: event, index: index }; })
+    .sort(function(a, b) {
+      var cmp = compareTs_(a.event.ts, b.event.ts);
+      return cmp !== 0 ? cmp : a.index - b.index;
+    })
+    .map(function(entry) { return entry.event; });
+
+  var lastMoveTo = null;
+  for (var i = 0; i < ordered.length; i++) {
+    if (ordered[i].id === candidate.id) {
+      break;
+    }
+    if (ordered[i].type === 'move') {
+      lastMoveTo = ordered[i].to;
+    }
   }
-
-  var latest = previousMoves.reduce(function(best, event) {
-    return (!best || compareTs_(event.ts, best.ts) > 0) ? event : best;
-  }, null);
-
-  return latest ? latest.to : null;
+  return lastMoveTo;
 }
 
 // Valida un evento candidato rispetto al log esistente.
