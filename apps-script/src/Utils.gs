@@ -65,9 +65,6 @@ function generateId_(prefix) {
   if (prefix === 'J') {
     return generateJobId();
   }
-  if (prefix === 'C') {
-    return generateCaseId();
-  }
   var stamp = Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd-HHmmss');
   var suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
   return prefix + '-' + stamp + '-' + suffix;
@@ -79,10 +76,6 @@ function nowRome() {
 
 function generateJobId() {
   return 'JOB-' + Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd') + '-' + randomSuffix_();
-}
-
-function generateCaseId() {
-  return 'CASE-' + Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd') + '-' + randomSuffix_();
 }
 
 function randomSuffix_() {
@@ -278,7 +271,17 @@ function readColumnLabels_() {
 }
 
 function readColumns_() {
-  var config = readConfig_();
+  return normalizeColumns_(readConfig_());
+}
+
+// Normalizzazione e ordinamento delle colonne a partire da un oggetto
+// config gia' in mano (non rilegge il foglio): usata sia da readColumns_
+// (config dal foglio live) sia da columnsFromConfig_ in Model.gs (config
+// passato come parametro, anche sintetico nei test). Prima di questa
+// unificazione, columnsFromConfig_ restituiva l'array cosi' come salvato
+// in columns_json, senza ordinarlo per "order": la dashboard poteva quindi
+// mostrare colonne in un ordine diverso da quello reale della board.
+function normalizeColumns_(config) {
   var columns = [];
 
   if (config.columns_json) {

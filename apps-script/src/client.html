@@ -173,7 +173,6 @@
     });
 
     document.getElementById('modal-create-button').addEventListener('click', saveCardFromModal);
-    document.getElementById('modal-correct-apply').addEventListener('click', applyTimestampCorrection);
     document.querySelectorAll('.modal-tabs .nav-button').forEach(function(button) {
       button.addEventListener('click', function() { setModalTab_(button.dataset.modalTab); });
     });
@@ -568,8 +567,6 @@
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
-    document.getElementById('modal-timestamp-correction').hidden = false;
-    fillTimestampCorrectionFields(job);
     document.querySelector('.modal-tabs').hidden = false;
     setModalTab_('info');
     document.getElementById('card-modal').showModal();
@@ -598,7 +595,6 @@
     document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
     resetCustomValueFields();
     updateLivePriorityBadge();
-    document.getElementById('modal-timestamp-correction').hidden = true;
     // La Cronologia richiede un job_id gia' esistente: nascosta in creazione.
     document.querySelector('.modal-tabs').hidden = true;
     setModalTab_('info');
@@ -617,13 +613,6 @@
       loadActivityLogForModal_();
     } else {
       closeActivityForm_();
-      // Un evento di Cronologia con align_fields puo' aver aggiornato
-      // arrival_ts/start_ts/done_ts su state.activeJob senza un reload
-      // completo del modal: rinfresca i campi di "Correggi timestamp"
-      // cosi' restano coerenti anche tornando su Informazioni.
-      if (state.activeJob) {
-        fillTimestampCorrectionFields(state.activeJob);
-      }
     }
   }
 
@@ -781,65 +770,29 @@
     return value ? String(value).slice(0, 16) : '';
   }
 
-  function fillTimestampCorrectionFields(job) {
-    document.getElementById('modal-correct-arrival').value = isoToDatetimeLocal_(job.arrival_ts);
-    document.getElementById('modal-correct-start').value = isoToDatetimeLocal_(job.start_ts);
-    document.getElementById('modal-correct-done').value = isoToDatetimeLocal_(job.done_ts);
-    document.getElementById('modal-correct-reason').value = '';
-  }
-
-  function applyTimestampCorrection() {
-    if (!state.activeJob) {
-      return;
-    }
-    var reason = document.getElementById('modal-correct-reason').value.trim();
-    if (!reason) {
-      showError(new Error('Inserisci il motivo della correzione'));
-      return;
-    }
-    var fieldInputs = { arrival_ts: 'modal-correct-arrival', start_ts: 'modal-correct-start', done_ts: 'modal-correct-done' };
-    var payload = { job_id: state.activeJob.job_id, reason: reason };
-    var hasValue = false;
-    Object.keys(fieldInputs).forEach(function(field) {
-      var value = document.getElementById(fieldInputs[field]).value;
-      if (value) {
-        payload[field] = value;
-        hasValue = true;
-      }
-    });
-    if (!hasValue) {
-      showError(new Error('Specificare almeno un timestamp da correggere'));
-      return;
-    }
-    var button = document.getElementById('modal-correct-apply');
-    button.disabled = true;
-    button.textContent = 'Applicazione...';
-    callApi('correctJobTimestamps', payload).then(function(data) {
-      state.activeJob = data.job;
-      mergeJobIntoState(data.job);
-      fillTimestampCorrectionFields(data.job);
-      renderBoard();
-      showMessage('Timestamp corretti (' + data.corrections_applied + ')');
-    }).catch(showError).finally(function() {
-      button.disabled = false;
-      button.textContent = 'Applica correzione';
-    });
-  }
-
   function renderReworkHistory(job) {
     var root = document.getElementById('modal-rework-history');
-    if (!coerceBool(job.is_rework) && Number(job.visit_number || 1) <= 1) {
+    var reworkCount = Math.max(0, Number(job.visit_number || 1) - 1);
+    if (!coerceBool(job.is_rework) && reworkCount <= 0) {
       root.hidden = true;
       root.innerHTML = '';
       return;
     }
+    // Solo un'indicazione informativa: il dettaglio di ogni passaggio
+    // (comprese le attese) e' gia' tutto visibile evento per evento piu'
+    // sotto, in cronologia — non serve ripeterlo qui.
     root.hidden = false;
-    root.innerHTML = '<h3>Storico rientri</h3><p>Rientro ' + escapeHtml(Math.max(1, Number(job.visit_number || 1) - 1)) + ' - causa: ' + escapeHtml(job.rework_cause || 'manual') + '</p>';
+    var label = reworkCount === 1 ? '1 rientro' : (reworkCount + ' rientri');
+    var lastCauseLabel = job.rework_cause ? columnLabelById_(job.rework_cause) : '';
+    root.innerHTML = '<p class="rework-history-note">' + escapeHtml(label) +
+      (lastCauseLabel ? ' — l\'ultimo da "' + escapeHtml(lastCauseLabel) + '"' : '') + '</p>';
   }
 
   var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
   var STRUCTURAL_FIELD_LABELS_ = {
     arrival_ts: 'Data creazione (arrival_ts)',
+    incarico_ts: 'Data incarico (incarico_ts)',
+    prep_ts: 'Data inizio preparazione (prep_ts)',
     start_ts: 'Data inizio lavorazione (start_ts)',
     done_ts: 'Data completamento (done_ts)'
   };
@@ -937,17 +890,21 @@
     description.textContent = activityEventDescription_(logEvent);
     row.appendChild(description);
 
-    // Icone visibili e attive solo sugli eventi manuali: gli eventi auto
-    // non si possono ne' modificare ne' eliminare (bloccato anche lato server).
+    // Ogni evento si puo' correggere, auto o manuale: il diario deve poter
+    // essere reso accurato dall'utente (bloccato lato server solo se il
+    // tentativo arriva su un percorso non consentito). La cancellazione
+    // resta invece riservata ai soli eventi manuali: cancellare un evento
+    // auto cancellerebbe un pezzo di storia reale, non una correzione.
+    var actions = document.createElement('span');
+    actions.className = 'activity-log-actions';
+    var editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'activity-log-edit';
+    editButton.setAttribute('aria-label', 'Modifica evento');
+    editButton.innerHTML = '&#9998;';
+    editButton.addEventListener('click', function() { openActivityForm_(logEvent); });
+    actions.appendChild(editButton);
     if (!isAuto) {
-      var actions = document.createElement('span');
-      actions.className = 'activity-log-actions';
-      var editButton = document.createElement('button');
-      editButton.type = 'button';
-      editButton.className = 'activity-log-edit';
-      editButton.setAttribute('aria-label', 'Modifica evento');
-      editButton.innerHTML = '&#9998;';
-      editButton.addEventListener('click', function() { openActivityForm_(logEvent); });
       var deleteButton = document.createElement('button');
       deleteButton.type = 'button';
       deleteButton.className = 'activity-log-delete';
@@ -957,10 +914,9 @@
         state.activityDeleteEventId = logEvent.id;
         document.getElementById('activity-delete-dialog').showModal();
       });
-      actions.appendChild(editButton);
       actions.appendChild(deleteButton);
-      row.appendChild(actions);
     }
+    row.appendChild(actions);
 
     return row;
   }
@@ -985,12 +941,6 @@
       submitActivityPayload_(state.activityPending.payload, state.activityPending.mode);
     });
 
-    document.getElementById('activity-alignment-cancel').addEventListener('click', function() {
-      document.getElementById('activity-alignment-dialog').close();
-      state.activityPending = null;
-    });
-    document.getElementById('activity-alignment-confirm').addEventListener('click', confirmActivityAlignment_);
-
     document.getElementById('activity-delete-cancel').addEventListener('click', function() {
       document.getElementById('activity-delete-dialog').close();
       state.activityDeleteEventId = null;
@@ -1013,7 +963,6 @@
     var type = document.getElementById('activity-form-type').value;
     document.getElementById('activity-form-move-fields').hidden = type !== 'move';
     document.getElementById('activity-form-note-fields').hidden = type !== 'note';
-    document.getElementById('activity-form-correction-fields').hidden = type !== 'correction';
   }
 
   function validateActivityFormTs_() {
@@ -1045,18 +994,12 @@
       document.getElementById('activity-form-to').value = eventToEdit.type === 'move' ? (eventToEdit.to || '') : '';
       document.getElementById('activity-form-move-note').value = eventToEdit.type === 'move' ? (eventToEdit.note || '') : '';
       document.getElementById('activity-form-note-text').value = eventToEdit.type === 'note' ? (eventToEdit.note || '') : '';
-      document.getElementById('activity-form-correction-field').value = eventToEdit.field || 'arrival_ts';
-      document.getElementById('activity-form-correction-new').value = eventToEdit.type === 'correction' ? isoToDatetimeLocal_(eventToEdit.new) : '';
-      document.getElementById('activity-form-correction-reason').value = eventToEdit.reason || '';
     } else {
       tsInput.value = isoToDatetimeLocal_(new Date().toISOString());
       typeSelect.value = 'move';
       document.getElementById('activity-form-to').value = '';
       document.getElementById('activity-form-move-note').value = '';
       document.getElementById('activity-form-note-text').value = '';
-      document.getElementById('activity-form-correction-field').value = 'arrival_ts';
-      document.getElementById('activity-form-correction-new').value = '';
-      document.getElementById('activity-form-correction-reason').value = '';
     }
     updateActivityFormFieldsVisibility_();
     document.getElementById('modal-activity-form').hidden = false;
@@ -1083,12 +1026,6 @@
       if (note) { payload.note = note; }
     } else if (payload.type === 'note') {
       payload.note = document.getElementById('activity-form-note-text').value.trim();
-    } else if (payload.type === 'correction') {
-      var field = document.getElementById('activity-form-correction-field').value;
-      payload.field = field;
-      payload.old = state.activeJob[field] || '';
-      payload.new = document.getElementById('activity-form-correction-new').value;
-      payload.reason = document.getElementById('activity-form-correction-reason').value.trim();
     }
     if (state.activityFormEditId) {
       payload.event_id = state.activityFormEditId;
@@ -1110,14 +1047,6 @@
     if (type === 'note' && !document.getElementById('activity-form-note-text').value.trim()) {
       errorEl.hidden = false; errorEl.textContent = 'Inserisci il testo della nota.'; return;
     }
-    if (type === 'correction') {
-      if (!document.getElementById('activity-form-correction-new').value) {
-        errorEl.hidden = false; errorEl.textContent = 'Inserisci il nuovo valore.'; return;
-      }
-      if (!document.getElementById('activity-form-correction-reason').value.trim()) {
-        errorEl.hidden = false; errorEl.textContent = 'Inserisci il motivo della correzione.'; return;
-      }
-    }
 
     var payload = buildActivityFormPayload_();
     var mode = state.activityFormEditId ? 'edit' : 'add';
@@ -1134,11 +1063,6 @@
         return;
       }
       state.activityPending = null;
-      if (payload.align_fields) {
-        Object.keys(payload.align_fields).forEach(function(field) {
-          state.activeJob[field] = payload.align_fields[field];
-        });
-      }
       closeActivityForm_();
       loadActivityLogForModal_();
     }).catch(function(error) {
@@ -1163,12 +1087,6 @@
       state.activityPending = { payload: payload, mode: mode };
       renderSequenceWarnings_(data.warnings || []);
       document.getElementById('activity-sequence-dialog').showModal();
-      return;
-    }
-    if (data.alignmentRequired) {
-      state.activityPending = { payload: payload, mode: mode, structuralWarnings: data.structuralWarnings || [] };
-      renderAlignmentWarnings_(data.structuralWarnings || []);
-      document.getElementById('activity-alignment-dialog').showModal();
     }
   }
 
@@ -1183,41 +1101,6 @@
     });
   }
 
-  function renderAlignmentWarnings_(warnings) {
-    var root = document.getElementById('activity-alignment-list');
-    root.innerHTML = '';
-    warnings.forEach(function(warning) {
-      var row = document.createElement('div');
-      row.className = 'activity-alignment-row';
-      row.dataset.field = warning.field;
-      var groupName = 'align-' + warning.field;
-      row.innerHTML =
-        '<strong>' + escapeHtml(STRUCTURAL_FIELD_LABELS_[warning.field] || warning.field) + '</strong>' +
-        '<span>Attuale: ' + escapeHtml(formatEventTimestamp_(warning.currentValue)) + '</span>' +
-        '<span>Suggerito: ' + escapeHtml(formatEventTimestamp_(warning.suggestedValue)) + '</span>' +
-        '<label><input type="radio" name="' + groupName + '" value="update" checked> Aggiorna</label>' +
-        '<label><input type="radio" name="' + groupName + '" value="keep"> Mantieni attuale</label>';
-      root.appendChild(row);
-    });
-  }
-
-  function confirmActivityAlignment_() {
-    document.getElementById('activity-alignment-dialog').close();
-    if (!state.activityPending) { return; }
-    var alignFields = {};
-    document.querySelectorAll('#activity-alignment-list .activity-alignment-row').forEach(function(row) {
-      var field = row.dataset.field;
-      var checked = row.querySelector('input[type="radio"]:checked');
-      if (checked && checked.value === 'update') {
-        var warning = (state.activityPending.structuralWarnings || []).filter(function(w) { return w.field === field; })[0];
-        if (warning) { alignFields[field] = warning.suggestedValue; }
-      }
-    });
-    var payload = state.activityPending.payload;
-    payload.align_fields = alignFields;
-    submitActivityPayload_(payload, state.activityPending.mode);
-  }
-
   function confirmActivityDelete_() {
     document.getElementById('activity-delete-dialog').close();
     var eventId = state.activityDeleteEventId;
@@ -1225,18 +1108,7 @@
     if (!eventId || !state.activeJob) { return; }
     callApi('deleteActivityEvent', { job_id: state.activeJob.job_id, event_id: eventId }).then(function(data) {
       loadActivityLogForModal_();
-      if (data.structuralWarnings && data.structuralWarnings.length) {
-        showActivityBanner_(data.structuralWarnings);
-      }
     }).catch(showError);
-  }
-
-  function showActivityBanner_(warnings) {
-    var banner = document.getElementById('modal-activity-banner');
-    banner.hidden = false;
-    banner.innerHTML = warnings.map(function(warning) {
-      return '<p>' + escapeHtml((STRUCTURAL_FIELD_LABELS_[warning.field] || warning.field) + ': valore suggerito ' + formatEventTimestamp_(warning.suggestedValue)) + '</p>';
-    }).join('');
   }
 
   function moveJob(jobId, status) {
@@ -1493,9 +1365,10 @@
     var workload = system.workloadMetrics || {};
     renderDl('workload-metrics', {
       'Lavoro pronto': valueOrDash(workload.ready),
+      'In preparazione': valueOrDash(workload.preparing),
       'Lavoro in corso': valueOrDash(workload.in_progress),
-      'Lavoro che puo rientrare': valueOrDash(workload.can_return),
-      'Lavori bloccati': valueOrDash(workload.blocked),
+      'Concluso, non ancora fatturato': valueOrDash(workload.can_return),
+      'Lavoro in attesa (totale)': valueOrDash(workload.blocked),
       'In attesa di cliente': valueOrDash(workload.waiting_client),
       'In attesa di enti': valueOrDash(workload.waiting_authority),
       'Fermi per decisione interna': valueOrDash(workload.waiting_internal)
@@ -1539,9 +1412,9 @@
     document.getElementById('points-open').textContent = metricValue(points.open_points, ' pt');
     document.getElementById('points-added').textContent = metricValue(points.added_points, ' pt');
     document.getElementById('points-completed').textContent = metricValue(points.completed_points, ' pt');
-    renderBreakdown('points-by-size', points.by_size || {}, false);
-    renderBreakdown('points-by-assignee', points.by_assignee || {}, false);
-    renderBreakdown('points-by-column', points.by_column || {}, true);
+    renderBreakdown('points-by-size', points.by_size || [], false);
+    renderBreakdown('points-by-assignee', points.by_assignee || [], false);
+    renderBreakdown('points-by-column', points.by_column || [], true);
     drawPointsTimeline(points.timeline || []);
     renderMonthlyLoad(points.timeline || []);
   }
@@ -1560,14 +1433,34 @@
     });
   }
 
-  function renderBreakdown(id, values, useLabel) {
-    var mapped = {};
-    Object.keys(values).forEach(function(key) {
-      var item = values[key] || {};
-      mapped[useLabel ? (item.label || key) : key] = valueOrDash(item.points) + ' pt - ' + valueOrDash(item.cards) + ' card';
+  // "values" e' un ARRAY (ordinato lato server), non un oggetto: l'ordine
+  // delle chiavi di un oggetto non e' garantito nell'attraversare il
+  // confine google.script.run, quello degli elementi di un array si'.
+  // Per questo si costruisce il <dl> direttamente qui invece di passare
+  // da renderDl (pensata per oggetti letterali client-side, dove
+  // l'ordine non e' un problema).
+  function renderBreakdown(id, rows, useLabel) {
+    var root = document.getElementById(id);
+    root.innerHTML = '';
+    var list = rows || [];
+    if (!list.length) {
+      var dt = document.createElement('dt');
+      dt.textContent = 'Nessun dato';
+      var dd = document.createElement('dd');
+      dd.textContent = '-';
+      root.appendChild(dt);
+      root.appendChild(dd);
+      return;
+    }
+    list.forEach(function(item) {
+      var label = useLabel ? (item.label || item.key) : item.key;
+      var dt = document.createElement('dt');
+      dt.textContent = label;
+      var dd = document.createElement('dd');
+      dd.textContent = valueOrDash(item.points) + ' pt - ' + valueOrDash(item.cards) + ' card';
+      root.appendChild(dt);
+      root.appendChild(dd);
     });
-    if (!Object.keys(mapped).length) { mapped['Nessun dato'] = '-'; }
-    renderDl(id, mapped);
   }
 
   function drawPointsTimeline(rows) {

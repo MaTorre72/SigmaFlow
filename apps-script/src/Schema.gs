@@ -1,7 +1,20 @@
+// Fase L5 parte 2/2 (DESIGN_modello_caso_visita.md, sez. 6.2/9.1):
+// rimossi i campi duplicati con 'visite' — visit_number, start_ts,
+// done_ts, service_time_d, lead_time_d, wait_time_d, is_rework,
+// rework_cause, incarico_ts, prep_ts. getBoard()/getMetrics() li
+// ricalcolano al volo dalla visita piu' recente del caso
+// (loadJobsWithVisitSummary_ in Kanban.gs) dove servono ancora per il
+// frontend o per le metriche di stato-corrente su jobs (punti/timeline).
+// Passo irreversibile: eseguito solo dopo che Marco ha verificato la
+// migrazione storica (L5 parte 1/2) su TEST.
+// case_id rimosso su richiesta di Marco: terminologia ufficiale/finale,
+// job = caso, 1:1 — case_id era un doppione di job_id, mai un legame
+// reale tra piu' righe (quel concetto non esiste nel modello attuale,
+// una card = un job = un caso). markRework/markRowAsRework_ (Kanban.gs),
+// l'unico codice che leggeva case_id per raggruppare righe "dello stesso
+// caso", rimossi insieme per lo stesso motivo.
 var JOB_HEADERS = [
   'job_id',
-  'case_id',
-  'visit_number',
   'title',
   'client',
   'ambassador',
@@ -18,37 +31,95 @@ var JOB_HEADERS = [
   'description',
   'due_date',
   'arrival_ts',
-  'start_ts',
-  'done_ts',
   'invoiced',
-  'service_time_d',
-  'lead_time_d',
-  'wait_time_d',
-  'is_rework',
-  'rework_cause',
   'notes',
   'card_color',
   'checklist_json',
   'correction_log_json',
-  'activity_log_json'
+  'activity_log_json',
+  'incarico_chiuso_ts'
 ];
 
-var CASE_HEADERS = [
-  'case_id',
-  'title',
-  'client',
-  'total_visits',
-  'is_open',
-  'created_ts',
-  'closed_ts'
+// Foglio 'cases' dismesso su richiesta di Marco, dopo che 'visite' si e'
+// dimostrata affidabile in L1-L5 e sulla migrazione PROD (R0-R4):
+// total_visits/is_open erano ridondanti con MAX(numero_visita)/l'ultimo
+// stato derivabile da 'visite', mai letti dal frontend (verificato).
+// Vedi removeCasesSheet_ sotto per la rimozione automatica sui fogli
+// esistenti. CASE_HEADERS rimossa: nessun altro codice la referenzia.
+//
+// Fase L (modello caso/visita, DESIGN_modello_caso_visita.md sez. 6.1 e
+// 9.2): foglio 'visite', nuovo e separato. Identita' della riga: job_id
+// + numero_visita (composta, nessun campo aggiuntivo introdotto
+// rispetto a quanto elencato nel documento).
+// rientro_ts/rientro_da (rinominati da chiusura_ts/chiusura_tipo su
+// richiesta di Marco: il vecchio nome si confondeva con
+// incarico_chiuso_ts su jobs, un concetto completamente diverso —
+// questi due segnano solo quando/da dove il caso e' rientrato,
+// chiudendo QUESTA visita e aprendone una nuova, non una chiusura
+// definitiva). Vedi renameVisiteChiusuraFields_ sotto per la migrazione
+// del nome sui dati gia' presenti.
+var VISITE_HEADERS = [
+  'job_id',
+  'numero_visita',
+  'apertura_ts',
+  'incarico_ts',
+  'prep_ts',
+  'start_ts',
+  'consegna_ts',
+  'rientro_ts',
+  'rientro_da',
+  't_cliente_d',
+  't_ente_d',
+  't_interno_d',
+  'rework_cause'
 ];
 
 var CONFIG_HEADERS = ['key', 'value', 'description'];
 
+// Rinomina una tantum, in loco, delle intestazioni chiusura_ts/
+// chiusura_tipo -> rientro_ts/rientro_da su un foglio 'visite' che ha
+// ancora il nome precedente. Necessaria perche' il riallineamento
+// automatico (alignSheetHeaders_) confronta i nomi delle colonne uno a
+// uno: senza questo passo tratterebbe il vecchio nome come "rimosso" e
+// il nuovo come "aggiunto", perdendo i dati gia' scritti. Rinominando
+// solo il testo della cella di intestazione (non i valori, che restano
+// nella stessa colonna), alignSheetHeaders_ trova gia' il nome giusto e
+// preserva tutto. Idempotente: se l'intestazione vecchia non c'e' piu',
+// non fa nulla.
+function renameVisiteChiusuraFields_(ss) {
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (!sheet || sheet.getLastRow() < 1) {
+    return;
+  }
+  var headers = getHeaderMap_(sheet);
+  if (headers.chiusura_ts) {
+    sheet.getRange(1, headers.chiusura_ts).setValue('rientro_ts');
+  }
+  if (headers.chiusura_tipo) {
+    sheet.getRange(1, headers.chiusura_tipo).setValue('rientro_da');
+  }
+}
+
+// Dismissione una tantum del foglio 'cases' (non piu' in JOB_HEADERS/
+// nessuna scrittura da codice dopo questa sotto-fase): elimina il
+// foglio se esiste ancora. Idempotente — se gia' assente, non fa nulla.
+// A differenza della rinomina di rientro_ts/rientro_da (che preserva
+// dati spostandoli su un nuovo nome), qui non c'e' nulla da preservare:
+// total_visits/is_open sono gia' ricavabili da 'visite'/'jobs', la
+// rimozione e' pulizia, non migrazione di dati.
+function removeCasesSheet_(ss) {
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CASES);
+  if (sheet) {
+    ss.deleteSheet(sheet);
+  }
+}
+
 function setupSigmaFlow() {
   var ss = getSpreadsheet_();
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
-  ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
+  removeCasesSheet_(ss);
+  renameVisiteChiusuraFields_(ss);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
   migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
