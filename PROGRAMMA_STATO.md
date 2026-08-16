@@ -107,14 +107,34 @@ tra un test e l'altro (mancava, avrebbe lasciato righe residue).
   file — **identici**, nessuna divergenza. La logica L2 e' ora live sul
   progetto Apps Script TEST.
 
+## Bug trovato e corretto durante il collaudo di Marco (commit `b80bba4`)
+
+Marco ha provato gli spostamenti su TEST e incollato l'export del
+foglio `visite`. Analizzando i dati: numerazione visite, `chiusura_tipo`
+e `rework_cause` incrociati correttamente tra visite consecutive
+(`rework_cause` di una visita = `chiusura_tipo` della precedente, come
+da sez. 6.1), accumulatori valorizzati anche su uscite dirette
+stand_by -> done. Nessun dato scritto da Marco risultava corrotto.
+
+Un bug pero' emergeva in un caso non ancora capitato nei dati di
+Marco ma latente: se la PRIMA mossa toccata dal nuovo codice per un job
+pre-esistente (nessuna riga `visite` ancora presente) e' proprio quella
+che chiude la visita (stand_by/done -> backlog/prep), il bootstrap in
+`ensureOpenVisit_` leggeva `job.visit_number` **dopo** l'incremento gia'
+applicato in `moveJob`, etichettando la visita che si chiude con lo
+stesso numero della nuova che si apre nella stessa mossa. Corretto
+passando il numero pre-mossa esplicitamente. Nuovo test dedicato
+(`testVisitBootstrapCoincidingWithClosureNumbersCorrectly`) che
+riproduce lo scenario — **49/49 test passati**. Push su TEST rieseguito
+e riverificato (13/13 identici).
+
 ## Prossimo passo
 
-1. **Gate umano**: Marco verifica su TEST che gli spostamenti sulla
-   board si comportino come atteso (in particolare: rientro da
-   `done`/`stand_by` verso `backlog`/`prep` blocca ancora la card come
-   prima visivamente, ma ora apre una nuova riga in `visite`), e
-   **decide sull'assunzione di bootstrap segnalata sopra** (visita
-   creata al volo per i job pre-esistenti) prima di procedere a L3
+1. **Gate umano**: Marco riverifica su TEST (in particolare i job che
+   non aveva ancora toccato, dove lo scenario del bug corretto sopra
+   potrebbe presentarsi) e **decide sull'assunzione di bootstrap**
+   (visita creata al volo per i job pre-esistenti, sovrascritta poi
+   dalla migrazione storica L5) prima di procedere a L3
    (`ActivityLog.gs`: allineamento sulla visita aperta) — sessione
    Claude Code separata, non questa.
 
