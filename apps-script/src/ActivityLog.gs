@@ -645,6 +645,14 @@ function eseguiMigrazioneCompleta_(ss, params) {
 // migrateVisiteFromHistoryOnTest), sulla copia reale di PROD confermata
 // da Marco in sessione il 2026-08-16 ("Backup di SigmaFlow Database").
 //
+// NOME SENZA underscore finale apposta: le funzioni con "_" alla fine
+// sono trattate da Apps Script come private e nascoste dal menu
+// "Esegui" dell'editor — esattamente come migrateActivityLogOnTest/
+// migrateVisiteFromHistoryOnTest (pubbliche, cliccabili) rispetto alle
+// funzioni interne che chiamano (con underscore). Avevo copiato per
+// errore l'underscore dalla funzione principale, rendendo questo
+// wrapper invisibile nel menu — segnalato da Marco, corretto qui.
+//
 // ID e nome sono scritti qui come due valori INDIPENDENTI apposta: id
 // preso dal messaggio di Marco, nome confermato separatamente a parola
 // sua. Se in futuro questo foglio venisse duplicato/rinominato e l'id
@@ -652,7 +660,7 @@ function eseguiMigrazioneCompleta_(ss, params) {
 // la funzione si fermerebbe da sola — lo stesso principio del controllo
 // in eseguiMigrazioneCompleta_, non un'auto-conferma (ss.getName() con
 // se stesso sarebbe sempre vera, inutile come controllo).
-function eseguiMigrazioneCompletaSuCopiaProd_() {
+function eseguiMigrazioneCompletaSuCopiaProd() {
   var ss = SpreadsheetApp.openById('1xUMWhAK8tovUU_gHEqizi9WDoqxTULzzfaygAfYL3FI');
   return eseguiMigrazioneCompleta_(ss, { confermaNome: 'Backup di SigmaFlow Database' });
 }
