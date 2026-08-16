@@ -1,8 +1,8 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 19:15
+Aggiornato: 2026-08-16 19:40
 
-Fase corrente: Dismissione foglio `cases` — completata su TEST
-Titolo: removeCasesSheet_ — vedi AUDIT_MIGRAZIONE_PROD.md §8
+Fase corrente: Rimozione `case_id`/`markRework` + generatore dati demo su schema finale — completata su TEST
+Titolo: JOB_HEADERS senza case_id, seedTestDataset_ riscritto
 
 ## Dismissione foglio `cases` (2026-08-16 19:15)
 
@@ -33,11 +33,72 @@ rimozioni di schema di questo programma. `markRework`/
 `markRowAsRework_` non toccate (gia' dormienti/degradate da L5, non
 scrivono su `cases`).
 
+## Chiarimenti Marco su foglio TEST standby e terminologia (2026-08-16, prima della fase seguente)
+
+Due domande di Marco dopo aver visto la dismissione di `cases` applicata
+alla copia "Backup di SigmaFlow Database": (1) il vecchio foglio
+standby "SigmaFlow Database TEST" (a cui puntava prima
+`SIGMAFLOW_TEST_SPREADSHEET_ID`) non ne risente, essendo dati fittizi a
+perdere; (2) terminologia ufficiale/finale chiarita da Marco — job =
+caso, 1:1, quindi `case_id` e' un doppione di `job_id` da rimuovere, non
+"il vero legame". Ho proposto un wrapper `setupSigmaFlowOnTest()` per
+proteggere il vecchio foglio standby dal rischio `PROP_SCHEMA_VERSION`
+condiviso globalmente (vedi AUDIT_MIGRAZIONE_PROD.md §0.1): **Marco ha
+rifiutato**, preferendo riscrivere direttamente il generatore di dati
+demo per emettere lo schema finale fin da subito, visto che sono "tutti
+dati a perdere, finti".
+
+## Rimozione case_id/markRework + generatore dati demo su schema finale (2026-08-16 19:40)
+
+Su conferma esplicita di Marco per entrambe le richieste sopra:
+
+- **`case_id` rimosso** da `JOB_HEADERS` (Schema.gs), da `addJob`
+  (Kanban.gs, niente piu' `createImplicitCase_`/`caseId` nella risposta),
+  da `generateId_`/`generateCaseId` (Utils.gs, dead code), e da tutte le
+  fixture Tests.gs che non simulano lo schema storico pre-migrazione.
+  `SCHEMA_VERSION` 8->9.
+- **`markRework`/`markRowAsRework_` rimosse** (Kanban.gs): dipendevano
+  interamente dal raggruppamento per `case_id` (righe "dello stesso
+  caso"), gia' non richiamate dal frontend da prima di questa sessione
+  (verificato in Fase L1). Route `markRework` tolta da `routeAction_`.
+  `testMarkRework` rimosso dai test.
+- **`setupOldProdShapedSheet_`** (fixture migrazione PROD) lasciata
+  intenzionalmente invariata: simula lo schema REALE osservato su PROD
+  prima della migrazione, che aveva ancora `case_id`/`cases` — la
+  migrazione (`eseguiMigrazioneCompleta_`) deve continuare a rimuoverlo,
+  gia' verificato dall'asserzione generica `assertHeaders_(jobsSheet,
+  JOB_HEADERS, ...)` dopo lo step di riallineamento schema.
+- **`seedTestDataset_` riscritta** (bottone dati demo dashboard TEST):
+  prima scriveva ancora `case_id`/`visit_number`/`start_ts`/`done_ts`/
+  `service_time_d`/`lead_time_d`/`wait_time_d`/`is_rework`/
+  `rework_cause` sull'oggetto job — tutti campi gia' rimossi da
+  `JOB_HEADERS` dalla L5 e silenziosamente scartati da `jobToRow_`. Ora
+  genera solo campi realmente presenti in `JOB_HEADERS` (incluso un
+  `activity_log_json` con l'evento di creazione, come fa `addJob`) e,
+  soprattutto, **vere righe `visite`** per ogni job generato (mancavano
+  del tutto prima): una singola visita aperta per i job normali, due
+  visite (la prima chiusa con un rientro, la seconda aperta con
+  `rework_cause` coerente) per l'~1/8 dei job con rework, stessa logica
+  di `updateVisiteForMove_`. Prima di questa modifica, la dashboard L4
+  (che legge le metriche di governo da `visite`) mostrava zeri su tutti
+  i job generati dal bottone demo: verificato via harness che ora
+  `getMetrics()` calcola valori reali (E_S ≈ 2.67 sul dataset demo) e
+  `getBoard()` mostra tutti i 60 job.
+
+**68/68 test passati** (69 - 1 per la rimozione di `testMarkRework`).
+Commit `00e79f0`. Push su TEST eseguito e verificato (13/13 file
+identici via `clasp pull` isolato + diff).
+
 ## Prossimo passo
 
 Verifica di Marco sulla board/dashboard live di TEST dopo il prossimo
-caricamento. Resta aperta la decisione su P4-P8 dell'audit PROD (deploy
-+ migrazione su PROD vero), non affrontata in questa sessione.
+caricamento, in particolare provando il bottone "Genera dati demo" per
+controllare a occhio la board/dashboard con le nuove `visite` popolate.
+Punti secondari non ancora fatti (bassa priorita', non richiesti
+esplicitamente): `AUDIT_MIGRAZIONE_PROD.md` §8 va aggiornato per
+riflettere che la dismissione di `cases` e' ormai COMPLETATA (non piu'
+"rimandata"). Resta aperta la decisione su P4-P8 dell'audit PROD
+(deploy + migrazione su PROD vero), non affrontata in questa sessione.
 
 ---
 
