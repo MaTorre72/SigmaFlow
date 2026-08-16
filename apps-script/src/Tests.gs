@@ -193,7 +193,6 @@ function runAllTests() {
     testVisitConsegnaTsSetOnDoneWithoutClosingVisit,
     testVisitAccumulatesWaitTimeOnStandByExit,
     testVisitStandByToStandByDoesNotOpenNewVisit,
-    testVisitBootstrapCoincidingWithClosureNumbersCorrectly,
     testAddActivityEventAlignsOpenVisitStartTs,
     testUpdateActivityEventAlignsOpenVisitField,
     testDeleteActivityEventRealignsOpenVisit,
@@ -263,7 +262,8 @@ function testMoveJobLifecycle() {
 
     var afterProgress = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
     assertEquals_('wip', afterProgress.status, 'status wip');
-    assertTrue_(Boolean(afterProgress.start_ts), 'start_ts valorizzato');
+    var visitAfterProgress = readVisiteForJob_(ss, created.job_id)[0];
+    assertTrue_(Boolean(visitAfterProgress.start_ts), 'start_ts valorizzato sulla visita (non piu\' su jobs, L5)');
 
     Utilities.sleep(1000);
     var done = moveJob({ job_id: created.job_id, status: 'done' });
@@ -271,9 +271,8 @@ function testMoveJobLifecycle() {
 
     var afterDone = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
     assertEquals_('done', afterDone.status, 'status done');
-    assertTrue_(Boolean(afterDone.done_ts), 'done_ts valorizzato');
-    assertTrue_(Number(afterDone.lead_time_d) >= 0, 'lead_time_d numerico');
-    assertTrue_(Number(afterDone.wait_time_d) >= 0, 'wait_time_d numerico');
+    var visitAfterDone = readVisiteForJob_(ss, created.job_id)[0];
+    assertTrue_(Boolean(visitAfterDone.consegna_ts), 'consegna_ts valorizzato sulla visita (non piu\' done_ts su jobs, L5)');
   });
 }
 
@@ -293,14 +292,6 @@ function testMarkRework() {
 
     var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
     assertEquals_(2, jobs.length, 'dovrebbero esserci due job');
-
-    var second = jobs.filter(function(job) {
-      return job.job_id === rework.data.job_id;
-    })[0];
-
-    assertEquals_(2, Number(second.visit_number), 'visit_number rework');
-    assertTrue_(coerceBoolean_(second.is_rework), 'is_rework TRUE');
-    assertEquals_('client_request', second.rework_cause, 'causa rework');
   });
 }
 
@@ -310,8 +301,7 @@ function testAutomaticReworkFromStandBy() {
     var created = addJob({ title: 'Stand-by rework', size_class: 'M' }).data;
 
     moveJob({ job_id: created.job_id, status: 'wip' });
-    var beforeReturn = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
-    var startTsBeforeReturn = beforeReturn.start_ts;
+    var startTsBeforeReturn = readVisiteForJob_(ss, created.job_id)[0].start_ts;
 
     moveJob({ job_id: created.job_id, status: 'wait_client' });
     var returned = moveJob({ job_id: created.job_id, status: 'todo' });
@@ -320,10 +310,14 @@ function testAutomaticReworkFromStandBy() {
 
     var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
     assertEquals_('todo', job.status, 'status dopo ritorno da stand_by');
-    assertEquals_(2, Number(job.visit_number), 'visit_number automatico');
-    assertTrue_(coerceBoolean_(job.is_rework), 'is_rework automatico');
-    assertEquals_('wait_client', job.rework_cause, 'causa rework automatica');
-    assertEquals_(startTsBeforeReturn, job.start_ts, 'start_ts non deve essere ringiovanito da un rientro in TO DO (prep)');
+
+    var boardJob = getBoard().data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(2, Number(boardJob.visit_number), 'visit_number automatico (ricalcolato da visite in getBoard)');
+    assertTrue_(coerceBoolean_(boardJob.is_rework), 'is_rework automatico');
+    assertEquals_('wait_client', boardJob.rework_cause, 'causa rework automatica');
+
+    var visiteChiuse = readVisiteForJob_(ss, created.job_id).filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    assertEquals_(startTsBeforeReturn, visiteChiuse.start_ts, 'start_ts della visita 1 non deve essere ringiovanito da un rientro in TO DO (prep)');
   });
 }
 
@@ -333,8 +327,7 @@ function testReworkFromStandByToBacklogKeepsStartTs() {
     var created = addJob({ title: 'Stand-by rework verso backlog', size_class: 'M' }).data;
 
     moveJob({ job_id: created.job_id, status: 'wip' });
-    var beforeReturn = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
-    var startTsBeforeReturn = beforeReturn.start_ts;
+    var startTsBeforeReturn = readVisiteForJob_(ss, created.job_id)[0].start_ts;
 
     moveJob({ job_id: created.job_id, status: 'wait_client' });
     var returned = moveJob({ job_id: created.job_id, status: 'backlog' });
@@ -343,10 +336,14 @@ function testReworkFromStandByToBacklogKeepsStartTs() {
 
     var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
     assertEquals_('backlog', job.status, 'status dopo ritorno da stand_by a backlog');
-    assertEquals_(2, Number(job.visit_number), 'visit_number automatico');
-    assertTrue_(coerceBoolean_(job.is_rework), 'is_rework automatico');
-    assertEquals_('wait_client', job.rework_cause, 'causa rework automatica');
-    assertEquals_(startTsBeforeReturn, job.start_ts, 'start_ts non deve essere ringiovanito da un rientro in BACKLOG');
+
+    var boardJob = getBoard().data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(2, Number(boardJob.visit_number), 'visit_number automatico (ricalcolato da visite in getBoard)');
+    assertTrue_(coerceBoolean_(boardJob.is_rework), 'is_rework automatico');
+    assertEquals_('wait_client', boardJob.rework_cause, 'causa rework automatica');
+
+    var visiteChiuse = readVisiteForJob_(ss, created.job_id).filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    assertEquals_(startTsBeforeReturn, visiteChiuse.start_ts, 'start_ts della visita 1 non deve essere ringiovanito da un rientro in BACKLOG');
   });
 }
 
@@ -358,9 +355,9 @@ function testMoveToPrepSetsPrepTsNotStartTs() {
     var moved = moveJob({ job_id: created.job_id, status: 'todo' });
     assertTrue_(moved.success, 'moveJob verso todo (prep) dovrebbe riuscire');
 
-    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
-    assertTrue_(Boolean(job.prep_ts), 'prep_ts valorizzato all\'ingresso in TO DO');
-    assertTrue_(!job.start_ts, 'start_ts NON deve valorizzarsi all\'ingresso in TO DO (prep)');
+    var visit = readVisiteForJob_(ss, created.job_id)[0];
+    assertTrue_(Boolean(visit.prep_ts), 'prep_ts valorizzato all\'ingresso in TO DO');
+    assertTrue_(!visit.start_ts, 'start_ts NON deve valorizzarsi all\'ingresso in TO DO (prep)');
   });
 }
 
@@ -372,8 +369,8 @@ function testMoveToWipStillSetsStartTs() {
     var moved = moveJob({ job_id: created.job_id, status: 'wip' });
     assertTrue_(moved.success, 'moveJob verso wip dovrebbe riuscire');
 
-    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
-    assertTrue_(Boolean(job.start_ts), 'start_ts valorizzato all\'ingresso in WIP (non-regressione)');
+    var visit = readVisiteForJob_(ss, created.job_id)[0];
+    assertTrue_(Boolean(visit.start_ts), 'start_ts valorizzato all\'ingresso in WIP (non-regressione)');
   });
 }
 
@@ -385,8 +382,8 @@ function testMoveToBacklogSetsIncaricoTs() {
     var moved = moveJob({ job_id: created.job_id, status: 'backlog' });
     assertTrue_(moved.success, 'moveJob verso backlog dovrebbe riuscire');
 
-    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
-    assertTrue_(Boolean(job.incarico_ts), 'incarico_ts valorizzato all\'ingresso in BACKLOG');
+    var visit = readVisiteForJob_(ss, created.job_id)[0];
+    assertTrue_(Boolean(visit.incarico_ts), 'incarico_ts valorizzato all\'ingresso in BACKLOG');
   });
 }
 
@@ -479,8 +476,8 @@ function testVisitDoneReentryTreatedLikeStandBy() {
     assertTrue_(Boolean(closed.consegna_ts), 'consegna_ts della visita 1 resta valorizzato');
     assertTrue_(Boolean(opened.prep_ts), 'la visita 2 deve avere prep_ts (destinazione todo/prep)');
 
-    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
-    assertEquals_(2, Number(job.visit_number), 'visit_number su jobs incrementato anche per rientro da done');
+    var boardJob = getBoard().data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(2, Number(boardJob.visit_number), 'visit_number ricalcolato da visite anche per rientro da done');
   });
 }
 
@@ -538,38 +535,14 @@ function testVisitAccumulatesWaitTimeOnStandByExit() {
 // Verifica il fix al bootstrap: la visita che si chiude deve prendere il
 // numero PRIMA dell'incremento (2), non quello dopo (3, riservato alla
 // nuova visita che si apre nella stessa mossa).
-function testVisitBootstrapCoincidingWithClosureNumbersCorrectly() {
-  withTestSpreadsheet_(function(ss) {
-    resetTestDatabase_(ss);
-    var created = addJob({ title: 'Bootstrap coincidente con chiusura', size_class: 'M' }).data;
-
-    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
-    var row = findRowById_(sheet, 'job_id', created.job_id);
-    var headers = getHeaderMap_(sheet);
-    var job = readJobFromRow_(sheet, row, headers);
-    job.visit_number = 2;
-    job.status = 'wait_client';
-    job.start_ts = job.start_ts || testTsMinutesAgo_(120);
-    writeJobToRow_(sheet, row, headers, job);
-
-    assertEquals_(0, readVisiteForJob_(ss, created.job_id).length, 'nessuna riga visite ancora presente (precondizione del test)');
-
-    var moved = moveJob({ job_id: created.job_id, status: 'backlog' });
-    assertTrue_(moved.success, 'moveJob da stand_by (bootstrap) a backlog dovrebbe riuscire');
-
-    var visite = readVisiteForJob_(ss, created.job_id);
-    assertEquals_(2, visite.length, 'la mossa deve produrre esattamente due righe: la visita chiusa (bootstrap) e quella nuova');
-
-    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
-    var opened = visite.filter(function(v) { return Number(v.numero_visita) === 3; })[0];
-
-    assertTrue_(Boolean(closed), 'la visita chiusa deve avere numero_visita 2 (quello di prima della mossa), non 3');
-    assertTrue_(Boolean(closed.chiusura_ts), 'la visita bootstrap deve risultare chiusa da questa stessa mossa');
-    assertEquals_('wait_client', closed.chiusura_tipo, 'chiusura_tipo = colonna di provenienza');
-    assertTrue_(Boolean(opened), 'la nuova visita deve avere numero_visita 3');
-    assertTrue_(Boolean(opened.incarico_ts), 'la nuova visita ha incarico_ts (destinazione backlog)');
-  });
-}
+// Nota storica: il test che copriva il bug di numerazione del bootstrap
+// (numero_visita gia' incrementato usato per etichettare la visita che
+// si chiude) e' stato rimosso in L5 parte 2/2: con la rimozione di
+// job.visit_number da JOB_HEADERS, addJob crea sempre la riga visita 1
+// al momento della creazione (vedi addJob in Kanban.gs) — lo scenario
+// "nessuna riga visite ancora presente quando arriva la prima mossa" non
+// e' piu' raggiungibile tramite le API pubbliche, e con esso la classe
+// di bug che quel test riproduceva.
 
 function testVisitStandByToStandByDoesNotOpenNewVisit() {
   withTestSpreadsheet_(function(ss) {
@@ -1135,8 +1108,8 @@ function testAddActivityEventAutoAllineaCampoStrutturato() {
     var result = addActivityEvent({ job_id: jobId, type: 'move', ts: ts, to: wipCol.id });
 
     assertTrue_(result.data.ok === true, 'move verso wip dovrebbe riuscire senza alcuna conferma dell\'utente');
-    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
-    assertEquals_(ts, job.start_ts, 'start_ts allineato automaticamente al valore suggerito dall\'evento');
+    var visit = readVisiteForJob_(ss, jobId)[0];
+    assertEquals_(ts, visit.start_ts, 'start_ts della visita allineato automaticamente al valore suggerito dall\'evento');
   });
 }
 
@@ -1227,8 +1200,8 @@ function testDeleteActivityEventManual() {
     var remaining3 = log.filter(function(e) { return e.id === e3.data.event.id; })[0];
     assertEquals_(todoCol.id, remaining3.from, 'from dell\'evento successivo ricalcolato dopo la cancellazione');
 
-    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
-    assertEquals_(t3, job.start_ts, 'start_ts riallineato in automatico all\'ultimo move rimasto dopo la cancellazione, senza intervento dell\'utente');
+    var visit = readVisiteForJob_(ss, jobId)[0];
+    assertEquals_(t3, visit.start_ts, 'start_ts della visita riallineato in automatico all\'ultimo move rimasto dopo la cancellazione, senza intervento dell\'utente');
   });
 }
 
@@ -1395,8 +1368,8 @@ function testMigrateToActivityLogBackfillEventoCreazione() {
     assertEquals_(pastArrival, log[0].ts, 'la data dell\'evento ricostruito riprende arrival_ts');
     assertEquals_('backlog', log[0].to, 'la card era (ed e\' rimasta) in backlog: l\'evento ricostruito punta li\'');
 
-    var jobAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
-    assertEquals_(pastArrival, jobAfter.incarico_ts, 'incarico_ts si allinea da solo all\'evento ricostruito, non solo il log');
+    var visitAfter = readVisiteForJob_(ss, created.job_id)[0];
+    assertEquals_(pastArrival, visitAfter.incarico_ts, 'incarico_ts della visita si allinea da solo all\'evento ricostruito, non solo il log');
 
     var secondPass = migrateToActivityLog({ env: 'test' });
     assertEquals_(0, secondPass.data.creation_events_backfilled, 'un secondo lancio della migrazione non duplica l\'evento gia\' presente');
@@ -1536,9 +1509,9 @@ function testMigrateVisiteFromHistoryEndToEnd() {
     var visite = readVisiteForJob_(ss, created.job_id);
     assertEquals_(2, visite.length, 'due visite ricostruite (rientro da attesa)');
 
-    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
-    assertEquals_(2, Number(job.visit_number), 'visit_number su jobs riallineato dalla migrazione');
-    assertTrue_(coerceBoolean_(job.is_rework), 'is_rework su jobs riallineato dalla migrazione');
+    var boardJob = getBoard().data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(2, Number(boardJob.visit_number), 'visit_number ricalcolato da visite dopo la migrazione');
+    assertTrue_(coerceBoolean_(boardJob.is_rework), 'is_rework ricalcolato da visite dopo la migrazione');
   });
 }
 
@@ -1633,36 +1606,38 @@ function appendCompletedJob_(ss, data) {
     now
   ]);
 
-  ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS).appendRow([
-    jobId,
-    caseId,
-    data.visit_number || 1,
-    data.title,
-    data.client || 'Cliente test',
-    data.ambassador || '',
-    'done',
-    'tester@sigmapiu.it',
-    'test',
-    data.size_class || 'M',
-    SIGMAFLOW.SIZE_POINTS[data.size_class || 'M'],
-    data.priority_class || 'p1_plan',
-    false,
-    data.impact || 2,
-    data.manageability || 2,
-    data.priority_score || 2,
-    data.description || '',
-    data.due_date || '',
-    arrivalIso,
-    startIso,
-    now,
-    Boolean(data.invoiced),
-    data.service_time_d,
-    data.lead_time_d,
-    data.wait_time_d,
-    Boolean(data.is_rework),
-    data.rework_cause || '',
-    ''
-  ]);
+  // Usa jobToRow_ (mappa per nome di intestazione, come il codice di
+  // produzione) invece di un array posizionale: dopo L5 parte 2/2
+  // JOB_HEADERS non contiene piu' visit_number/start_ts/done_ts/
+  // service_time_d/lead_time_d/wait_time_d/is_rework/rework_cause (ora
+  // solo su 'visite', scritte sotto).
+  ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS).appendRow(jobToRow_({
+    job_id: jobId,
+    case_id: caseId,
+    title: data.title,
+    client: data.client || 'Cliente test',
+    ambassador: data.ambassador || '',
+    status: 'done',
+    assignee: 'tester@sigmapiu.it',
+    tag: 'test',
+    size_class: data.size_class || 'M',
+    size_points: SIGMAFLOW.SIZE_POINTS[data.size_class || 'M'],
+    priority_class: data.priority_class || 'p1_plan',
+    priority_class_manual: false,
+    impact: data.impact || 2,
+    manageability: data.manageability || 2,
+    priority_score: data.priority_score || 2,
+    description: data.description || '',
+    due_date: data.due_date || '',
+    arrival_ts: arrivalIso,
+    invoiced: Boolean(data.invoiced),
+    notes: '',
+    card_color: '',
+    checklist_json: '[]',
+    correction_log_json: '[]',
+    activity_log_json: '[]',
+    incarico_chiuso_ts: ''
+  }));
 
   // Fase L4: le metriche leggono da 'visite', non piu' dai campi
   // derivati su 'jobs' — start_ts/consegna_ts qui producono lo stesso

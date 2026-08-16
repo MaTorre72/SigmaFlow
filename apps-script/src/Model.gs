@@ -1,6 +1,9 @@
 function getMetrics() {
   var config = readConfig_();
-  var jobs = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+  // loadJobsWithVisitSummary_ (Kanban.gs): dopo L5 parte 2/2, done_ts non
+  // e' piu' un campo di jobs — serve ricalcolato per pointsStatistics_/
+  // monthBuckets_, che restano esplicitamente su jobs (L4).
+  var jobs = loadJobsWithVisitSummary_();
   var visite = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE));
   return ok_(calculateMetrics_(jobs, visite, config, new Date()));
 }

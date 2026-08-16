@@ -80,7 +80,7 @@ function routeAction_(params) {
 
 function getBoard() {
   ensureCurrentSchema_();
-  var jobs = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+  var jobs = loadJobsWithVisitSummary_();
   var columns = readColumns_();
   var board = {};
   var columnMeta = [];
@@ -154,7 +154,6 @@ function addJob(params) {
   var job = {
     job_id: generateJobId(),
     case_id: caseId,
-    visit_number: Number(params.visit_number || 1),
     title: title,
     client: params.client || '',
     ambassador: params.ambassador || '',
@@ -171,16 +170,7 @@ function addJob(params) {
     description: params.description || '',
     due_date: params.due_date || '',
     arrival_ts: now,
-    incarico_ts: targetColumn.role === 'backlog' ? now : '',
-    prep_ts: targetColumn.role === 'prep' ? now : '',
-    start_ts: targetColumn.role === 'wip' ? now : '',
-    done_ts: '',
     invoiced: coerceBoolean_(params.invoiced),
-    service_time_d: '',
-    lead_time_d: '',
-    wait_time_d: '',
-    is_rework: Number(params.visit_number || 1) > 1,
-    rework_cause: params.rework_cause || '',
     notes: params.notes || '',
     card_color: normalizeCardColor_(params.card_color),
     checklist_json: normalizeChecklistJson_(params.checklist_json),
@@ -203,6 +193,30 @@ function addJob(params) {
   job.activity_log_json = serializeActivityLog_([creationEvent]);
 
   sheet.appendRow(jobToRow_(job));
+
+  // Modello caso/visita: la visita 1 nasce con la card, stesso principio
+  // del gate-setting in updateVisiteForMove_ applicato alla colonna di
+  // destinazione iniziale — senza questo, un job creato direttamente in
+  // WIP/TO DO/DONE non avrebbe alcuna riga 'visite' finche' non viene
+  // spostato per la prima volta.
+  var visiteSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (visiteSheet) {
+    appendVisitRow_(visiteSheet, {
+      job_id: job.job_id,
+      numero_visita: 1,
+      apertura_ts: now,
+      incarico_ts: targetColumn.role === 'backlog' ? now : '',
+      prep_ts: targetColumn.role === 'prep' ? now : '',
+      start_ts: targetColumn.role === 'wip' ? now : '',
+      consegna_ts: targetColumn.role === 'done' ? now : '',
+      chiusura_ts: '',
+      chiusura_tipo: '',
+      t_cliente_d: 0,
+      t_ente_d: 0,
+      t_interno_d: 0,
+      rework_cause: ''
+    });
+  }
 
   refreshCaseVisitCount_(ss, caseId);
   return ok_({ job_id: job.job_id, case_id: caseId, job: job });
@@ -251,44 +265,8 @@ function moveJob(params) {
   // updateVisiteForMove_ per gli accumulatori e consegna_ts.
   var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
 
-  // Numero della visita PRIMA di questo spostamento: serve al bootstrap in
-  // updateVisiteForMove_ (sotto) per etichettare correttamente la visita
-  // che si sta chiudendo, nel caso in cui questa sia la prima volta che il
-  // job viene toccato dopo il deploy della Fase L (nessuna riga 'visite'
-  // ancora presente) E questo stesso spostamento la chiuda: senza questo,
-  // il bootstrap userebbe il numero GIA' incrementato sotto, duplicando il
-  // numero della visita nuova invece di quello della visita chiusa.
-  var visitNumberBeforeMove = Number(job.visit_number || 1);
-
-  if (closesVisit) {
-    job.visit_number = visitNumberBeforeMove + 1;
-    job.is_rework = true;
-    job.rework_cause = sourceColumn.id;
-  }
-
-  if (targetColumn.role === 'wip' && !job.start_ts) {
-    job.start_ts = now;
-  }
-
   if (targetColumn.role === 'backlog' && !job.arrival_ts) {
     job.arrival_ts = now;
-  }
-
-  if (targetColumn.role === 'backlog' && !job.incarico_ts) {
-    job.incarico_ts = now;
-  }
-
-  if (targetColumn.role === 'prep' && !job.prep_ts) {
-    job.prep_ts = now;
-  }
-
-  if (targetColumn.role === 'done') {
-    job.done_ts = now;
-    if (job.start_ts && job.arrival_ts) {
-      job.service_time_d = diffDays(job.start_ts, job.done_ts);
-      job.lead_time_d = diffDays(job.arrival_ts, job.done_ts);
-      job.wait_time_d = diffDays(job.arrival_ts, job.start_ts);
-    }
   }
 
   job.status = status;
@@ -307,20 +285,21 @@ function moveJob(params) {
     from: sourceColumn.id,
     note: ''
   };
-  if (job.is_rework) {
+  if (closesVisit) {
     autoEvent.is_rework = true;
   }
 
   var rawLog = sheet.getRange(row, headers.activity_log_json).getValue();
   var log = parseActivityLog_(rawLog);
 
-  // Modello caso/visita (Fase L2): scrive su 'visite' in aggiunta alla
-  // mutazione in-place su 'jobs' sopra (non ancora rimossa, resta per
-  // compatibilita' fino a L5). Usa il log COSI' COM'E' PRIMA di appendere
-  // l'evento di questo stesso spostamento: la ricerca dell'ingresso nella
-  // colonna di attesa lasciata (sez. 4) deve guardare solo eventi
-  // realmente precedenti a "now".
-  updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now, visitNumberBeforeMove);
+  // Modello caso/visita (Fase L2): start_ts/done_ts/incarico_ts/prep_ts/
+  // visit_number/is_rework/rework_cause/service_time_d/lead_time_d/
+  // wait_time_d non sono piu' salvati su jobs (rimossi in L5) — vivono
+  // solo su 'visite'. Usa il log COSI' COM'E' PRIMA di appendere l'evento
+  // di questo stesso spostamento: la ricerca dell'ingresso nella colonna
+  // di attesa lasciata (sez. 4) deve guardare solo eventi realmente
+  // precedenti a "now".
+  updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
 
   log.push(autoEvent);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
@@ -331,7 +310,7 @@ function moveJob(params) {
 
 // Modello caso/visita (DESIGN_modello_caso_visita.md, sez. 2-4): aggiorna
 // il foglio 'visite' in occasione di uno spostamento. Non tocca 'jobs'.
-function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now, visitNumberBeforeMove) {
+function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now) {
   var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
   if (!visiteSheet) {
     // Non dovrebbe succedere dopo ensureCurrentSchema_() in testa a
@@ -340,7 +319,7 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
     return;
   }
 
-  var opened = ensureOpenVisit_(visiteSheet, job, now, visitNumberBeforeMove);
+  var opened = ensureOpenVisit_(visiteSheet, job, now);
   var activeVisit = opened.visit;
   var activeRow = opened.row;
 
@@ -358,7 +337,7 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
 
     activeVisit = {
       job_id: job.job_id,
-      numero_visita: Number(job.visit_number || 1),
+      numero_visita: Number(activeVisit.numero_visita || 1) + 1,
       apertura_ts: now,
       incarico_ts: '',
       prep_ts: '',
@@ -402,26 +381,30 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
 // prima della Fase L, o migrazione storica L5 non ancora eseguita), ne
 // crea una minima al volo per non bloccare lo spostamento: la
 // materializzazione storica di L5 e' autorevole e la sovrascrivera'.
-function ensureOpenVisit_(visiteSheet, job, now, visitNumberBeforeMove) {
+function ensureOpenVisit_(visiteSheet, job, now) {
   var row = findOpenVisitRow_(visiteSheet, job.job_id);
   if (row > 0) {
     return { row: row, visit: readVisitFromRow_(visiteSheet, row) };
   }
 
+  // Bootstrap raro (dopo L5 ogni job con un log dovrebbe gia' avere le
+  // sue righe 'visite' dalla migrazione storica): senza altra
+  // informazione (job non porta piu' i campi gate — rimossi in L5), si
+  // assume visita 1.
   var visit = {
     job_id: job.job_id,
-    numero_visita: Number(visitNumberBeforeMove || job.visit_number || 1),
+    numero_visita: 1,
     apertura_ts: job.arrival_ts || now,
-    incarico_ts: job.incarico_ts || '',
-    prep_ts: job.prep_ts || '',
-    start_ts: job.start_ts || '',
-    consegna_ts: job.done_ts || '',
+    incarico_ts: '',
+    prep_ts: '',
+    start_ts: '',
+    consegna_ts: '',
     chiusura_ts: '',
     chiusura_tipo: '',
     t_cliente_d: 0,
     t_ente_d: 0,
     t_interno_d: 0,
-    rework_cause: job.rework_cause || ''
+    rework_cause: ''
   };
   appendVisitRow_(visiteSheet, visit);
   return { row: visiteSheet.getLastRow(), visit: visit };
@@ -461,6 +444,40 @@ function appendVisitRow_(sheet, visit) {
   sheet.appendRow(VISITE_HEADERS.map(function(header) {
     return visit[header] === undefined ? '' : visit[header];
   }));
+}
+
+// Fase L5 parte 2/2: visit_number/is_rework/rework_cause/start_ts/
+// done_ts non sono piu' salvati su jobs (rimossi, sez. 9.1 — duplicati
+// con 'visite'). getBoard() e getMetrics() li ricalcolano qui al volo
+// dalla visita PIU' RECENTE del caso (MAX(numero_visita)), cosi':
+// - il frontend continua a funzionare senza modifiche (badge R1/R2,
+//   indicatore "fermo da N giorni", storico rientri in client.html);
+// - pointsStatistics_/monthBuckets_ (Model.gs) — che restano
+//   esplicitamente su jobs per L4 — hanno ancora un done_ts per calcolare
+//   punti completati e timeline.
+function loadJobsWithVisitSummary_() {
+  var ss = getSpreadsheet_();
+  var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+  var visite = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+
+  var latestByJob = {};
+  visite.forEach(function(visit) {
+    var existing = latestByJob[visit.job_id];
+    if (!existing || Number(visit.numero_visita || 1) > Number(existing.numero_visita || 1)) {
+      latestByJob[visit.job_id] = visit;
+    }
+  });
+
+  jobs.forEach(function(job) {
+    var latest = latestByJob[job.job_id];
+    job.visit_number = latest ? Number(latest.numero_visita || 1) : 1;
+    job.is_rework = job.visit_number > 1;
+    job.rework_cause = latest ? (latest.rework_cause || '') : '';
+    job.start_ts = latest ? (latest.start_ts || '') : '';
+    job.done_ts = latest ? (latest.consegna_ts || '') : '';
+  });
+
+  return jobs;
 }
 
 // Sez. 4: durata della permanenza appena conclusa nella colonna stand_by
@@ -648,7 +665,7 @@ function alignOpenVisitFields_(job, warnings) {
     return;
   }
 
-  var opened = ensureOpenVisit_(visiteSheet, job, nowIso_(), job.visit_number);
+  var opened = ensureOpenVisit_(visiteSheet, job, nowIso_());
   var visit = opened.visit;
   visitWarnings.forEach(function(warning) {
     visit[JOB_FIELD_TO_VISIT_FIELD_[warning.field]] = warning.suggestedValue;
@@ -777,6 +794,11 @@ function deleteActivityEvent(params) {
 // resta solo per uso interno di test (testAddJobWithPastArrival_), che
 // deve spostare arrival_ts nel passato senza generare un evento visibile
 // nel diario.
+// Fase L5 parte 2/2: start_ts/done_ts non sono piu' campi di jobs
+// (rimossi, vivono solo su 'visite') — questa funzione di supporto ai
+// test ne correggeva anche loro, ora corregge solo arrival_ts (unico
+// campo rimasto in JOB_HEADERS che questa funzione tocca), il suo unico
+// uso reale (testAddJobWithPastArrival_).
 function correctJobTimestamps(params) {
   var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var jobId = requireParam_(params, 'job_id');
@@ -785,12 +807,12 @@ function correctJobTimestamps(params) {
     throw new Error('Il motivo della correzione e obbligatorio');
   }
 
-  var correctableFields = ['arrival_ts', 'start_ts', 'done_ts'];
-  var providedFields = correctableFields.filter(function(field) {
-    return params[field] !== undefined && params[field] !== '';
-  });
-  if (!providedFields.length) {
-    throw new Error('Specificare almeno uno tra arrival_ts, start_ts, done_ts');
+  var newArrival = params.arrival_ts;
+  if (newArrival === undefined || newArrival === '') {
+    throw new Error('Specificare arrival_ts');
+  }
+  if (!isValidIso8601_(newArrival)) {
+    throw new Error('Formato data non valido per arrival_ts: ' + newArrival);
   }
 
   var row = findRowById_(sheet, 'job_id', jobId);
@@ -803,41 +825,13 @@ function correctJobTimestamps(params) {
   var log = parseJsonArray_(job.correction_log_json);
   var correctionTs = nowIso_();
 
-  providedFields.forEach(function(field) {
-    var newValue = params[field];
-    if (!isValidIso8601_(newValue)) {
-      throw new Error('Formato data non valido per ' + field + ': ' + newValue);
-    }
-    log.push({ ts: correctionTs, field: field, old: job[field] || '', new: newValue, reason: reason });
-    job[field] = newValue;
-  });
-
-  if (job.arrival_ts && job.start_ts && new Date(job.arrival_ts).getTime() > new Date(job.start_ts).getTime()) {
-    throw new Error('arrival_ts non puo essere successivo a start_ts');
-  }
-  if (job.start_ts && job.done_ts && new Date(job.start_ts).getTime() > new Date(job.done_ts).getTime()) {
-    throw new Error('start_ts non puo essere successivo a done_ts');
-  }
-  if (job.arrival_ts && job.done_ts && new Date(job.arrival_ts).getTime() > new Date(job.done_ts).getTime()) {
-    throw new Error('arrival_ts non puo essere successivo a done_ts');
-  }
-
-  if (job.done_ts) {
-    if (job.start_ts) {
-      job.service_time_d = diffDays(job.start_ts, job.done_ts);
-    }
-    if (job.arrival_ts) {
-      job.lead_time_d = diffDays(job.arrival_ts, job.done_ts);
-    }
-    if (job.arrival_ts && job.start_ts) {
-      job.wait_time_d = diffDays(job.arrival_ts, job.start_ts);
-    }
-  }
+  log.push({ ts: correctionTs, field: 'arrival_ts', old: job.arrival_ts || '', new: newArrival, reason: reason });
+  job.arrival_ts = newArrival;
 
   job.correction_log_json = JSON.stringify(log);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ job_id: jobId, corrections_applied: providedFields.length, job: job });
+  return ok_({ job_id: jobId, corrections_applied: 1, job: job });
 }
 
 function deleteJob(params) {

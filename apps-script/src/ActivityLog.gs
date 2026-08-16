@@ -176,8 +176,14 @@ function validateSequence_(events, candidate) {
   return { hardErrors: hardErrors, sequenceWarnings: sequenceWarnings };
 }
 
-// Confronta l'evento candidato con i campi strutturati del job (start_ts,
-// done_ts, arrival_ts) e segnala le incoerenze come suggerimenti, non errori.
+// Confronta l'evento candidato con i campi strutturati ancora su jobs
+// (solo arrival_ts, dopo L5) e con i gate ormai propri della visita
+// aperta (start_ts/done_ts/incarico_ts/prep_ts, rimossi da jobs in L5,
+// sez. 9.1). Per questi ultimi non c'e' piu' un valore corrente da
+// confrontare su jobs: il suggerimento si propone sempre per il ruolo
+// pertinente — applyStructuralAlignment_/alignOpenVisitFields_ (Kanban.gs)
+// lo scrive solo sulla visita aperta, la correzione manuale di un evento
+// e' per definizione autorevole per quell'evento specifico.
 function checkStructuralAlignment_(job, candidate) {
   var warnings = [];
 
@@ -185,20 +191,20 @@ function checkStructuralAlignment_(job, candidate) {
     var columns = readColumns_();
     var column = findColumn_(columns, candidate.to);
 
-    if (column && column.role === 'wip' && (!job.start_ts || compareTs_(job.start_ts, candidate.ts) !== 0)) {
-      warnings.push({ field: 'start_ts', currentValue: job.start_ts || '', suggestedValue: candidate.ts });
+    if (column && column.role === 'wip') {
+      warnings.push({ field: 'start_ts', currentValue: '', suggestedValue: candidate.ts });
     }
 
-    if (column && column.role === 'done' && (!job.done_ts || compareTs_(job.done_ts, candidate.ts) !== 0)) {
-      warnings.push({ field: 'done_ts', currentValue: job.done_ts || '', suggestedValue: candidate.ts });
+    if (column && column.role === 'done') {
+      warnings.push({ field: 'done_ts', currentValue: '', suggestedValue: candidate.ts });
     }
 
-    if (column && column.role === 'backlog' && (!job.incarico_ts || compareTs_(job.incarico_ts, candidate.ts) !== 0)) {
-      warnings.push({ field: 'incarico_ts', currentValue: job.incarico_ts || '', suggestedValue: candidate.ts });
+    if (column && column.role === 'backlog') {
+      warnings.push({ field: 'incarico_ts', currentValue: '', suggestedValue: candidate.ts });
     }
 
-    if (column && column.role === 'prep' && (!job.prep_ts || compareTs_(job.prep_ts, candidate.ts) !== 0)) {
-      warnings.push({ field: 'prep_ts', currentValue: job.prep_ts || '', suggestedValue: candidate.ts });
+    if (column && column.role === 'prep') {
+      warnings.push({ field: 'prep_ts', currentValue: '', suggestedValue: candidate.ts });
     }
   }
 
@@ -425,7 +431,6 @@ function migrateVisiteFromHistory_(ss) {
     jobs_processed: 0,
     jobs_without_log: 0,
     visite_written: 0,
-    job_fields_realigned: 0,
     coherence_warnings: []
   };
 
@@ -434,11 +439,11 @@ function migrateVisiteFromHistory_(ss) {
   }
 
   var allVisite = [];
-  var jobRows = jobs.map(function(job) {
+  jobs.forEach(function(job) {
     var result = computeVisiteFromLog_(job);
     if (!result.visite.length) {
       summary.jobs_without_log++;
-      return jobToRow_(job);
+      return;
     }
 
     summary.jobs_processed++;
@@ -446,24 +451,7 @@ function migrateVisiteFromHistory_(ss) {
       summary.coherence_warnings.push(warning);
     });
     allVisite = allVisite.concat(result.visite);
-
-    // Riallinea anche i campi derivati su jobs (non ancora rimossi, L5
-    // fase 2) alla visita APERTA risultante dalla ricostruzione — la
-    // stessa correzione motivata dal documento bugfix originale (Card
-    // A/Card B), applicata ora con la derivazione corretta invece che
-    // con quella superata basata su 'from'.
-    var lastVisit = result.visite[result.visite.length - 1];
-    var before = JSON.stringify([job.incarico_ts, job.prep_ts, job.start_ts, job.done_ts, job.visit_number, job.rework_cause]);
-    syncJobFieldsFromVisit_(job, lastVisit);
-    var after = JSON.stringify([job.incarico_ts, job.prep_ts, job.start_ts, job.done_ts, job.visit_number, job.rework_cause]);
-    if (before !== after) {
-      summary.job_fields_realigned++;
-    }
-
-    return jobToRow_(job);
   });
-
-  jobsSheet.getRange(2, 1, jobRows.length, JOB_HEADERS.length).setValues(jobRows);
 
   visiteSheet.clear();
   visiteSheet.getRange(1, 1, 1, VISITE_HEADERS.length).setValues([VISITE_HEADERS]);
@@ -578,19 +566,3 @@ function computeVisiteFromLog_(job) {
   return result;
 }
 
-// Allinea i campi derivati su jobs (non ancora rimossi) alla visita
-// APERTA risultante dalla ricostruzione — stesso principio del bootstrap
-// di L2/allineamento di L3, applicato qui in blocco su tutto lo storico.
-function syncJobFieldsFromVisit_(job, lastVisit) {
-  job.incarico_ts = lastVisit.incarico_ts || '';
-  job.prep_ts = lastVisit.prep_ts || '';
-  job.start_ts = lastVisit.start_ts || '';
-  job.done_ts = lastVisit.consegna_ts || '';
-  job.visit_number = lastVisit.numero_visita;
-  job.is_rework = lastVisit.numero_visita > 1;
-  job.rework_cause = lastVisit.rework_cause || '';
-
-  job.service_time_d = (job.start_ts && job.done_ts) ? diffDays(job.start_ts, job.done_ts) : '';
-  job.lead_time_d = (job.arrival_ts && job.done_ts) ? diffDays(job.arrival_ts, job.done_ts) : '';
-  job.wait_time_d = (job.arrival_ts && job.start_ts) ? diffDays(job.arrival_ts, job.start_ts) : '';
-}

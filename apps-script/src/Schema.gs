@@ -1,7 +1,15 @@
+// Fase L5 parte 2/2 (DESIGN_modello_caso_visita.md, sez. 6.2/9.1):
+// rimossi i campi duplicati con 'visite' — visit_number, start_ts,
+// done_ts, service_time_d, lead_time_d, wait_time_d, is_rework,
+// rework_cause, incarico_ts, prep_ts. getBoard()/getMetrics() li
+// ricalcolano al volo dalla visita piu' recente del caso
+// (loadJobsWithVisitSummary_ in Kanban.gs) dove servono ancora per il
+// frontend o per le metriche di stato-corrente su jobs (punti/timeline).
+// Passo irreversibile: eseguito solo dopo che Marco ha verificato la
+// migrazione storica (L5 parte 1/2) su TEST.
 var JOB_HEADERS = [
   'job_id',
   'case_id',
-  'visit_number',
   'title',
   'client',
   'ambassador',
@@ -18,21 +26,12 @@ var JOB_HEADERS = [
   'description',
   'due_date',
   'arrival_ts',
-  'start_ts',
-  'done_ts',
   'invoiced',
-  'service_time_d',
-  'lead_time_d',
-  'wait_time_d',
-  'is_rework',
-  'rework_cause',
   'notes',
   'card_color',
   'checklist_json',
   'correction_log_json',
   'activity_log_json',
-  'incarico_ts',
-  'prep_ts',
   'incarico_chiuso_ts'
 ];
 
