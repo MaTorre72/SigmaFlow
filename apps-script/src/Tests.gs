@@ -176,6 +176,10 @@ function runAllTests() {
     testGetActivityLogFromResolvesTiedTimestamps,
     testMoveJobScriveEventoAuto,
     testMigrateToActivityLogChecklist,
+    testExtractDateFromJobIdParsesValidFormat,
+    testExtractDateFromJobIdReturnsNullForInvalidFormat,
+    testExtractDateFromJobIdReturnsNullForInvalidCalendarDate,
+    testMigrateToActivityLogUsesJobIdDateWhenArrivalTsMissing,
     testMigrateToActivityLogBackfillEventoCreazione,
     testMigrateToActivityLogBackfillNonContraddiceSpostamentiReali,
     testComputeVisiteFromLogWipToWipKeepsFirstStartTs,
@@ -1364,6 +1368,55 @@ function testMigrateToActivityLogChecklist() {
     assertTrue_(after.description.indexOf('--- Checklist migrata ---') !== -1, 'separatore presente');
     assertTrue_(after.description.indexOf('[x] Voce A') !== -1, 'voce completata con [x]');
     assertTrue_(after.description.indexOf('[ ] Voce B') !== -1, 'voce non completata con [ ]');
+  });
+}
+
+// --- Indizio data dal job_id per il backfill (segnalato da Marco sulla
+// migrazione PROD reale: molte card storiche non hanno mai avuto
+// arrival_ts valorizzato, la migrazione ricadeva sulla data del giorno
+// facendo sembrare "creato oggi" un caso vecchio di mesi) ---
+
+function testExtractDateFromJobIdParsesValidFormat() {
+  assertEquals_('2026-07-07T09:00:00+02:00', extractDateFromJobId_('JOB-20260707-7L8R'), 'data e ora 9:00 estratte dal job_id');
+}
+
+function testExtractDateFromJobIdReturnsNullForInvalidFormat() {
+  assertEquals_(null, extractDateFromJobId_('CASE-20260707-5AF4'), 'prefisso diverso da JOB-: null');
+  assertEquals_(null, extractDateFromJobId_('JOB-ABCDEFGH-XXXX'), 'non numerico: null');
+  assertEquals_(null, extractDateFromJobId_(''), 'vuoto: null');
+  assertEquals_(null, extractDateFromJobId_(undefined), 'undefined: null, nessun crash');
+}
+
+function testExtractDateFromJobIdReturnsNullForInvalidCalendarDate() {
+  assertEquals_(null, extractDateFromJobId_('JOB-20260231-XXXX'), 'il 31 febbraio non esiste: null, non fabbrica una data sbagliata');
+}
+
+function testMigrateToActivityLogUsesJobIdDateWhenArrivalTsMissing() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Card senza arrival_ts, con job_id datato' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Simula lo stato osservato su PROD: arrival_ts vuoto, nessun log —
+    // ma il job_id (generato da addJob poco sopra) porta comunque la
+    // data vera di oggi, sufficiente per verificare che venga usata al
+    // posto della data di migrazione "nuda".
+    job.arrival_ts = '';
+    job.activity_log_json = '[]';
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = migrateToActivityLog({ env: 'test' });
+    assertTrue_(result.success, 'migrazione dovrebbe riuscire');
+
+    var expectedTs = extractDateFromJobId_(created.job_id);
+    var log = getActivityLog({ job_id: created.job_id }).data.log;
+    assertEquals_(expectedTs, log[0].ts, 'l\'evento di creazione ricostruito usa la data ricavata dal job_id, non la data della migrazione');
+
+    var jobAfter = readTable_(sheet).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_(expectedTs, jobAfter.arrival_ts, 'arrival_ts si allinea alla data ricavata dal job_id');
   });
 }
 

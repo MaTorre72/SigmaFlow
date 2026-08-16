@@ -288,6 +288,29 @@ function migrateActivityLogData_(ss) {
   return summary;
 }
 
+// Ricava una data indicativa dal job_id (formato JOB-YYYYMMDD-XXXX,
+// generato da generateJobId in Utils.gs), fissando le 9:00 come ora di
+// default — su richiesta di Marco, come indizio migliore della data di
+// migrazione quando arrival_ts manca (§ commento in
+// migrateSingleJobActivityLog_). Non fabbrica nulla se il job_id non
+// segue il formato atteso o incorpora una data non valida (es. giorno
+// 31 di un mese che non lo ha): ritorna null, lasciando che il chiamante
+// ricada sull'ultima risorsa.
+function extractDateFromJobId_(jobId) {
+  var match = /^JOB-(\d{4})(\d{2})(\d{2})-/.exec(String(jobId || ''));
+  if (!match) {
+    return null;
+  }
+  var year = Number(match[1]);
+  var month = Number(match[2]);
+  var day = Number(match[3]);
+  var candidate = new Date(year, month - 1, day, 9, 0, 0);
+  if (candidate.getFullYear() !== year || candidate.getMonth() !== month - 1 || candidate.getDate() !== day) {
+    return null;
+  }
+  return Utilities.formatDate(candidate, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
 // Migra una singola card: aggiunge eventi 'correction' al log a partire
 // da correction_log_json (senza duplicare) e appende la checklist in
 // fondo a description. Muta l'oggetto job passato, ma NON tocca
@@ -320,9 +343,19 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
     var existingMoves = log.filter(function(event) { return event.type === 'move'; })
       .sort(function(a, b) { return compareTs_(a.ts, b.ts); });
     var backfillTo = existingMoves.length ? existingMoves[0].from : (job.status || 'backlog');
+    // Data dell'evento sintetico: arrival_ts se presente; altrimenti,
+    // invece di ricadere subito sulla data di oggi (avrebbe fatto
+    // sembrare "creato oggi" un caso magari vecchio di mesi — segnalato
+    // da Marco sulla migrazione PROD reale, dove molte card storiche non
+    // hanno mai avuto arrival_ts valorizzato), un indizio migliore:
+    // job_id incorpora la data di creazione reale (formato
+    // JOB-YYYYMMDD-XXXX, generato da generateJobId in Utils.gs). Solo se
+    // nessuno dei due e' disponibile si usa la data della migrazione
+    // come ultima risorsa. Non fabbrica una data se il job_id non segue
+    // il formato atteso (extractDateFromJobId_ ritorna null in quel caso).
     log.push({
       id: generateActivityEventId_(),
-      ts: job.arrival_ts || migrationTs,
+      ts: job.arrival_ts || extractDateFromJobId_(job.job_id) || migrationTs,
       type: 'move',
       source: 'auto',
       to: backfillTo || job.status || 'backlog',
