@@ -1,5 +1,5 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 10:15
+Aggiornato: 2026-08-16 14:05
 
 Fase corrente: L3
 Titolo: Modello caso/visita — ActivityLog.gs, allineamento sulla visita aperta
@@ -164,12 +164,49 @@ allineamento durante la migrazione Fase F): **53/53 test passati**
 (nessuna regressione). Push su TEST eseguito e verificato (13/13
 identici).
 
+## Bug trovato e corretto durante il collaudo di Marco (commit `931a45c`)
+
+Marco ha segnalato eventi "WIP -> WIP" / "TO DO -> TO DO" e modifiche
+incoerenti nella Cronologia dopo aver corretto alcuni eventi in test
+ravvicinati. Causa individuata: **bug preesistente dalla Fase G**
+(introduzione dell'activity log, non causato dal modello caso/visita,
+ma trovato durante il suo collaudo). `computeFrom_` (`ActivityLog.gs`)
+calcolava il `from` di ogni evento cercando indipendentemente "l'ultimo
+evento con ts < insertedTs": con due eventi allo **stesso timestamp
+esatto** — facile da ottenere, il campo data/ora della Cronologia in
+`client.html` ha precisione al minuto (`isoToDatetimeLocal_` tronca i
+secondi) — nessuno dei due risultava "prima" dell'altro, ed entrambi
+calcolavano lo stesso `from`, ignorandosi a vicenda.
+
+Corretto sostituendo `computeFrom_` con due funzioni che rispettano
+l'ordine reale della sequenza invece di confrontare ogni evento in
+isolamento: `recalculateMoveFrom_` (per il log gia' completo — lettura
+in `getActivityLog`, ricalcolo dopo `deleteActivityEvent`) e
+`computeFromForCandidate_` (per l'inserimento di un evento nuovo/
+modificato in `buildActivityEventCandidate_` — usato da
+`addActivityEvent`/`updateActivityEvent`). A parita' di timestamp
+esatto, l'ordine di inserimento decide chi viene "prima", non un
+confronto indipendente.
+
+L'evento AUTO "TO DO -> TO DO" visto da Marco e' probabilmente un caso
+diverso, genuino: la card e' stata trascinata e rilasciata nella stessa
+colonna in cui si trovava gia' — non un artefatto di visualizzazione,
+un evento reale auto-registrato da `moveJob` (nessun guardia impedisce
+oggi un "self-move"; non necessariamente un problema, da confermare con
+Marco se e' un comportamento indesiderato o accettabile).
+
+Nuovo test dedicato che riproduce lo scenario dei timestamp identici.
+**54/54 test passati**. Push su TEST eseguito e verificato (13/13
+identici).
+
 ## Prossimo passo
 
-1. **Gate umano**: Marco verifica su TEST che una correzione manuale in
-   Cronologia (es. modificare la data di un evento di spostamento)
-   aggiorni coerentemente anche la riga aperta in `visite`, poi decide
-   se procedere a L4 (`Model.gs`: metriche di governo lette da
-   `visite`) — sessione separata.
+1. **Gate umano**: Marco riverifica su TEST che le correzioni in
+   Cronologia producano ora una sequenza `from`/`to` coerente (incluso
+   il caso di due eventi molto ravvicinati nel tempo), conferma se
+   l'evento "self-move" (stessa colonna di partenza e arrivo) e' un
+   comportamento da bloccare o da lasciare cosi', poi decide se
+   procedere a L4 (`Model.gs`: metriche di governo lette da `visite`)
+   — sessione separata.
 
 Nessuna scrittura su PROD.
