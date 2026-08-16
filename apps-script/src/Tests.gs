@@ -184,7 +184,8 @@ function runAllTests() {
     testDoneCannotReturnDirectlyToWip,
     testVisitConsegnaTsSetOnDoneWithoutClosingVisit,
     testVisitAccumulatesWaitTimeOnStandByExit,
-    testVisitStandByToStandByDoesNotOpenNewVisit
+    testVisitStandByToStandByDoesNotOpenNewVisit,
+    testVisitBootstrapCoincidingWithClosureNumbersCorrectly
   ];
 
   tests.forEach(function(testFn) {
@@ -489,6 +490,45 @@ function testVisitAccumulatesWaitTimeOnStandByExit() {
     var visite = readVisiteForJob_(ss, jobId);
     var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
     assertTrue_(Number(closed.t_cliente_d) >= 0, 't_cliente_d valorizzato numericamente sull\'uscita da ATTESA CLIENTE');
+  });
+}
+
+// Simula un job che esisteva gia' prima del deploy della Fase L (nessuna
+// riga 'visite' ancora presente) e la cui PRIMA mossa toccata dal nuovo
+// codice e' proprio quella che chiude la visita (stand_by -> backlog).
+// Verifica il fix al bootstrap: la visita che si chiude deve prendere il
+// numero PRIMA dell'incremento (2), non quello dopo (3, riservato alla
+// nuova visita che si apre nella stessa mossa).
+function testVisitBootstrapCoincidingWithClosureNumbersCorrectly() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Bootstrap coincidente con chiusura', size_class: 'M' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.visit_number = 2;
+    job.status = 'wait_client';
+    job.start_ts = job.start_ts || testTsMinutesAgo_(120);
+    writeJobToRow_(sheet, row, headers, job);
+
+    assertEquals_(0, readVisiteForJob_(ss, created.job_id).length, 'nessuna riga visite ancora presente (precondizione del test)');
+
+    var moved = moveJob({ job_id: created.job_id, status: 'backlog' });
+    assertTrue_(moved.success, 'moveJob da stand_by (bootstrap) a backlog dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'la mossa deve produrre esattamente due righe: la visita chiusa (bootstrap) e quella nuova');
+
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
+    var opened = visite.filter(function(v) { return Number(v.numero_visita) === 3; })[0];
+
+    assertTrue_(Boolean(closed), 'la visita chiusa deve avere numero_visita 2 (quello di prima della mossa), non 3');
+    assertTrue_(Boolean(closed.chiusura_ts), 'la visita bootstrap deve risultare chiusa da questa stessa mossa');
+    assertEquals_('wait_client', closed.chiusura_tipo, 'chiusura_tipo = colonna di provenienza');
+    assertTrue_(Boolean(opened), 'la nuova visita deve avere numero_visita 3');
+    assertTrue_(Boolean(opened.incarico_ts), 'la nuova visita ha incarico_ts (destinazione backlog)');
   });
 }
 

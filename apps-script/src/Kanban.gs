@@ -239,8 +239,17 @@ function moveJob(params) {
   // updateVisiteForMove_ per gli accumulatori e consegna_ts.
   var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
 
+  // Numero della visita PRIMA di questo spostamento: serve al bootstrap in
+  // updateVisiteForMove_ (sotto) per etichettare correttamente la visita
+  // che si sta chiudendo, nel caso in cui questa sia la prima volta che il
+  // job viene toccato dopo il deploy della Fase L (nessuna riga 'visite'
+  // ancora presente) E questo stesso spostamento la chiuda: senza questo,
+  // il bootstrap userebbe il numero GIA' incrementato sotto, duplicando il
+  // numero della visita nuova invece di quello della visita chiusa.
+  var visitNumberBeforeMove = Number(job.visit_number || 1);
+
   if (closesVisit) {
-    job.visit_number = Number(job.visit_number || 1) + 1;
+    job.visit_number = visitNumberBeforeMove + 1;
     job.is_rework = true;
     job.rework_cause = sourceColumn.id;
   }
@@ -299,7 +308,7 @@ function moveJob(params) {
   // l'evento di questo stesso spostamento: la ricerca dell'ingresso nella
   // colonna di attesa lasciata (sez. 4) deve guardare solo eventi
   // realmente precedenti a "now".
-  updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
+  updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now, visitNumberBeforeMove);
 
   log.push(autoEvent);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
@@ -310,7 +319,7 @@ function moveJob(params) {
 
 // Modello caso/visita (DESIGN_modello_caso_visita.md, sez. 2-4): aggiorna
 // il foglio 'visite' in occasione di uno spostamento. Non tocca 'jobs'.
-function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now) {
+function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now, visitNumberBeforeMove) {
   var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
   if (!visiteSheet) {
     // Non dovrebbe succedere dopo ensureCurrentSchema_() in testa a
@@ -319,7 +328,7 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
     return;
   }
 
-  var opened = ensureOpenVisit_(visiteSheet, job, now);
+  var opened = ensureOpenVisit_(visiteSheet, job, now, visitNumberBeforeMove);
   var activeVisit = opened.visit;
   var activeRow = opened.row;
 
@@ -381,7 +390,7 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
 // prima della Fase L, o migrazione storica L5 non ancora eseguita), ne
 // crea una minima al volo per non bloccare lo spostamento: la
 // materializzazione storica di L5 e' autorevole e la sovrascrivera'.
-function ensureOpenVisit_(visiteSheet, job, now) {
+function ensureOpenVisit_(visiteSheet, job, now, visitNumberBeforeMove) {
   var row = findOpenVisitRow_(visiteSheet, job.job_id);
   if (row > 0) {
     return { row: row, visit: readVisitFromRow_(visiteSheet, row) };
@@ -389,7 +398,7 @@ function ensureOpenVisit_(visiteSheet, job, now) {
 
   var visit = {
     job_id: job.job_id,
-    numero_visita: Number(job.visit_number || 1),
+    numero_visita: Number(visitNumberBeforeMove || job.visit_number || 1),
     apertura_ts: job.arrival_ts || now,
     incarico_ts: job.incarico_ts || '',
     prep_ts: job.prep_ts || '',
