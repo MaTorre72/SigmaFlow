@@ -1,15 +1,40 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 15:40
+Aggiornato: 2026-08-16 16:05
 
-Fase corrente: L5 — COMPLETATA (entrambe le parti)
+Fase corrente: L5 — COMPLETATA; collaudo post-L5 in corso
 Titolo: Modello caso/visita — rimozione campi duplicati da JOB_HEADERS
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
 
-Stato: COMPLETATA — Fase L (L1-L5) chiusa su TEST. In attesa che Marco
-verifichi la board/dashboard live prima di considerare il lavoro
-definitivamente concluso; nessun'altra azione di codice prevista senza
-sua richiesta.
+Stato: Fase L (L1-L5) chiusa su TEST. Marco sta verificando i dati reali
+post-migrazione (foglio `jobs`/`visite` con `activity_log_json`
+completo). Nessuna incoerenza trovata nella ricostruzione finora — ogni
+caso analizzato a mano (incluso JOB-DEMO-1, il piu' complesso con 3
+visite, e alcuni con `from` storicamente contraddittorio) torna
+esattamente coerente con la sequenza reale degli eventi.
+
+## Richiesta aggiuntiva di Marco, fuori programma L (fatta, verificata)
+
+Marco aveva interpretato la casella "Fatturato" nella card come un
+flag di chiusura, aspettandosi una data associata — non esisteva mai,
+era un booleano puro, comportamento pre-esistente non introdotto da
+questa sessione. Rinominata **"Chiuso"** e collegata al campo
+`incarico_chiuso_ts` gia' presente in schema dalla Fase L1 (sez. 3 del
+documento: chiusura manuale dell'incarico, indipendente dai movimenti
+sulla board) — la spunta imposta il timestamp corrente, la rimozione lo
+svuota, nessun re-stamp se il valore non cambia. Il vero ridisegno del
+significato del campo resta per una sessione futura (parole di Marco:
+"faremo successivamente le modifiche del caso").
+
+Nuovo test dedicato. **61/61 test passati**. Push su TEST eseguito e
+verificato (13/13 identici).
+
+## Prossimo passo
+
+In attesa che Marco completi la verifica dei dati post-L5 e confermi
+se: (a) la Fase L (caso/visita) puo' considerarsi conclusa su TEST, (b)
+procedere con la pianificazione PROD (vedi nota separata sopra), o (c)
+altre correzioni mirate emergano dal collaudo.
 
 Fase J e Fase K: chiuse. L1: chiusa, gate umano confermato da Marco
 ("verificato, tutto ok" sul foglio `visite` su TEST) prima di avviare L2.
