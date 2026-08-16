@@ -1,5 +1,5 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 15:10
+Aggiornato: 2026-08-16 15:35
 
 Fase corrente: L5 (parte 1/2 — migrazione storica)
 Titolo: Modello caso/visita — materializzazione visite dal log
@@ -342,18 +342,36 @@ rimozione.
   `migrateVisiteFromHistoryOnTest`, cliccare "Esegui" — nessuna UI
   frontend per questa azione, come gia' per `migrateActivityLogOnTest`).
 
+## Esito della migrazione, eseguita da Marco su TEST
+
+`migrateVisiteFromHistoryOnTest()` eseguita da Marco dall'editor Apps
+Script. Risultato verificato con l'export completo del foglio `visite`
+(62 righe, tutti i 60 job demo + 2 job creati durante i test manuali di
+questa sessione): analisi riga per riga a campione — apertura/chiusura
+coerenti tra visite consecutive, `rework_cause` di ogni visita = 
+`chiusura_tipo` della precedente, gate vuoti quando il ruolo di
+destinazione non li prevede, accumulatori coerenti anche per uscite da
+attesa verso `done` o un'altra attesa. Nessuna anomalia trovata.
+
+Confermato da Marco: `coherence_warnings` vuoto nell'esecuzione (nessun
+rientro diretto attesa/done->WIP anomalo nello storico).
+
+Osservazione positiva: per JOB-DEMO-1 la ricostruzione completa dal log
+intero ha corretto la numerazione/causa che il solo bootstrap
+incompleto di L2 aveva stimato in modo approssimato (chiusura_tipo
+passato da una stima parziale a quella corretta) — prova diretta che la
+migrazione funziona come da disegno.
+
 ## Prossimo passo
 
-1. Marco esegue `migrateVisiteFromHistoryOnTest()` dall'editor Apps
-   Script (ambiente TEST).
-2. **Gate umano**: Marco verifica il risultato — foglio `visite`
-   ricostruito, eventuali `coherence_warnings` nel log di esecuzione
-   (Logger/risposta della funzione) da correggere manualmente via
-   Cronologia se presenti, campi su `jobs` riallineati coerentemente.
-3. Solo dopo conferma esplicita: **L5 parte 2/2** — rimozione dei campi
-   duplicati da `JOB_HEADERS` (`incarico_ts`, `prep_ts`, `start_ts`,
-   `done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d`,
-   `is_rework`, `rework_cause`, `visit_number`) — **l'unico passo
-   irreversibile del programma**, solo TEST, sessione separata.
+Marco ha chiesto di **non procedere ancora** con L5 parte 2/2 (rimozione
+campi duplicati da `JOB_HEADERS`): vuole verificare altro prima di
+autorizzare il passo irreversibile. **Fermo qui, in attesa.**
+
+Quando Marco conferma esplicitamente: **L5 parte 2/2** — rimozione dei
+campi duplicati da `JOB_HEADERS` (`incarico_ts`, `prep_ts`, `start_ts`,
+`done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d`, `is_rework`,
+`rework_cause`, `visit_number`) — l'unico passo irreversibile del
+programma, solo TEST, sessione separata.
 
 Nessuna scrittura su PROD.
