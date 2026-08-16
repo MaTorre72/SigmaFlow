@@ -7,13 +7,13 @@ Questa guida porta SigmaFlow da repository locale a Web App Apps Script.
 Spreadsheet database creato e verificato:
 
 - Nome: `SigmaFlow Database`
-- ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
-- URL: <https://docs.google.com/spreadsheets/d/1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q>
+- ID: `15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g` (`DEFAULT_SPREADSHEET_ID` in Constants.gs)
+- URL: <https://docs.google.com/spreadsheets/d/15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g>
 - Timezone: `Europe/Rome`
-- Tab verificati: `jobs`, `cases`, `config`
+- Tab verificati: `jobs`, `visite`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
 - Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec>
-- Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@16`)
+- Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@19`)
 - Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
 - Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=test>
 
@@ -27,15 +27,20 @@ Opzione automatica:
 
 1. Riconnetti il connettore Google Drive in Codex concedendo i permessi di creazione/upload file.
 2. Importa `outputs/sigmaflow/SigmaFlow Database.xlsx` come Google Sheets nativo.
-3. Verifica che siano presenti i tab `jobs`, `cases`, `config`.
+3. Verifica che siano presenti i tab `jobs`, `visite`, `config`.
 
 Opzione manuale:
 
 1. Apri Google Drive con l'account Workspace.
 2. Crea un nuovo Google Sheet chiamato `SigmaFlow Database`.
-3. Crea tre tab: `jobs`, `cases`, `config`.
-4. Copia le intestazioni dagli array `JOB_HEADERS`, `CASE_HEADERS` e `CONFIG_HEADERS` in `apps-script/src/Schema.gs`.
+3. Crea tre tab: `jobs`, `visite`, `config`.
+4. Copia le intestazioni dagli array `JOB_HEADERS`, `VISITE_HEADERS` e `CONFIG_HEADERS` in `apps-script/src/Schema.gs`.
 5. In `config`, aggiungi le righe default definite in `SIGMAFLOW.DEFAULT_CONFIG`.
+
+In pratica, il modo più semplice è comunque eseguire `setupSigmaFlow()`
+una volta dall'editor Apps Script (sezione 3 sotto): crea/allinea tutti
+i fogli automaticamente, questa procedura manuale serve solo come
+riferimento di cosa quella funzione fa.
 
 ## 2. Progetto Apps Script
 
@@ -101,9 +106,9 @@ cd apps-script
 2. Verifica che la board mostri le colonne: NOTE, BACKLOG, TO DO, WIP, ATTESA CLIENTE, ATTESA ENTI, ATTESA MT/GC, DA INVIARE / DA FATTURARE.
 3. Crea un job di prova.
 4. Trascinalo in `WIP`, poi in `ATTESA CLIENTE`, poi in `TO DO`.
-5. Verifica nello Sheet TEST che il ritorno da `ATTESA CLIENTE` abbia impostato `is_rework`, `visit_number` e `rework_cause = wait_client`.
+5. Verifica nel foglio `visite` che il ritorno da `ATTESA CLIENTE` abbia chiuso la visita 1 (`rientro_ts`/`rientro_da = wait_client`) e aperto la visita 2 (`rework_cause = wait_client`); sulla board il badge mostra `R1`.
 6. Trascinalo in `DA INVIARE / DA FATTURARE`.
-7. Verifica nello Sheet che `start_ts`, `done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d` siano valorizzati.
+7. Verifica nel foglio `visite` che la visita aperta abbia `consegna_ts` valorizzato.
 8. Verifica che le colonne mostrino conteggio job e somma punti.
 9. Crea una nuova colonna, assegnale un ruolo, spostala a sinistra/destra e prova a rinominarla.
 10. Apri la tab Dashboard e verifica stato generale, affidabilita' dei dati, flusso, rientri, tempi, lavoro presente e capacita' senza errori o valori `NaN`.
