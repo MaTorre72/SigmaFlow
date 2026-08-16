@@ -1,8 +1,8 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 14:40
+Aggiornato: 2026-08-16 15:10
 
-Fase corrente: L4
-Titolo: Modello caso/visita — Model.gs, metriche di governo da 'visite'
+Fase corrente: L5 (parte 1/2 — migrazione storica)
+Titolo: Modello caso/visita — materializzazione visite dal log
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
 
@@ -279,15 +279,81 @@ fonte dati, non solo che i numeri combacino per coincidenza:
 **57/57 test passati**. Push su TEST eseguito e verificato (13/13
 identici).
 
+Marco ha confermato L4 e chiesto di procedere con L5 nella stessa
+sessione.
+
+## L5, parte 1/2 — migrazione storica (fatta, in attesa di verifica)
+
+Per esplicita indicazione del documento, L5 si divide in due passi con
+un gate umano nel mezzo: (1) materializzazione storica di `visite` dal
+log — fatta ora; (2) rimozione dei campi duplicati da `JOB_HEADERS` —
+**NON fatta**, richiede conferma esplicita separata di Marco dopo aver
+verificato il risultato del passo 1 su TEST.
+
+**`computeVisiteFromLog_`** (`ActivityLog.gs`): ricostruisce la
+sequenza di visite di un caso dall'intero `activity_log_json`,
+applicando in ordine cronologico la stessa regola di apertura/chiusura
+gia' live in `moveJob` (sez. 2). Scelta di progetto importante: **non
+legge mai il campo `from` memorizzato** (che puo' essere
+contraddittorio — vedi "Card A" in
+`BUGFIX_derivazione_gate_dal_log.md`: creazione con `to=wip` ma un
+evento successivo che dichiara `from=backlog` mai realmente visitato) —
+ricostruisce la sequenza delle colonne solo dal `to` di ogni evento, in
+ordine. Quel tipo di incoerenza non puo' quindi piu' verificarsi in
+questa derivazione. Un rientro diretto da attesa/`done` a WIP nello
+storico (impedito dal guardia live, ma possibile su dati precedenti o
+corretti manualmente aggirandolo) viene raccolto in un report
+(`coherence_warnings`), **non corretto automaticamente** — stesso
+principio del documento bugfix.
+
+**`migrateVisiteFromHistory_`** (+ azione API `migrateVisiteFromHistory`,
+solo `env:test`, + wrapper `migrateVisiteFromHistoryOnTest` per
+l'editor Apps Script, stesso pattern di `migrateActivityLogOnTest` della
+Fase F): sovrascrive **integralmente** `visite` con la ricostruzione
+autorevole (le righe bootstrap/live di L2/L3 erano provvisorie), e
+riallinea i campi derivati ancora presenti su `jobs`
+(`incarico_ts`/`prep_ts`/`start_ts`/`done_ts`/`visit_number`/
+`is_rework`/`rework_cause`/`service_time_d`/`lead_time_d`/
+`wait_time_d`) alla visita aperta risultante — chiude il cerchio sul
+bug originale (Card A/Card B) con la derivazione ora corretta, invece
+che lasciare quei campi con eventuali valori sbagliati fino alla
+rimozione.
+
+## Test e verifica
+
+- 4 nuovi test dedicati, inclusi i due criteri di accettazione
+  **espliciti** del documento bugfix: `testComputeVisiteFromLogWipToWipKeepsFirstStartTs`
+  (wip->wip non sposta `start_ts` dal primo ingresso) e
+  `testComputeVisiteFromLogStandByReentryOpensNewVisit` (rientro
+  legittimo da attesa aggiorna correttamente il gate). Piu'
+  `testComputeVisiteFromLogFlagsIllegalDirectReentryToWip` e
+  `testMigrateVisiteFromHistoryEndToEnd`.
+- Verifica aggiuntiva su dataset piu' ampio (60 job demo, via harness
+  Node, non solo i test unitari): `jobs_processed: 60,
+  jobs_without_log: 0, visite_written: 60, job_fields_realigned: 39,
+  coherence_warnings: []` — nessun crash, nessun warning di
+  incoerenza segnalato su questo set sintetico.
+- **61/61 test passati**. Push su TEST eseguito e verificato (13/13
+  identici).
+- **La migrazione NON e' ancora stata eseguita sui dati reali di
+  TEST** — `migrateVisiteFromHistory` e' solo distribuita, non
+  lanciata. Va eseguita da Marco (stesso meccanismo della Fase F:
+  aprire l'editor Apps Script, selezionare la funzione
+  `migrateVisiteFromHistoryOnTest`, cliccare "Esegui" — nessuna UI
+  frontend per questa azione, come gia' per `migrateActivityLogOnTest`).
+
 ## Prossimo passo
 
-1. **Gate umano**: Marco verifica su TEST che il cruscotto mostri le
-   metriche attese — **ricordando che per lo storico non ancora
-   toccato da uno spostamento sotto il nuovo codice i numeri saranno
-   parziali/bassi fino a L5** (non un bug, gia' concordato sopra).
-2. Se conferma, prossimo passo e' **L5** (migrazione storica +
-   rimozione dei campi duplicati da `JOB_HEADERS`) — l'unico passo
-   irreversibile del programma, richiede un gate umano esplicito
-   *prima* di qualunque rimozione, solo su TEST. Sessione separata.
+1. Marco esegue `migrateVisiteFromHistoryOnTest()` dall'editor Apps
+   Script (ambiente TEST).
+2. **Gate umano**: Marco verifica il risultato — foglio `visite`
+   ricostruito, eventuali `coherence_warnings` nel log di esecuzione
+   (Logger/risposta della funzione) da correggere manualmente via
+   Cronologia se presenti, campi su `jobs` riallineati coerentemente.
+3. Solo dopo conferma esplicita: **L5 parte 2/2** — rimozione dei campi
+   duplicati da `JOB_HEADERS` (`incarico_ts`, `prep_ts`, `start_ts`,
+   `done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d`,
+   `is_rework`, `rework_cause`, `visit_number`) — **l'unico passo
+   irreversibile del programma**, solo TEST, sessione separata.
 
 Nessuna scrittura su PROD.
