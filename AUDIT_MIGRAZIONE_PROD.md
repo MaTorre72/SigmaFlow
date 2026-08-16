@@ -205,6 +205,28 @@ sul foglio sbagliato.
 - [ ] Decisione su deployment presa (P4)
 - [ ] Comunicazione al team pianificata (P8)
 
+## 8bis. Prossimi miglioramenti (dopo la messa in produzione, fuori scope da questa migrazione)
+
+Elenco raccolto da Marco il 16/08/2026, da riprendere a migrazione e
+deploy completati — nessuna priorità assegnata tra i quattro punti:
+
+- **Frontend lentissimo** — da profilare (board/dashboard), causa non
+  ancora indagata in questa sessione.
+- **Ricostruzione date reali delle card di PROD** — molte card reali
+  hanno `arrival_ts`/`apertura_ts` mancanti (vedi §2.3); oltre al
+  fallback già implementato (data dal nome del job, `extractDateFromJobId_`),
+  Marco ha indicato mail e date di creazione delle cartelle di progetto
+  come fonti future per una ricostruzione più accurata caso per caso.
+- **Pulizia di vecchi campi non usati** — `notes` (nessuna UI, nessun
+  ruolo in migrazione: rimovibile senza rischio in qualunque momento);
+  `checklist_json`/`correction_log_json` (nessuna UI, ma letti da
+  `migrateSingleJobActivityLog_`/step1 della migrazione — da NON
+  toccare finché la migrazione reale di PROD, P5 sotto, non li ha
+  consumati almeno una volta).
+- **Migliore allineamento e lettura della dashboard alla dispensa FSC**
+  — riferimento a un documento/manuale FSC esterno non ancora condiviso
+  con questa sessione; da riprendere quando Marco lo fornirà.
+
 ## 8. Cosa NON è incluso in questo documento (aggiornato 16/08/2026, sera)
 
 - Non è stata presa nessuna decisione sul merge dei branch a `main`.
