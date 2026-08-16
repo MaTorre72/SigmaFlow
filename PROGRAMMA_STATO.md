@@ -199,14 +199,33 @@ Nuovo test dedicato che riproduce lo scenario dei timestamp identici.
 **54/54 test passati**. Push su TEST eseguito e verificato (13/13
 identici).
 
+## Fix aggiuntivo: self-move senza feedback (commit `401d474`)
+
+Marco ha confermato la causa dell'evento "TO DO -> TO DO": la board a
+volte non da' un feedback visivo immediato del drag, l'utente rilascia
+la card piu' volte pensando che non si sia spostata — genera uno
+spostamento verso la colonna in cui la card si trova gia', un evento
+"X -> X" senza alcun significato, solo fuorviante in Cronologia.
+
+`moveJob` ora riconosce questo caso (colonna di destinazione = colonna
+attuale del job, confrontate normalizzate) e ritorna subito senza
+toccare Cronologia, gate su `jobs` ne' `visite`. Nuovo test dedicato.
+**55/55 test passati**. Push su TEST eseguito e verificato (13/13
+identici).
+
+Nota: la causa di fondo (board poco reattiva, nessun feedback visivo
+del drag) resta un problema di UX/performance del frontend, non
+affrontato qui — questo fix elimina solo il sintomo nella Cronologia,
+non il ritardo percepito nel drag-and-drop.
+
 ## Prossimo passo
 
 1. **Gate umano**: Marco riverifica su TEST che le correzioni in
-   Cronologia producano ora una sequenza `from`/`to` coerente (incluso
-   il caso di due eventi molto ravvicinati nel tempo), conferma se
-   l'evento "self-move" (stessa colonna di partenza e arrivo) e' un
-   comportamento da bloccare o da lasciare cosi', poi decide se
-   procedere a L4 (`Model.gs`: metriche di governo lette da `visite`)
-   — sessione separata.
+   Cronologia producano ora una sequenza `from`/`to` coerente e che i
+   rilasci ripetuti sulla stessa colonna non lascino piu' traccia, poi
+   decide se procedere a L4 (`Model.gs`: metriche di governo lette da
+   `visite`) — sessione separata. Se la lentezza della board resta un
+   problema, va trattata come richiesta a parte (non e' nel programma
+   Activity Log / caso-visita).
 
 Nessuna scrittura su PROD.
