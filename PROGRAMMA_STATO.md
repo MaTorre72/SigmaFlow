@@ -1,11 +1,53 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 18:15
+Aggiornato: 2026-08-16 18:40
 
-Fase corrente: Migrazione PROD — R3 eseguita con successo, in attesa
-della verifica a campione di Marco (R4)
+Fase corrente: Migrazione PROD — R4 in corso (verifica a campione),
+trovato e corretto un problema nel fallback delle date mancanti
 Titolo: eseguiMigrazioneCompletaSuCopiaProd — vedi AUDIT_MIGRAZIONE_PROD.md v2
 
-## R0-R3 completati (2026-08-16)
+## R4 — osservazione di Marco: date odierne diffuse, non un errore ma un limite noto (2026-08-16)
+
+Marco ha notato, verificando i dati della R3, che moltissime card
+mostrano `arrival_ts`/`apertura_ts` di oggi anche se il `job_id`
+suggerisce una creazione molto precedente (es. `JOB-20260707-...`).
+
+**Verificato con certezza prima di agire** (non fidandosi della sola
+lettura manuale di una tabella enorme): scenario dedicato nell'harness
+con un caso "arrival_ts gia' popolato nello schema vecchio" e uno
+"arrival_ts vuoto" — confermato che **quando arrival_ts era davvero
+presente, la migrazione lo preserva correttamente** (non e' corruzione
+di dati). Il fallback su "oggi" scattava solo per i casi genuinamente
+senza `arrival_ts` — molto piu' diffuso su PROD reale di quanto
+osservato nei dati demo di TEST (dove praticamente ogni card aveva
+sempre un `arrival_ts`).
+
+**Migliorato il fallback** (`migrateSingleJobActivityLog_`,
+`ActivityLog.gs`): quando manca sia il log sia `arrival_ts`, prima di
+ricadere sulla data della migrazione si prova a ricavare una data dal
+`job_id` stesso (formato `JOB-YYYYMMDD-XXXX`, generato da
+`generateJobId`), con le 9:00 come ora di default — su indicazione
+esplicita di Marco. Nuova funzione `extractDateFromJobId_`, non
+fabbrica mai una data se il job_id non segue il formato atteso o
+incorpora una data di calendario non valida. 4 nuovi test dedicati,
+**69/69 test passati**. Push su TEST eseguito e verificato (identici).
+
+**Dichiarato esplicitamente da Marco come soluzione solo parziale**:
+questo e' il primo passo di un lavoro piu' ampio di "ricostruzione
+della memoria" delle card storiche (email, date di creazione delle
+cartelle di progetto) — rimandato a sessioni successive, "andiamo con
+ordine".
+
+**Nota operativa non ancora risolta**: la copia di PROD gia' migrata in
+R3 ha gia' "congelato" le date sbagliate (oggi) per le card senza
+arrival_ts, dentro gli eventi di creazione gia' scritti — il backfill
+non sovrascrive un evento di creazione gia' presente (evita
+duplicazioni). Per beneficiare del fix serve rieseguire la migrazione
+su una copia **fresca** di PROD, non su quella gia' processata. Da
+confermare con Marco se procedere cosi' per continuare R4, o se accetta
+di proseguire la verifica sulla copia attuale sapendo che le date-oggi
+verranno riviste comunque in un secondo momento (ricostruzione memoria).
+
+## R0-R3 completati (2026-08-16, riepilogo)
 
 Marco ha creato la copia reale di PROD ("Backup di SigmaFlow Database",
 id `1xUMWhAK8tovUU_gHEqizi9WDoqxTULzzfaygAfYL3FI`, R0) e confermato di
