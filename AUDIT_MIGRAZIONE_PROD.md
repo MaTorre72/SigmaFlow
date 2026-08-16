@@ -205,13 +205,21 @@ sul foglio sbagliato.
 - [ ] Decisione su deployment presa (P4)
 - [ ] Comunicazione al team pianificata (P8)
 
-## 8. Cosa NON è incluso in questo documento
+## 8. Cosa NON è incluso in questo documento (aggiornato 16/08/2026, sera)
 
 - Non è stata presa nessuna decisione sul merge dei branch a `main`.
-- `eseguiMigrazioneCompleta_` non è stata ancora scritta.
-- Non è stata toccata né letta direttamente nessuna risorsa PROD.
-- Non è stata presa nessuna decisione sulla dismissione del foglio
-  `cases`/`refreshCaseVisitCount_`/`markRework`.
+- Non è stata toccata né letta direttamente nessuna risorsa PROD (solo
+  la copia).
+- **Dismissione del foglio `cases`/`refreshCaseVisitCount_`/`markRework`**:
+  proposta da Marco dopo R3, esplicitamente rimandata ("non è urgente,
+  la affrontiamo dopo") — non prima che R3/R4 siano chiuse. Tocca
+  `Kanban.gs` in piu' punti (`refreshCaseVisitCount_` scrive su `cases`
+  a ogni `moveJob`/`addJob`/`deleteJob`), non e' solo eliminare un
+  foglio — richiede una sessione dedicata quando Marco vorra'
+  riprenderla.
+- `eseguiMigrazioneCompleta_`/`eseguiMigrazioneCompletaSuCopiaProd`:
+  scritte, testate, in uso per R3 (vedi `PROGRAMMA_STATO.md` per
+  l'esito piu' recente) — questa nota della v2 originale e' superata.
 
 ---
 
