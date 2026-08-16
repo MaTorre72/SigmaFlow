@@ -167,15 +167,26 @@ codice nuovo diventi quello servito dall'URL pubblico
 Azione compiuta direttamente da Marco nell'editor, nessun intervento di
 Claude Code possibile ne' necessario qui.
 
+## Migrazione PROD e messa online — COMPLETATA (2026-08-16 ~21:35)
+
+Deployment `@19` (nuova versione sulla stessa distribuzione `@18`,
+stesso URL pubblico) confermato da Marco come aggiornato. Team avvisato
+(P8). Con questo si chiude l'intera sequenza R0-R5/P4-P8 di
+`AUDIT_MIGRAZIONE_PROD.md`: PROD vero gira ora sul modello caso/visita
+completo (L1-L5), senza `case_id`/`markRework`, con `visite` come fonte
+delle metriche di governo (L4).
+
 ## Prossimo passo
 
-Attesa conferma di Marco che il deployment `@18` e' aggiornato. Poi:
-- **P8**: comunicazione al team sul cambio di comportamento della board
-  (guardia estesa a `done`, rientri diretti da attesa/completato a WIP
-  bloccati, nuova casella "Chiuso").
-- Decisione, ancora aperta, sul merge di `codex/case-visit-model` (via
-  `codex/activity-log-prep-role`) a `main` — non affrontata finora in
-  questa sessione, da riprendere quando Marco lo chiede esplicitamente.
+Nessuna azione tecnica pendente sulla migrazione. Restano aperte, non
+urgenti, da riprendere quando Marco lo chiede esplicitamente:
+- Decisione sul merge di `codex/case-visit-model` (via
+  `codex/activity-log-prep-role`) a `main` — non affrontata in questa
+  sessione.
+- I quattro miglioramenti raccolti in `AUDIT_MIGRAZIONE_PROD.md` §8bis
+  (frontend lento, ricostruzione date reali, pulizia `notes`/
+  `checklist_json`/`correction_log_json`, allineamento dashboard alla
+  dispensa FSC).
 
 ---
 
