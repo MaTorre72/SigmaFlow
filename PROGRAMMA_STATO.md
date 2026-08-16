@@ -1,243 +1,91 @@
-# Stato programma: SigmaFlow — Activity Log
-Aggiornato: 2026-08-12 21:35
+# Stato programma: SigmaFlow — Activity Log / Modello caso-visita
+Aggiornato: 2026-08-15 12:30
 
-Fase corrente: K
-Titolo: Ruolo `prep` per TO DO — gate incarico/prep/lavorazione
-Branch: `codex/activity-log-prep-role` (da `main`, commit 4b1076a)
+Fase corrente: L1
+Titolo: Modello caso/visita — Ricognizione + schema additivo
+Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`, commit da56212)
+Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
 
-Stato: CODICE COMPLETO E VERIFICATO SU TEST. In attesa del gate umano
-finale di Marco prima di valutare l'estensione a PROD (vedi sezione
-"Gate umano" in fondo).
+Stato: IN_ATTESA_GATE_UMANO
 
-Nota su PROD scoperta durante la ricognizione: TO DO su PROD ha oggi
-ruolo `wip` (non `backlog` come si era visto su TEST — Marco aveva gia'
-sperimentato manualmente il cambio su TEST in precedenza, i due ambienti
-erano disallineati fra loro). La riassegnazione a `prep` va quindi fatta
-manualmente anche su PROD quando si decide di procedere, con lo stesso
-percorso usato qui su TEST (Impostazioni colonna, non `Constants.gs`).
+Fase J e Fase K: chiuse per decisione di Marco. Nota tecnica: nessuna
+delle due e' stata mersa su `main` (12 commit di differenza,
+verificato) — resta una decisione/azione separata ed esplicita di
+Marco, non presa da Claude Code in questa sessione.
 
-## Riepilogo implementazione (K1-K6)
-- K1: `SCHEMA_VERSION` 3->4, `'prep'` aggiunto a `COLUMN_ROLES`, TO DO in
-  `DEFAULT_COLUMNS` passato a `role: 'prep'` (fallback, non sufficiente
-  da solo per ambienti con `config.columns_json` gia' popolato — vedi
-  nota PROD sopra).
-- K2: campi additivi `incarico_ts`, `prep_ts` in coda a `JOB_HEADERS`.
-- K3: `moveJob` distingue ingresso in BACKLOG (`incarico_ts`), TO
-  DO/prep (`prep_ts`) e WIP (`start_ts`); il rientro da stand-by verso
-  prep non ringiovanisce piu' `start_ts`; il divieto di rientro diretto
-  da attesa a WIP resta invariato (ancorato all'id colonna).
-- K4: `checkStructuralAlignment_` propone anche `incarico_ts`/`prep_ts`
-  nel dialog di allineamento, con etichette leggibili.
-- K5: `currentWorkload_` conta `preparing`, esposto in dashboard come
-  "In preparazione".
-- K6: 4 nuovi test + assert aggiuntivo su `testAutomaticReworkFromStandBy`.
-  Suite completa: **39/39 passati**.
+## Audit obbligatorio pre-L1 (eseguito, riportato, confermato da Marco)
 
-Bug non previsto dall'addendum, trovato e corretto: la select "Tipo di
-colonna" in `board.html` aveva le opzioni cablate in HTML, senza
-`'prep'` — senza la correzione il nuovo ruolo non sarebbe stato
-assegnabile dall'interfaccia utente.
+1. Nomi/ruoli colonna (`Constants.gs`): `COLUMN_ROLES` include `prep`
+   (Fase K); `DEFAULT_COLUMNS` con `todo` su ruolo `prep`. Confermato.
+2. `JOB_HEADERS`/`CASE_HEADERS` (`Schema.gs`): contenuto esatto riportato
+   e confermato — `incarico_ts`/`prep_ts` gia' presenti da Fase K,
+   `CASE_HEADERS` a 7 campi invariato dalla ricognizione originale.
+3. Guardia anti-reingresso-WIP e ramo rework in `moveJob`
+   ([Kanban.gs:225-236](apps-script/src/Kanban.gs:225)): confermati nella
+   forma attuale. Divergenza segnalata (non bloccante per L1, rilevante
+   per L2): il guardia copre solo provenienza `stand_by`, il documento
+   (par. 2) vuole l'estensione anche a `done` — verra' gestita in L2.
+4. `markRework`: ancora in `routeAction_`, confermato **non richiamata**
+   da `client.html` (nessun match). `refreshCaseVisitCount_`: non e' una
+   route API, e' un helper interno chiamato da `moveJob`/`addJob` ad ogni
+   spostamento/creazione — attivo, non "scollegato dal frontend" nello
+   stesso senso di `markRework` (il frontend lo attiva indirettamente).
 
-## Verifica dal vivo su TEST
-- Codice pushato e confrontato file per file col live (clasp pull +
-  diff) — coincide.
-- TO DO riassegnato a ruolo `prep` su TEST tramite l'app (non tramite
-  codice), verificato che l'opzione "In preparazione" sia disponibile e
-  persista dopo reload.
-- Dashboard TEST: "In preparazione: 7", coerente col conteggio reale
-  della colonna TO DO.
-- Evento di spostamento manuale verso TO DO -> dialog di allineamento
-  propone correttamente "Data inizio preparazione (prep_ts)", non
-  start_ts. Confermato "Aggiorna" -> evento persistito e verificato
-  anche dopo reload completo della pagina.
-- Evento di spostamento manuale verso WIP (non-regressione) -> dialog
-  propone correttamente "Data inizio lavorazione (start_ts)" come prima
-  di Fase K, persistito correttamente.
-- Falsa pista investigata e chiusa: durante il primo giro di prove il
-  salvataggio dell'evento verso TO DO sembrava fallire silenziosamente
-  (nessun errore, ma l'evento non appariva). Riprodotto a fondo anche
-  offline con l'harness (dati seed realistici, stesso percorso di
-  migrazione schema) senza mai fallire — la causa e' risultata
-  instabilita' dello strumento di automazione browser usato per i test
-  (disconnessioni intermittenti dell'estensione, confermate dai log),
-  non un difetto di codice. Ripetendo la prova con calma dopo la
-  riconnessione, il salvataggio e' riuscito ed e' rimasto persistito
-  anche dopo reload completo. Nessuna modifica al codice necessaria per
-  questo punto.
-- Eventi di prova ripuliti dalla card usata per i test (Cliente 1) al
-  termine della verifica.
+**Correzione di Marco al piano originale**: NON ridefinire `CASE_HEADERS`
+sul foglio `cases` esistente — `refreshCaseVisitCount_` gira ad ogni
+`moveJob`/`addJob` e scriverebbe su colonne inesistenti nel momento
+stesso del cambio intestazione, rompendo ogni spostamento sulla board.
+Creato invece un foglio **nuovo e separato** `visite`. `cases`,
+`CASE_HEADERS` e `refreshCaseVisitCount_` restano completamente
+invariati e funzionanti — ignorati, non rotti. La dismissione di
+`cases` e delle funzioni collegate sara' un passo separato, successivo,
+quando `visite` sara' comprovata (non prima di L5+).
 
-## Gate umano (dall'addendum, non ancora dato da Marco)
+## Lavoro svolto in L1 (additivo, verificato)
 
-Da verificare tu stesso su TEST, poi scrivere "verificato, procedi" per
-sbloccare l'estensione a PROD:
-- [ ] una card che entra in TO DO riceve `prep_ts`, non `start_ts`
-- [ ] una card che entra in WIP riceve `start_ts` normalmente
-- [ ] una card riaperta da attesa verso TO DO mantiene il vecchio
-      `start_ts` (non "ringiovanito") — coperto da test automatico,
-      non ripetuto manualmente da Claude Code in questa sessione
-- [ ] il tentativo di riaprire una card direttamente in WIP resta
-      bloccato dall'interfaccia (invariato, coperto da test automatico)
-- [ ] la dashboard TEST mostra "In preparazione" con un conteggio
-      sensato
+- `Constants.gs`: `SIGMAFLOW.SHEETS.VISITE = 'visite'`,
+  `SCHEMA_VERSION` 4 -> 5.
+- `Schema.gs`: nuovo `VISITE_HEADERS` secondo la sezione 9.2 del
+  documento di design — `job_id`, `numero_visita` (identita' composta,
+  nessun id sintetico aggiunto), `apertura_ts`, `incarico_ts`,
+  `prep_ts`, `start_ts`, `consegna_ts`, `chiusura_ts`, `chiusura_tipo`,
+  `t_cliente_d`, `t_ente_d`, `t_interno_d`, `rework_cause`. Registrato in
+  `setupSigmaFlow` con lo stesso pattern di jobs/cases/config
+  (`ensureSheet_`).
+- `Schema.gs`: aggiunto `incarico_chiuso_ts` in coda a `JOB_HEADERS`
+  (chiusura definitiva manuale del caso, indipendente dalla board).
+  **Nessun campo rimosso** da `JOB_HEADERS` — la rimozione dei campi
+  duplicati (`incarico_ts`, `prep_ts`, `start_ts`, `done_ts`,
+  `service_time_d`, `lead_time_d`, `wait_time_d`, `is_rework`,
+  `rework_cause`, `visit_number`) e' prevista solo in L5, dopo che
+  L2-L4 avranno dimostrato che la lettura da `visite` funziona.
 
-Punti 1, 2 e 5 gia' osservati direttamente da Claude Code durante la
-verifica sopra; restano comunque nella lista perche' l'addendum chiede
-la conferma esplicita di Marco, non solo l'osservazione di Claude Code.
+## Verifica
 
-Ex-condizioni bloccanti di avvio, entrambe risolte da Marco prima di
-iniziare il lavoro:
+- Harness offline: creato un foglio TEST sintetico via `setupSigmaFlow()`
+  — foglio `visite` creato con le 13 intestazioni esatte attese; foglio
+  `cases` verificato bit-per-bit invariato (le 7 colonne originali,
+  nessuna modifica); `jobs` verificato con `incarico_chiuso_ts`
+  presente.
+- Suite test completa: **41/41 passati**, nessuna regressione.
+- Push su TEST: **eseguito con successo** (dopo che Marco ha rifatto il
+  login `clasp`). Verificato con `clasp pull` in directory isolata +
+  diff riga per riga contro i sorgenti locali per tutti i 13 file
+  (`ActivityLog.gs`, `Constants.gs`, `Kanban.gs`, `Model.gs`,
+  `Schema.gs`, `Utils.gs`, `Tests.gs`, `appsscript.json`, `board.html`,
+  `client.html`, `dashboard.html`, `index.html`, `style.html`) —
+  **identici**, nessuna divergenza. Lo schema v5 con il foglio `visite`
+  e `incarico_chiuso_ts` e' ora live sul progetto Apps Script TEST.
 
-1. Fase J considerata COMPLETATA ai fini del gate dell'addendum, dopo
-   verifica di rischio richiesta esplicitamente da Marco. Scoperta
-   rilevante emersa dalla verifica: la Web App PROD reale usata dal team
-   (`docs/google-workspace-setup.md`, deployment pinnato
-   `AKfycbxKZMfSDbFMI7.../exec?env=prod`) e' ferma alla versione
-   "timestamps-fix", precedente a tutto il lavoro sull'Activity Log —
-   diversa dalla URL `/dev` usata per l'intero smoke test, che segue
-   sempre l'ultimo codice pushato. Quindi il merge di oggi NON e' mai
-   arrivato agli utenti reali di PROD: nessun rischio di disallineamento
-   tra codice nuovo e dati non migrati, perche' il codice nuovo su PROD
-   semplicemente non gira ancora. Il "deploy vero" (pubblicare una nuova
-   versione sul deployment pinnato PROD + migrazione dati) resta un passo
-   a se', non ancora programmato, da trattare come cutover reale quando
-   Marco decide — non una formalita' della Fase J.
-2. CLAUDE.md recuperato da `codex/activity-log-recon`, stesso
-   procedimento usato per `PROGRAMMA_ACTIVITY_LOG.md`.
+## Prossimo passo
 
-## Fase J (storico, chiuso)
-Nota storica: CLAUDE.md, richiesto in lettura dall'istruzione di avvio,
-non esisteva nel branch corrente (codex/activity-log-frontend) ne' in
-main prima del recupero sopra — esisteva solo su
-codex/activity-log-recon, come accadeva per PROGRAMMA_ACTIVITY_LOG.md
-prima del recupero manuale del 2026-08-12.
+1. **Gate umano**: Marco verifica sul foglio Google TEST che
+   `setupSigmaFlow()` (o il primo caricamento della board, che triggera
+   `ensureCurrentSchema_`) abbia creato il foglio `visite` con le
+   intestazioni corrette e che `cases` sia rimasto intatto, poi conferma
+   esplicitamente prima di procedere a L2 (`moveJob`: regola di
+   apertura/chiusura visita) — L2 e' una sessione Claude Code separata,
+   non questa.
 
-Verifica di chiusura Fase J:
-- Codice live su TEST confrontato file per file con i sorgenti locali
-  (clasp pull in cartella isolata + diff) — tutti i file coincidono,
-  incluse le due correzioni frontend rimaste non committate da Fase I
-  (form annidato non valido in board.html, refresh campi "Correggi
-  timestamp" in client.html): ora committate (7e0e2f9).
-- Smoke test 12 punti della specifica frontend: 12/12 confermati, l'ultimo
-  (punto 12, drag-and-drop) verificato a mano da Marco direttamente.
-- Merge eseguito 2026-08-12: `codex/activity-log-frontend` -> `main`
-  (commit 8cb5c3d, merge --no-ff), dopo conferma esplicita di Marco che
-  ha scavalcato consapevolmente la regola "mai in autonomia" del
-  programma per questo solo passaggio. Contiene gia' tutto il lavoro di
-  `codex/activity-log-backend` (ne era discendente) e i contenuti di
-  `codex/activity-log-recon` (gia' copiati). Non sono stati fusi
-  separatamente backend/recon (ridondante) ne' timestamps-fix (gia' in
-  main). Suite test harness rilanciata sul codice unito: 35/35 passati
-  prima del push.
-- Migrazione PROD: NON eseguita e NON eseguibile con il codice attuale.
-  `migrateToActivityLog()` (ActivityLog.gs:166) rifiuta esplicitamente
-  qualunque ambiente diverso da TEST; non esiste una variante PROD (solo
-  `migrateActivityLogOnTest()`, che forza sempre TEST). Il blocco e'
-  intenzionale, non un dimenticanza. Per procedere serve prima scrivere
-  una funzione dedicata tipo `migrateActivityLogOnProd()` sul modello di
-  quella per TEST — decisione rimandata a quando Marco vorra' riprendere
-  il tema, non presa di riflesso in questa sessione.
-
-## Fase I (storico)
-Stato: SMOKE TEST ESEGUITO IN AUTONOMIA (via Claude in Chrome, autorizzato da Marco) — 11/12 punti confermati su TEST, poi punto 12 confermato a mano da Marco
-
-Criteri di accettazione:
-[x] Inserimento evento move valido -> appare nel log con badge MANUALE — verificato live su TEST
-[x] Data futura -> blocco inline immediato — implementato (verifica statica, non ripetuta live)
-[x] Warning sequenza -> dialog HTML custom con descrizione chiara -> conferma -> evento salvato — verificato live su TEST (Fase H/I precedente)
-[x] Warning allineamento -> dialog con valori corretti -> scelta utente rispettata — verificato live su TEST (dialog "Allinea i campi strutturati", start_ts aggiornato)
-[x] Modifica evento manuale -> valori precompilati correttamente — verificato live su TEST (Fase I precedente)
-[x] Eliminazione evento manuale -> scompare dal log — verificato live su TEST: creato evento di test, cancellato con dialog di conferma, verificato "Nessun evento registrato" anche dopo reload completo della pagina (persistenza server confermata)
-[x] Evento auto -> nessuna icona modifica/cancellazione — verificato via revisione codice: client.html righe 940-963, guardia `if (!isAuto)` attorno alla creazione di editButton/deleteButton; bloccato anche lato server (deleteActivityEvent lancia EVENTO_AUTO_NON_ELIMINABILE per source==='auto')
-[~] Trascinare una card (moveJob) -> evento AUTO compare in Cronologia — NON verificabile live: il drag-and-drop nativo HTML5 della board non si simula in modo affidabile con lo strumento di automazione browser disponibile (limite gia' noto, analogo al problema con i <select> nativi). Copertura alternativa: il test harness Node (35/35 test, incluso test dedicato su moveJob che verifica creazione evento auto con timestamp corretto) verifica la logica server; il rendering del badge AUTO e l'assenza di icone sono verificati via codice.
-
-Nota su un falso allarme: durante il primo giro di test la cancellazione
-sembrava non avere effetto (evento ancora visibile in lista subito dopo
-la conferma). Ripetendo il test da zero (nuovo evento creato ad hoc,
-cancellato, verificato con screenshot immediati e poi con reload
-completo) la cancellazione ha funzionato correttamente end-to-end. Non e'
-stata trovata alcuna causa applicativa: sospetto una lettura prematura
-dello screenshot rispetto al refresh asincrono della lista nel primo
-tentativo, non un bug di codice. Nessuna modifica al codice è stata
-necessaria.
-
-Prossima fase: J (deploy e chiusura — gate umano)
-
-Per sbloccare la Fase J serve la conferma esplicita di Marco, in
-particolare sul punto 12 (drag reale mai osservato da un umano in questa
-sessione) e in generale sull'intero smoke test qui riassunto. Se Marco
-conferma (anche solo verificando il punto 12 a mano, che richiede 10
-secondi), scrivere "procedi con fase J" per sbloccare il gate finale.
-
-Note operative permanenti (invariate):
-- Gate umani reali del programma: Fase F (gia' superata) e Fase J (prossima).
-- Routine cloud attiva su codex/activity-log-backend (trig_01WrQXQAv2a2Rw8DfhmwGRNG)
-  — NON vede questo aggiornamento (vive su codex/activity-log-frontend).
-  Da riconfigurare se si vuole che la routine prosegua in autonomia oltre
-  questo punto; al momento il lavoro procede su richiesta diretta di Marco.
-- Push sempre verificato con clasp pull + diff.
-
-Note specifiche Fase I:
-- Deviazione da specifica: layout desktop a tab invece di colonne
-  affiancate — decisione presa in Fase H, confermata funzionante da
-  Marco dopo il fix del bug di navigazione, non toccata qui.
-- "old" per le correzioni via form e' sempre letto da state.activeJob[field]
-  al momento dell'invio (sia in creazione sia in modifica) — la spec non
-  specifica esplicitamente il comportamento in modifica; interpretazione
-  scelta per semplicita' e coerenza.
-- Dopo un salvataggio con align_fields, i campi aggiornati vengono
-  applicati anche otticamente a state.activeJob lato client (la risposta
-  di addActivityEvent/updateActivityEvent non include l'intero job
-  aggiornato, solo l'evento) — cosi' riaprendo il form o il tab
-  Informazioni i valori restano coerenti senza un reload completo.
-
-## TEMA APERTO — revisione del modello dati (non ancora avviata)
-
-Durante lo smoke test e' emersa una discussione approfondita con Marco,
-non ancora chiusa in una decisione operativa. Riassunto per non perderla
-in una sessione futura:
-
-1. Bug di sostanza confermato: il pannello "Correggi timestamp" (tab
-   Informazioni) chiama ancora `correctJobTimestamps` (Kanban.gs:550),
-   che scrive SOLO su `correction_log_json` — un log separato, invisibile
-   in Cronologia. Le correzioni fatte da li' non appaiono mai
-   nell'Activity Log. Va deprecato in favore dell'evento "Correzione"
-   gia' implementato in Fase I.
-2. Scoperta sulla configurazione reale delle colonne: TO DO ha oggi ruolo
-   `wip`, identico a WIP (Constants.gs:24) — quindi `start_ts` scatta gia'
-   al primo ingresso in TO DO, non quando il lavoro arriva davvero in WIP.
-3. Direzione concordata con Marco: l'Activity Log (il "diario") deve
-   diventare l'UNICA fonte di verita'. I campi strutturati
-   (arrival_ts/start_ts/done_ts e i nuovi gate) diventano una cache
-   calcolata automaticamente da una funzione unica che rilegge il log
-   dopo ogni sua modifica — non piu' scritti/allineati manualmente,
-   elimina la scelta opzionale "Aggiorna/Mantieni" del dialog di
-   allineamento.
-4. Gate da coprire (cap. 11.4.1 della dispensa fsc.pdf): richiesta
-   (creazione), pronto a partire (primo ingresso ruolo backlog —
-   corrisponde a "Incarichi/Lavoro pronto" in produzione), inizio
-   lavorazione (primo ingresso ruolo wip), consegna (ultimo ingresso
-   ruolo done), riapertura, attese. Proposta: oltre ai gate "di
-   business", calcolare anche una mappa granulare per-colonna (tempo
-   cumulato per ogni colonna attraversata, es. TO DO separato da WIP,
-   ogni tipo di attesa — cliente/enti/interna — separato) derivata dal
-   log, senza dover moltiplicare i ruoli colonna.
-5. Domanda ancora aperta per Marco: TO DO e WIP restano fusi sotto lo
-   stesso gate "inizio lavorazione" (comportamento attuale) o si vuole un
-   gate ufficiale separato per l'ingresso in WIP vero? (La granularita'
-   per-colonna del punto 4 risponde comunque a livello di dettaglio,
-   indipendentemente da questa scelta.)
-6. Obbligo esplicito di Marco, prioritario su tutto: MAI perdere dati.
-   Piano di sicurezza concordato: nessuna colonna schema eliminata;
-   `correction_log_json` esistente va migrato come eventi `correction`
-   dentro `activity_log_json` (non scartato); per job con storia
-   incompleta i gate nuovi possono restare mancanti/imprecisi ma nessun
-   dato grezzo va sovrascritto per "inventarli"; qualunque ricalcolo va
-   verificato su TEST con backup prima di essere anche solo proposto per
-   PROD, che resta comunque sempre una decisione/azione di Marco.
-
-Prossimo passo, quando Marco decide di riprendere il tema: rispondere al
-punto 5, poi Claude Code scrive un design tecnico dettagliato (nuove
-colonne di schema, elenco funzioni da riscrivere, piano di migrazione)
-come revisione formale del programma — da trattare come nuova fase
-dedicata, non come modifica libera dentro fasi gia' chiuse.
+Nessuna scrittura su PROD. Nessuna modifica a `moveJob`, `ActivityLog.gs`
+o `Model.gs` in questa sessione, come richiesto.
