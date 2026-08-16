@@ -1,12 +1,89 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 16:18
+Aggiornato: 2026-08-16 17:15
 
-Fase corrente: L5 — COMPLETATA; collaudo post-L5 in corso
-Titolo: Modello caso/visita — rimozione campi duplicati da JOB_HEADERS
+Fase corrente: Migrazione PROD — R2 completata (orchestratrice scritta
+e testata), in attesa di revisione prima di R3 (copia reale di PROD)
+Titolo: eseguiMigrazioneCompleta_ — vedi AUDIT_MIGRAZIONE_PROD.md v2
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
-Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
+Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6); `AUDIT_MIGRAZIONE_PROD.md` v2 (sez. 4-5) per la migrazione PROD
 
-Stato: Fase L (L1-L5) chiusa su TEST. Marco sta verificando i dati reali
+## Migrazione PROD — R2 (scritta, testata su TEST sintetico, fermata per revisione)
+
+Su istruzione esplicita di Marco (messaggio `claude "..."`, con
+riferimento ad `AUDIT_MIGRAZIONE_PROD.md` v2 sez. 4-5): scritta
+`eseguiMigrazioneCompleta_(ss, params)` — orchestratrice unica per i 4
+passi verso il modello caso/visita (allineamento schema K/L1, backfill
+Fase G, correzione `columns_json`, migrazione storica L5 parte 1). NON
+include L5 parte 2 (rimozione campi, irreversibile) — resta un gesto
+separato, come specificato.
+
+**Ricognizione preliminare** (richiesta esplicitamente prima di
+scrivere codice): confermati i nomi esatti di `migrateActivityLogData_`,
+`migrateVisiteFromHistory_`, `computeVisiteFromLog_` (invariati).
+Confermato che `setupSigmaFlow()`/`ensureCurrentSchema_()` **non
+accettano un parametro `ss`** — risolvono sempre lo spreadsheet tramite
+la Script Property globale `PROP_SPREADSHEET_ID`.
+
+**Due problemi reali trovati e corretti durante la stesura**, entrambi
+riprodotti con un test isolato prima di decidere la correzione (non
+assunti):
+
+1. **Ordine dei passi**: eseguire il backfill Fase G *prima*
+   dell'allineamento schema (come nell'elenco concettuale originale,
+   1-2-3-4) corrompe i dati — `jobToRow_` scrive un array nella forma
+   di `JOB_HEADERS` *corrente* dentro un foglio la cui intestazione e'
+   ancora quella vecchia: le colonne si disallineano silenziosamente
+   (dati shiftati di posizione). Corretto l'ordine interno di
+   esecuzione (schema PRIMA, poi backfill) — i nomi dei campi nel
+   risultato restano quelli richiesti, per continuita' con la
+   descrizione a 4 passi.
+2. **Risoluzione dello spreadsheet nelle chiamate annidate**:
+   `migrateActivityLogData_`/`migrateVisiteFromHistory_` accettano `ss`
+   in superficie, ma funzioni richiamate al loro interno
+   (`checkStructuralAlignment_` → `readColumns_` → `readConfig_` →
+   `getSpreadsheet_()`, e la scrittura su `visite` in
+   `alignOpenVisitFields_`) risolvono lo spreadsheet tramite la Script
+   Property globale, non tramite `ss`. Corretto scambiando
+   `PROP_SPREADSHEET_ID` sul foglio target per l'**intera**
+   orchestrazione (stesso principio di `withTestSpreadsheet_`/
+   `withEnvironment_` in `Utils.gs`), non solo per il passo di
+   allineamento schema.
+
+`fixPrepColumnRole_(ss)` (nuova): corregge il ruolo della colonna che
+`DEFAULT_COLUMNS` assegna a `prep` (oggi `todo`) se sul foglio live
+risulta ancora un ruolo diverso — **generica**, confronta
+`columns_json` live con `DEFAULT_COLUMNS` per scoprire quale id
+dovrebbe avere ruolo `prep`, non hardcoded sul valore osservato su PROD
+(`AUDIT_MIGRAZIONE_PROD.md` sez. 2.1). Corregge solo il campo `role`,
+lascia `label`/`color`/`order`/`hidden` invariati.
+
+`params.confermaNome` deve corrispondere esattamente a `ss.getName()`,
+altrimenti lancia un errore senza modificare nulla.
+
+**Test**: 5 nuovi test dedicati, incluso un end-to-end
+(`testEseguiMigrazioneCompletaEndToEndOnOldSchemaData`) che riproduce
+esattamente la forma di `JOB_HEADERS` osservata su PROD (31 colonne,
+senza `activity_log_json`) e il `columns_json` reale (TO DO a ruolo
+`wip`). Estesa anche `gas-harness.js` (`deleteSheet`/`getName`
+mancanti su `MockSpreadsheet`). **65/65 test passati**. Push su TEST
+eseguito e verificato (13/13 identici).
+
+**Non eseguita su nessuna copia di dati reali** — solo su TEST
+sintetico (harness Node), come richiesto esplicitamente. Nessuna azione
+su PROD. La Script Property `SIGMAFLOW_TEST_SPREADSHEET_ID` non e'
+stata toccata, punta ancora al TEST originale.
+
+### Prossimo passo (fermo qui, in attesa di revisione)
+
+Per procedere a **R3** (esecuzione su una copia reale di PROD, per
+AUDIT_MIGRAZIONE_PROD.md sez. 5) serve: (1) Marco crea la copia Google
+Sheets di PROD (R0); (2) Marco punta `SIGMAFLOW_TEST_SPREADSHEET_ID`
+alla copia (R1); (3) richiesta esplicita separata per eseguire
+`eseguiMigrazioneCompleta_` sulla copia (R3) — non prima.
+
+---
+
+Stato precedente (Fase L, chiusa): Marco sta verificando i dati reali
 post-migrazione (foglio `jobs`/`visite` con `activity_log_json`
 completo). Nessuna incoerenza trovata nella ricostruzione finora — ogni
 caso analizzato a mano (incluso JOB-DEMO-1, il piu' complesso con 3
