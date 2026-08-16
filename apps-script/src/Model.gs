@@ -578,14 +578,14 @@ function indexBy_(rows, key) {
 }
 
 // Tempo di servizio della visita (DESIGN_modello_caso_visita.md, sez. 5):
-// consegna_ts - start_ts, oppure chiusura_ts - start_ts se la visita si
+// consegna_ts - start_ts, oppure rientro_ts - start_ts se la visita si
 // e' chiusa su un rientro senza mai raggiungere done.
 function visitServiceTimeDays_(visit) {
   if (visit.start_ts && visit.consegna_ts) {
     return diffDays(visit.start_ts, visit.consegna_ts);
   }
-  if (visit.start_ts && visit.chiusura_ts && !visit.consegna_ts) {
-    return diffDays(visit.start_ts, visit.chiusura_ts);
+  if (visit.start_ts && visit.rientro_ts && !visit.consegna_ts) {
+    return diffDays(visit.start_ts, visit.rientro_ts);
   }
   return 0;
 }

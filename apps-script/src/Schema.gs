@@ -52,6 +52,13 @@ var CASE_HEADERS = [
 // successivo (L5+), non questa sotto-fase. Identita' della riga:
 // job_id + numero_visita (composta, nessun campo aggiuntivo introdotto
 // rispetto a quanto elencato nel documento).
+// rientro_ts/rientro_da (rinominati da chiusura_ts/chiusura_tipo su
+// richiesta di Marco: il vecchio nome si confondeva con
+// incarico_chiuso_ts su jobs, un concetto completamente diverso —
+// questi due segnano solo quando/da dove il caso e' rientrato,
+// chiudendo QUESTA visita e aprendone una nuova, non una chiusura
+// definitiva). Vedi renameVisiteChiusuraFields_ sotto per la migrazione
+// del nome sui dati gia' presenti.
 var VISITE_HEADERS = [
   'job_id',
   'numero_visita',
@@ -60,8 +67,8 @@ var VISITE_HEADERS = [
   'prep_ts',
   'start_ts',
   'consegna_ts',
-  'chiusura_ts',
-  'chiusura_tipo',
+  'rientro_ts',
+  'rientro_da',
   't_cliente_d',
   't_ente_d',
   't_interno_d',
@@ -70,10 +77,35 @@ var VISITE_HEADERS = [
 
 var CONFIG_HEADERS = ['key', 'value', 'description'];
 
+// Rinomina una tantum, in loco, delle intestazioni chiusura_ts/
+// chiusura_tipo -> rientro_ts/rientro_da su un foglio 'visite' che ha
+// ancora il nome precedente. Necessaria perche' il riallineamento
+// automatico (alignSheetHeaders_) confronta i nomi delle colonne uno a
+// uno: senza questo passo tratterebbe il vecchio nome come "rimosso" e
+// il nuovo come "aggiunto", perdendo i dati gia' scritti. Rinominando
+// solo il testo della cella di intestazione (non i valori, che restano
+// nella stessa colonna), alignSheetHeaders_ trova gia' il nome giusto e
+// preserva tutto. Idempotente: se l'intestazione vecchia non c'e' piu',
+// non fa nulla.
+function renameVisiteChiusuraFields_(ss) {
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (!sheet || sheet.getLastRow() < 1) {
+    return;
+  }
+  var headers = getHeaderMap_(sheet);
+  if (headers.chiusura_ts) {
+    sheet.getRange(1, headers.chiusura_ts).setValue('rientro_ts');
+  }
+  if (headers.chiusura_tipo) {
+    sheet.getRange(1, headers.chiusura_tipo).setValue('rientro_da');
+  }
+}
+
 function setupSigmaFlow() {
   var ss = getSpreadsheet_();
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
+  renameVisiteChiusuraFields_(ss);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));

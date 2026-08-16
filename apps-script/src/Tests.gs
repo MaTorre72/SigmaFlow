@@ -429,7 +429,7 @@ function testVisitWipToWipDoesNotOpenNewVisit() {
     var visite = readVisiteForJob_(ss, created.job_id);
     assertEquals_(1, visite.length, 'wip->wip non deve aprire una nuova visita');
     assertEquals_(1, Number(visite[0].numero_visita), 'numero_visita resta 1');
-    assertTrue_(!visite[0].chiusura_ts, 'la visita resta aperta');
+    assertTrue_(!visite[0].rientro_ts, 'la visita resta aperta');
   });
 }
 
@@ -449,11 +449,11 @@ function testVisitStandByReentryOpensNewVisit() {
     var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
     var opened = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
 
-    assertTrue_(Boolean(closed.chiusura_ts), 'la visita 1 deve risultare chiusa');
-    assertEquals_('wait_client', closed.chiusura_tipo, 'chiusura_tipo = colonna di provenienza');
+    assertTrue_(Boolean(closed.rientro_ts), 'la visita 1 deve risultare chiusa');
+    assertEquals_('wait_client', closed.rientro_da, 'rientro_da = colonna di provenienza');
     assertTrue_(Boolean(opened.apertura_ts), 'la visita 2 deve avere apertura_ts');
     assertTrue_(Boolean(opened.incarico_ts), 'la visita 2 deve avere incarico_ts (destinazione backlog)');
-    assertEquals_('wait_client', opened.rework_cause, 'rework_cause = chiusura_tipo della visita precedente');
+    assertEquals_('wait_client', opened.rework_cause, 'rework_cause = rientro_da della visita precedente');
   });
 }
 
@@ -473,7 +473,7 @@ function testVisitDoneReentryTreatedLikeStandBy() {
     var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
     var opened = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
 
-    assertEquals_('done', closed.chiusura_tipo, 'chiusura_tipo = done');
+    assertEquals_('done', closed.rientro_da, 'rientro_da = done');
     assertTrue_(Boolean(closed.consegna_ts), 'consegna_ts della visita 1 resta valorizzato');
     assertTrue_(Boolean(opened.prep_ts), 'la visita 2 deve avere prep_ts (destinazione todo/prep)');
 
@@ -511,7 +511,7 @@ function testVisitConsegnaTsSetOnDoneWithoutClosingVisit() {
     var visite = readVisiteForJob_(ss, created.job_id);
     assertEquals_(1, visite.length, 'l\'ingresso in done non apre una nuova visita');
     assertTrue_(Boolean(visite[0].consegna_ts), 'consegna_ts valorizzato al primo ingresso in done');
-    assertTrue_(!visite[0].chiusura_ts, 'la visita resta aperta: puo\' ancora rientrare');
+    assertTrue_(!visite[0].rientro_ts, 'la visita resta aperta: puo\' ancora rientrare');
   });
 }
 
@@ -557,7 +557,7 @@ function testVisitStandByToStandByDoesNotOpenNewVisit() {
 
     var visite = readVisiteForJob_(ss, created.job_id);
     assertEquals_(1, visite.length, 'spostamento tra due stand_by non apre una nuova visita');
-    assertTrue_(!visite[0].chiusura_ts, 'la visita resta aperta');
+    assertTrue_(!visite[0].rientro_ts, 'la visita resta aperta');
     assertTrue_(Number(visite[0].t_cliente_d) >= 0, 't_cliente_d aggiornato sull\'uscita dalla prima attesa');
   });
 }
@@ -1479,9 +1479,9 @@ function testComputeVisiteFromLogStandByReentryOpensNewVisit() {
 
     assertEquals_(2, result.visite.length, 'il rientro da attesa deve aprire una nuova visita');
     assertEquals_('2026-01-02T09:00:00+02:00', result.visite[0].start_ts, 'start_ts visita 1');
-    assertEquals_('wait_client', result.visite[0].chiusura_tipo, 'chiusura_tipo visita 1');
+    assertEquals_('wait_client', result.visite[0].rientro_da, 'rientro_da visita 1');
     assertEquals_('2026-01-11T09:00:00+02:00', result.visite[1].start_ts, 'start_ts visita 2 = nuovo ingresso in wip dopo il rientro');
-    assertEquals_('wait_client', result.visite[1].rework_cause, 'rework_cause visita 2 = chiusura_tipo della precedente');
+    assertEquals_('wait_client', result.visite[1].rework_cause, 'rework_cause visita 2 = rientro_da della precedente');
   });
 }
 

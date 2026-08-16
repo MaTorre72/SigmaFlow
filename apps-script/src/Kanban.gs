@@ -209,8 +209,8 @@ function addJob(params) {
       prep_ts: targetColumn.role === 'prep' ? now : '',
       start_ts: targetColumn.role === 'wip' ? now : '',
       consegna_ts: targetColumn.role === 'done' ? now : '',
-      chiusura_ts: '',
-      chiusura_tipo: '',
+      rientro_ts: '',
+      rientro_da: '',
       t_cliente_d: 0,
       t_ente_d: 0,
       t_interno_d: 0,
@@ -331,8 +331,8 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
   }
 
   if (closesVisit) {
-    activeVisit.chiusura_ts = now;
-    activeVisit.chiusura_tipo = sourceColumn.id;
+    activeVisit.rientro_ts = now;
+    activeVisit.rientro_da = sourceColumn.id;
     writeVisitToRow_(visiteSheet, activeRow, activeVisit);
 
     activeVisit = {
@@ -343,8 +343,8 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
       prep_ts: '',
       start_ts: '',
       consegna_ts: '',
-      chiusura_ts: '',
-      chiusura_tipo: '',
+      rientro_ts: '',
+      rientro_da: '',
       t_cliente_d: 0,
       t_ente_d: 0,
       t_interno_d: 0,
@@ -399,8 +399,8 @@ function ensureOpenVisit_(visiteSheet, job, now) {
     prep_ts: '',
     start_ts: '',
     consegna_ts: '',
-    chiusura_ts: '',
-    chiusura_tipo: '',
+    rientro_ts: '',
+    rientro_da: '',
     t_cliente_d: 0,
     t_ente_d: 0,
     t_interno_d: 0,
@@ -416,7 +416,7 @@ function findOpenVisitRow_(sheet, jobId) {
   var headers = getHeaderMap_(sheet);
   var values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
   for (var i = 0; i < values.length; i++) {
-    if (values[i][headers.job_id - 1] === jobId && !values[i][headers.chiusura_ts - 1]) {
+    if (values[i][headers.job_id - 1] === jobId && !values[i][headers.rientro_ts - 1]) {
       return i + 2;
     }
   }

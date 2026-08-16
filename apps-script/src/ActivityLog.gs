@@ -505,8 +505,8 @@ function computeVisiteFromLog_(job) {
       prep_ts: '',
       start_ts: '',
       consegna_ts: '',
-      chiusura_ts: '',
-      chiusura_tipo: '',
+      rientro_ts: '',
+      rientro_da: '',
       t_cliente_d: 0,
       t_ente_d: 0,
       t_interno_d: 0,
@@ -542,8 +542,8 @@ function computeVisiteFromLog_(job) {
     }
 
     if (sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep')) {
-      currentVisit.chiusura_ts = event.ts;
-      currentVisit.chiusura_tipo = sourceColumn.id;
+      currentVisit.rientro_ts = event.ts;
+      currentVisit.rientro_da = sourceColumn.id;
       openVisit(event.ts, sourceColumn.id);
     }
 
