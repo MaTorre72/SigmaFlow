@@ -1,9 +1,47 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 19:05
+Aggiornato: 2026-08-16 19:15
 
-Fase corrente: Migrazione PROD — R4 chiusa, in attesa di decisione su
-P4-P8 (deploy/migrazione su PROD vero)
-Titolo: R0-R4 completate su copia di PROD — vedi AUDIT_MIGRAZIONE_PROD.md v2
+Fase corrente: Dismissione foglio `cases` — completata su TEST
+Titolo: removeCasesSheet_ — vedi AUDIT_MIGRAZIONE_PROD.md §8
+
+## Dismissione foglio `cases` (2026-08-16 19:15)
+
+Su richiesta esplicita di Marco (rimandata dopo R3, ripresa ora dopo la
+chiusura di R4): rimosso `CASE_HEADERS`, `addCase`,
+`refreshCaseVisitCount_` e tutte le chiamate (`addJob`/`moveJob`/
+`deleteJob`); `createImplicitCase_` semplificata a generare solo l'id
+(il concetto di "caso" — `job_id`/`case_id` — resta valido, solo senza
+piu' una riga propria da mantenere allineata a ogni spostamento).
+`SCHEMA_VERSION` 7->8. Nuova `removeCasesSheet_(ss)` (idempotente,
+chiamata da `setupSigmaFlow`): elimina il foglio se ancora presente —
+qui non c'e' nulla da preservare (a differenza della rinomina
+`rientro_ts`/`rientro_da` in L1bis), `total_visits`/`is_open` erano gia'
+ridondanti con `visite`/`jobs`, mai letti dal frontend (verificato:
+nessun riferimento in `client.html`/`board.html`/`dashboard.html`).
+
+Verificato con uno scenario dedicato: foglio `cases` preesistente (come
+l'attuale TEST live) + `SCHEMA_VERSION` vecchia in property -> prossimo
+`getBoard()` lo rimuove correttamente, dati di `jobs` intatti. Test
+aggiornati (nuova asserzione positiva che il foglio non esiste piu'
+dopo `setupSigmaFlow`). **69/69 test passati**. Push su TEST eseguito e
+verificato (13/13 identici).
+
+**Importante**: il prossimo caricamento reale della board su TEST (bump
+di `SCHEMA_VERSION`) rimuovera' automaticamente il foglio `cases` dal
+foglio Google reale, con i suoi dati — irreversibile come le altre
+rimozioni di schema di questo programma. `markRework`/
+`markRowAsRework_` non toccate (gia' dormienti/degradate da L5, non
+scrivono su `cases`).
+
+## Prossimo passo
+
+Verifica di Marco sulla board/dashboard live di TEST dopo il prossimo
+caricamento. Resta aperta la decisione su P4-P8 dell'audit PROD (deploy
++ migrazione su PROD vero), non affrontata in questa sessione.
+
+---
+
+## Cronologia precedente (Migrazione PROD — R0-R4)
 
 ## R4 chiusa (2026-08-16 19:05)
 
