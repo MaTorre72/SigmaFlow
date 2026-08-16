@@ -1,8 +1,8 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
 Aggiornato: 2026-08-16 10:15
 
-Fase corrente: L2
-Titolo: Modello caso/visita — moveJob, regola di apertura/chiusura visita
+Fase corrente: L3
+Titolo: Modello caso/visita — ActivityLog.gs, allineamento sulla visita aperta
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
 
@@ -128,14 +128,48 @@ passando il numero pre-mossa esplicitamente. Nuovo test dedicato
 riproduce lo scenario — **49/49 test passati**. Push su TEST rieseguito
 e riverificato (13/13 identici).
 
+Marco ha confermato ("va bene così") l'assunzione di bootstrap dopo aver
+riverificato su TEST. Fase L2 chiusa. Procede L3 nella stessa sessione,
+per esplicita richiesta di Marco ("procedi con L3").
+
+## L3 — lavoro svolto (Kanban.gs)
+
+Ricognizione: `applyStructuralAlignment_` (Kanban.gs) e' condivisa da
+`addActivityEvent`, `updateActivityEvent`, `deleteActivityEvent` (via
+`checkStructuralAlignment_`) e dal ricalcolo della migrazione Fase F
+(`migrateSingleJobActivityLog_`, unico altro chiamante). Nessun "dialog
+di conferma" separato nel frontend: le correzioni si allineano gia' in
+automatico e silenziosamente (comportamento invariato dalla Fase G).
+`client.html` verificato: **nessun riferimento a `visite`**, nessuna
+modifica frontend necessaria.
+
+Estesa `applyStructuralAlignment_` per allineare, oltre al campo su
+`jobs` come gia' faceva, il campo corrispondente sulla **visita aperta
+corrente** in `visite` (`incarico_ts`/`prep_ts`/`start_ts`, e
+`done_ts` -> `consegna_ts`). `arrival_ts` esclusa (campo di caso, non
+di visita, sez. 6.3). Bootstrap riusato da L2 se la visita non esiste
+ancora.
+
+**Limite esplicito, dichiarato nel codice**: allinea sempre la visita
+APERTA corrente, non quella a cui l'evento corretto apparteneva
+storicamente (una correzione su un evento molto vecchio, appartenente
+a una visita gia' chiusa, aggiorna comunque la visita aperta oggi).
+Identificare con precisione la visita storica giusta e' compito della
+migrazione autorevole di L5, non di questo allineamento live — stessa
+lettura data al testo del documento ("scrivere sulla visita aperta
+corrente").
+
+4 nuovi test dedicati (allineamento su add/update/delete di un evento,
+allineamento durante la migrazione Fase F): **53/53 test passati**
+(nessuna regressione). Push su TEST eseguito e verificato (13/13
+identici).
+
 ## Prossimo passo
 
-1. **Gate umano**: Marco riverifica su TEST (in particolare i job che
-   non aveva ancora toccato, dove lo scenario del bug corretto sopra
-   potrebbe presentarsi) e **decide sull'assunzione di bootstrap**
-   (visita creata al volo per i job pre-esistenti, sovrascritta poi
-   dalla migrazione storica L5) prima di procedere a L3
-   (`ActivityLog.gs`: allineamento sulla visita aperta) — sessione
-   Claude Code separata, non questa.
+1. **Gate umano**: Marco verifica su TEST che una correzione manuale in
+   Cronologia (es. modificare la data di un evento di spostamento)
+   aggiorni coerentemente anche la riga aperta in `visite`, poi decide
+   se procedere a L4 (`Model.gs`: metriche di governo lette da
+   `visite`) — sessione separata.
 
 Nessuna scrittura su PROD.
