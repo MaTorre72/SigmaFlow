@@ -82,11 +82,16 @@ class MockSheet {
 }
 
 class MockSpreadsheet {
-  constructor(id) { this.id = id; this.sheets = {}; }
+  constructor(id) { this.id = id; this.name = id; this.sheets = {}; }
   getId() { return this.id; }
+  getName() { return this.name; }
   getUrl() { return 'mock://' + this.id; }
   getSheetByName(name) { return this.sheets[name] || null; }
   insertSheet(name) { const s = new MockSheet(name); this.sheets[name] = s; return s; }
+  deleteSheet(sheet) {
+    const name = sheet && sheet.getName ? sheet.getName() : sheet;
+    delete this.sheets[name];
+  }
 }
 
 function createHarness() {

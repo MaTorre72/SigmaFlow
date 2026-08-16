@@ -566,3 +566,141 @@ function computeVisiteFromLog_(job) {
   return result;
 }
 
+// Fase "R2" (AUDIT_MIGRAZIONE_PROD.md v2, sez. 4-5): orchestratrice
+// unica per i 4 passi della migrazione verso il modello caso/visita —
+// backfill Fase G (activity_log_json), correzione columns_json (colonna
+// 'prep' ancora con ruolo 'wip', stato pre-Fase-K), allineamento schema
+// K/L1 (foglio 'visite', incarico_ts/prep_ts/incarico_chiuso_ts), L5
+// parte 1 (migrazione storica delle visite). Scritta una volta, pensata
+// per essere richiamata identica sia su una copia di prova sia su PROD
+// vero (mai da questa sessione — solo dopo richiesta esplicita
+// separata). **Non include L5 parte 2** (rimozione campi duplicati,
+// irreversibile): resta sempre un gesto separato dopo revisione dei
+// risultati.
+//
+// **Ordine di esecuzione interno diverso dall'elenco concettuale
+// (1 backfill, 2 columns_json, 3 schema, 4 visite) chiesto in origine**:
+// verificato con un test dedicato (vedi Tests.gs) che eseguire il
+// backfill PRIMA dell'allineamento schema corrompe i dati — jobToRow_
+// scrive un array nella forma di JOB_HEADERS *corrente* (25 colonne,
+// con activity_log_json) dentro un foglio la cui riga di intestazione
+// e' ancora quella vecchia (31 colonne, senza activity_log_json): le
+// colonne si disallineano silenziosamente (dati shiftati). L'ordine
+// sicuro, confermato dal test: schema PRIMA, poi backfill. I nomi dei
+// campi nel risultato restano quelli richiesti, per continuita' con la
+// descrizione dei 4 passi.
+//
+// Le funzioni riusate qui sotto (migrateActivityLogData_,
+// checkStructuralAlignment_/readColumns_ al loro interno,
+// migrateVisiteFromHistory_) risolvono lo spreadsheet target tramite
+// getSpreadsheet_() (Script Property PROP_SPREADSHEET_ID), non tramite
+// il parametro 'ss' che ricevono in superficie — per questo l'intera
+// orchestrazione, non solo l'allineamento schema, va eseguita con
+// PROP_SPREADSHEET_ID scambiata sul foglio target (stesso principio
+// gia' usato da withTestSpreadsheet_/withEnvironment_ in Utils.gs).
+// Verificato anche questo con un test dedicato: senza lo scambio, le
+// chiamate annidate risolvono lo spreadsheet sbagliato e falliscono.
+function eseguiMigrazioneCompleta_(ss, params) {
+  params = params || {};
+  var nomeAtteso = String(params.confermaNome || '');
+  var nomeReale = ss.getName();
+  if (nomeAtteso !== nomeReale) {
+    throw new Error('confermaNome ("' + nomeAtteso + '") non corrisponde al nome del foglio target ("' + nomeReale + '"). Nessuna modifica eseguita.');
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  var props = PropertiesService.getScriptProperties();
+  var previousSpreadsheetId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+
+  try {
+    var schemaAlignment = setupSigmaFlow();
+    var backfillActivityLog = migrateActivityLogData_(ss);
+    var columnsJson = fixPrepColumnRole_(ss);
+    var visiteMigration = migrateVisiteFromHistory_(ss);
+
+    var summary = {
+      spreadsheet_id: ss.getId(),
+      spreadsheet_name: nomeReale,
+      step1_backfill_activity_log: backfillActivityLog,
+      step2_columns_json: columnsJson,
+      step3_schema_alignment: schemaAlignment,
+      step4_migrazione_visite: visiteMigration
+    };
+    console.log(JSON.stringify(summary));
+    return summary;
+  } finally {
+    if (previousSpreadsheetId) {
+      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetId);
+    } else {
+      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+    }
+    lock.releaseLock();
+  }
+}
+
+// Corregge il ruolo della colonna che DEFAULT_COLUMNS assegna a 'prep'
+// (oggi 'todo'/TO DO) se sul foglio live risulta ancora un ruolo
+// diverso (tipicamente 'wip', stato pre-Fase-K) — trovato concretamente
+// su PROD (AUDIT_MIGRAZIONE_PROD.md sez. 2.1), ma la funzione non
+// assume quel valore specifico: confronta columns_json live con
+// DEFAULT_COLUMNS solo per scoprire QUALE id dovrebbe avere ruolo
+// 'prep', poi corregge solo il campo 'role' di quella colonna,
+// lasciando label/color/order/hidden esattamente come nel foglio live.
+// Nessuna modifica se il ruolo e' gia' corretto, se columns_json manca/
+// e' vuoto, o se l'id atteso non compare affatto tra le colonne live
+// (caso fuori scope: colonna mancante, non colonna col ruolo sbagliato).
+function fixPrepColumnRole_(ss) {
+  var result = { corrected: false, column_id: null, from_role: null, to_role: 'prep' };
+
+  var configSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
+  if (!configSheet) {
+    return result;
+  }
+
+  var rows = readTable_(configSheet);
+  var rowIndex = -1;
+  var liveColumns = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key === 'columns_json') {
+      rowIndex = i;
+      try {
+        liveColumns = JSON.parse(rows[i].value);
+      } catch (err) {
+        liveColumns = null;
+      }
+      break;
+    }
+  }
+  if (rowIndex < 0 || !Array.isArray(liveColumns) || !liveColumns.length) {
+    return result;
+  }
+
+  var expectedPrepId = SIGMAFLOW.DEFAULT_COLUMNS.filter(function(column) {
+    return column.role === 'prep';
+  }).map(function(column) { return column.id; })[0];
+  if (!expectedPrepId) {
+    return result;
+  }
+
+  var changed = false;
+  var updatedColumns = liveColumns.map(function(column) {
+    if (column.id === expectedPrepId && column.role !== 'prep') {
+      result.corrected = true;
+      result.column_id = column.id;
+      result.from_role = column.role;
+      changed = true;
+      return Object.assign({}, column, { role: 'prep' });
+    }
+    return column;
+  });
+
+  if (changed) {
+    var headers = getHeaderMap_(configSheet);
+    configSheet.getRange(rowIndex + 2, headers.value).setValue(JSON.stringify(updatedColumns));
+  }
+
+  return result;
+}
+

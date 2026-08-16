@@ -182,6 +182,10 @@ function runAllTests() {
     testComputeVisiteFromLogStandByReentryOpensNewVisit,
     testComputeVisiteFromLogFlagsIllegalDirectReentryToWip,
     testMigrateVisiteFromHistoryEndToEnd,
+    testEseguiMigrazioneCompletaRejectsWrongConfirmName,
+    testFixPrepColumnRoleCorrectsGenericMismatch,
+    testFixPrepColumnRoleNoOpWhenAlreadyCorrect,
+    testEseguiMigrazioneCompletaEndToEndOnOldSchemaData,
     testReworkFromStandByToBacklogKeepsStartTs,
     testMoveToPrepSetsPrepTsNotStartTs,
     testMoveToWipStillSetsStartTs,
@@ -1534,6 +1538,138 @@ function testMigrateVisiteFromHistoryEndToEnd() {
     var boardJob = getBoard().data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
     assertEquals_(2, Number(boardJob.visit_number), 'visit_number ricalcolato da visite dopo la migrazione');
     assertTrue_(coerceBoolean_(boardJob.is_rework), 'is_rework ricalcolato da visite dopo la migrazione');
+  });
+}
+
+// --- Migrazione PROD (AUDIT_MIGRAZIONE_PROD.md v2): orchestratrice ---
+
+// Simula lo schema osservato REALMENTE su PROD (AUDIT_MIGRAZIONE_PROD.md
+// sez. 2): JOB_HEADERS senza activity_log_json/incarico_ts/prep_ts/
+// incarico_chiuso_ts, nessun foglio 'visite', columns_json con la
+// colonna 'prep' (todo) ancora a ruolo 'wip' (sez. 2.1).
+function setupOldProdShapedSheet_(ss) {
+  var oldJobHeaders = [
+    'job_id', 'case_id', 'visit_number', 'title', 'client', 'ambassador',
+    'status', 'assignee', 'tag', 'size_class', 'size_points',
+    'priority_class', 'priority_class_manual', 'impact', 'manageability',
+    'priority_score', 'description', 'due_date', 'arrival_ts', 'start_ts',
+    'done_ts', 'invoiced', 'service_time_d', 'lead_time_d', 'wait_time_d',
+    'is_rework', 'rework_cause', 'notes', 'card_color', 'checklist_json',
+    'correction_log_json'
+  ];
+
+  var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS) || ss.insertSheet(SIGMAFLOW.SHEETS.JOBS);
+  jobsSheet.clear();
+  jobsSheet.appendRow(oldJobHeaders);
+  jobsSheet.appendRow(['JOB-OLD-1', 'CASE-OLD-1', 1, 'Caso storico 1', 'Cliente storico', '', 'wip', 'Marco', 'VIA', 'M', 8, 'p1_plan', false, 2, 2, 2, '', '', '2026-01-01T09:00:00+02:00', '2026-01-05T09:00:00+02:00', '', false, '', '', '', false, '', '', '', '[]', '[]']);
+  jobsSheet.appendRow(['JOB-OLD-2', 'CASE-OLD-2', 1, 'Caso storico 2', 'Cliente storico 2', '', 'done', 'Giovanni', 'acque', 'S', 5, 'p4_assess', false, 1, 1, 1, '', '', '2026-01-10T09:00:00+02:00', '2026-01-12T09:00:00+02:00', '2026-01-20T09:00:00+02:00', true, 8, 10, 2, false, '', '', '', '[]', '[]']);
+  jobsSheet.setFrozenRows(1);
+
+  var casesSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CASES) || ss.insertSheet(SIGMAFLOW.SHEETS.CASES);
+  casesSheet.clear();
+  casesSheet.appendRow(CASE_HEADERS);
+  casesSheet.appendRow(['CASE-OLD-1', 'Caso storico 1', 'Cliente storico', 1, true, '2026-01-01T09:00:00+02:00', '']);
+  casesSheet.appendRow(['CASE-OLD-2', 'Caso storico 2', 'Cliente storico 2', 1, false, '2026-01-10T09:00:00+02:00', '2026-01-20T09:00:00+02:00']);
+  casesSheet.setFrozenRows(1);
+
+  var existingVisite = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (existingVisite) {
+    ss.deleteSheet(existingVisite);
+  }
+
+  var configSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG) || ss.insertSheet(SIGMAFLOW.SHEETS.CONFIG);
+  configSheet.clear();
+  configSheet.appendRow(CONFIG_HEADERS);
+  var oldColumns = SIGMAFLOW.DEFAULT_COLUMNS.map(function(column) {
+    var copy = Object.assign({}, column);
+    if (copy.id === 'todo') {
+      copy.role = 'wip'; // stato pre-Fase-K, come osservato su PROD
+    }
+    copy.hidden = false;
+    return copy;
+  });
+  configSheet.appendRow(['columns_json', JSON.stringify(oldColumns), 'Configurazione colonne board']);
+  configSheet.appendRow(['team_size', 3, '']);
+  configSheet.setFrozenRows(1);
+}
+
+function testEseguiMigrazioneCompletaRejectsWrongConfirmName() {
+  withTestSpreadsheet_(function(ss) {
+    setupOldProdShapedSheet_(ss);
+
+    var failed = false;
+    try {
+      eseguiMigrazioneCompleta_(ss, { confermaNome: 'nome sbagliato' });
+    } catch (err) {
+      failed = err.message.indexOf('confermaNome') !== -1;
+    }
+    assertTrue_(failed, 'confermaNome errato deve far fallire la funzione');
+
+    var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var headers = jobsSheet.getRange(1, 1, 1, jobsSheet.getLastColumn()).getValues()[0];
+    assertTrue_(headers.indexOf('activity_log_json') === -1, 'nessuna modifica deve essere avvenuta: schema ancora quello vecchio');
+  });
+}
+
+function testFixPrepColumnRoleCorrectsGenericMismatch() {
+  withTestSpreadsheet_(function(ss) {
+    setupOldProdShapedSheet_(ss);
+
+    var result = fixPrepColumnRole_(ss);
+
+    assertTrue_(result.corrected, 'deve correggere il ruolo della colonna prep');
+    assertEquals_('todo', result.column_id, 'la colonna corretta e\' todo (quella con ruolo prep in DEFAULT_COLUMNS)');
+    assertEquals_('wip', result.from_role, 'il ruolo precedente era wip');
+
+    var configSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
+    var columnsJson = readTable_(configSheet).filter(function(row) { return row.key === 'columns_json'; })[0].value;
+    var columns = JSON.parse(columnsJson);
+    var todoColumn = columns.filter(function(c) { return c.id === 'todo'; })[0];
+    assertEquals_('prep', todoColumn.role, 'il valore scritto sul foglio ha il ruolo corretto');
+    assertEquals_('TO DO', todoColumn.label, 'label invariata');
+    assertEquals_(3, todoColumn.order, 'order invariato');
+  });
+}
+
+function testFixPrepColumnRoleNoOpWhenAlreadyCorrect() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss); // schema/config gia' corrente, columns_json gia' corretta
+    var result = fixPrepColumnRole_(ss);
+    assertTrue_(!result.corrected, 'nessuna correzione se il ruolo e\' gia\' giusto');
+  });
+}
+
+function testEseguiMigrazioneCompletaEndToEndOnOldSchemaData() {
+  withTestSpreadsheet_(function(ss) {
+    setupOldProdShapedSheet_(ss);
+
+    var summary = eseguiMigrazioneCompleta_(ss, { confermaNome: ss.getName() });
+
+    assertEquals_(2, summary.step1_backfill_activity_log.cards_processed, 'step1: entrambe le card processate');
+    assertEquals_(2, summary.step1_backfill_activity_log.creation_events_backfilled, 'step1: evento di creazione ricostruito per entrambe (nessun log preesistente)');
+    assertEquals_(0, summary.step1_backfill_activity_log.errors.length, 'step1: nessun errore');
+
+    assertTrue_(summary.step2_columns_json.corrected, 'step2: ruolo prep corretto');
+    assertEquals_('todo', summary.step2_columns_json.column_id, 'step2: colonna todo');
+
+    var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    assertHeaders_(jobsSheet, JOB_HEADERS, 'jobs deve avere lo schema corrente dopo step3');
+    var visiteSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+    assertTrue_(Boolean(visiteSheet), 'foglio visite creato da step3');
+    assertHeaders_(visiteSheet, VISITE_HEADERS, 'visite deve avere lo schema corrente');
+
+    assertEquals_(2, summary.step4_migrazione_visite.jobs_processed, 'step4: entrambi i job hanno ora un log da cui ricostruire');
+    assertTrue_(summary.step4_migrazione_visite.visite_written > 0, 'step4: righe visite scritte');
+    assertEquals_(0, summary.step4_migrazione_visite.coherence_warnings.length, 'nessun warning di incoerenza sui dati sintetici puliti');
+
+    var jobs = readTable_(jobsSheet);
+    var job1 = jobs.filter(function(j) { return j.job_id === 'JOB-OLD-1'; })[0];
+    assertTrue_(Boolean(job1.activity_log_json) && job1.activity_log_json !== '[]', 'job1 ha ora un activity_log_json popolato');
+    assertEquals_('Caso storico 1', job1.title, 'i dati esistenti (title) restano intatti e allineati, non shiftati');
+
+    var visite1 = readVisiteForJob_(ss, 'JOB-OLD-1');
+    assertEquals_(1, visite1.length, 'una visita ricostruita per JOB-OLD-1 (mai rientrato)');
+    assertEquals_('2026-01-01T09:00:00+02:00', visite1[0].apertura_ts, 'apertura_ts della visita = arrival_ts storico');
   });
 }
 
