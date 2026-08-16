@@ -1,5 +1,5 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 16:05
+Aggiornato: 2026-08-16 16:18
 
 Fase corrente: L5 — COMPLETATA; collaudo post-L5 in corso
 Titolo: Modello caso/visita — rimozione campi duplicati da JOB_HEADERS
@@ -29,12 +29,36 @@ significato del campo resta per una sessione futura (parole di Marco:
 Nuovo test dedicato. **61/61 test passati**. Push su TEST eseguito e
 verificato (13/13 identici).
 
+## Rinomina chiusura_ts/chiusura_tipo -> rientro_ts/rientro_da (fatta, verificata)
+
+Durante il collaudo Marco ha segnalato confusione tra `visite.chiusura_ts`/
+`chiusura_tipo` (quando/da dove il caso e' rientrato, chiudendo la
+visita corrente per aprirne una nuova — automatico) e
+`jobs.incarico_chiuso_ts` (chiusura definitiva manuale dell'incarico —
+concetto diverso). Rinominati su sua richiesta in **`rientro_ts`/
+`rientro_da`**, coerenti con la terminologia gia' usata ovunque nel
+codice ("rientro diretto da...", `rework_cause`).
+
+`SCHEMA_VERSION` 6->7. Aggiunta `renameVisiteChiusuraFields_` (Schema.gs):
+rinomina in loco solo il testo delle intestazioni su un foglio `visite`
+con i nomi vecchi, **preservando i dati esistenti** nella stessa
+colonna — verificato con uno scenario dedicato (dati con l'intestazione
+vecchia, dopo `setupSigmaFlow` tutti i valori risultano intatti sotto
+il nuovo nome). Senza questo passo il riallineamento automatico dello
+schema avrebbe trattato le vecchie colonne come rimosse, perdendo i
+dati gia' scritti sul foglio TEST reale di Marco.
+
+**61/61 test passati**. Push su TEST eseguito e verificato (13/13
+identici). Il rename delle intestazioni sul foglio `visite` reale
+avviene automaticamente al prossimo caricamento della board (bump di
+`SCHEMA_VERSION`), preservando i dati.
+
 ## Prossimo passo
 
 In attesa che Marco completi la verifica dei dati post-L5 e confermi
 se: (a) la Fase L (caso/visita) puo' considerarsi conclusa su TEST, (b)
 procedere con la pianificazione PROD (vedi nota separata sopra), o (c)
-altre correzioni mirate emergano dal collaudo.
+altre correzioni/rinomine emergano dal collaudo.
 
 Fase J e Fase K: chiuse. L1: chiusa, gate umano confermato da Marco
 ("verificato, tutto ok" sul foglio `visite` su TEST) prima di avviare L2.
