@@ -27,6 +27,7 @@
 | H    | Frontend — struttura base           | 🟢 Auto  |
 | I    | Frontend — form e warning           | 🟢 Auto  |
 | J    | Deploy e chiusura                   | 🔴 Umano |
+| L    | Modello caso/visita — ricostruzione backend gate/rework  | 🔴 Umano |
 
 ---
 

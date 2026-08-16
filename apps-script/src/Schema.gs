@@ -32,7 +32,8 @@ var JOB_HEADERS = [
   'correction_log_json',
   'activity_log_json',
   'incarico_ts',
-  'prep_ts'
+  'prep_ts',
+  'incarico_chiuso_ts'
 ];
 
 var CASE_HEADERS = [
@@ -45,12 +46,36 @@ var CASE_HEADERS = [
   'closed_ts'
 ];
 
+// Fase L (modello caso/visita, DESIGN_modello_caso_visita.md sez. 6.1 e
+// 9.2): foglio nuovo e separato da 'cases'. 'cases'/CASE_HEADERS restano
+// invariati e in uso (refreshCaseVisitCount_ continua a scrivervi) finche'
+// 'visite' non sara' comprovata — la dismissione e' un passo separato
+// successivo (L5+), non questa sotto-fase. Identita' della riga:
+// job_id + numero_visita (composta, nessun campo aggiuntivo introdotto
+// rispetto a quanto elencato nel documento).
+var VISITE_HEADERS = [
+  'job_id',
+  'numero_visita',
+  'apertura_ts',
+  'incarico_ts',
+  'prep_ts',
+  'start_ts',
+  'consegna_ts',
+  'chiusura_ts',
+  'chiusura_tipo',
+  't_cliente_d',
+  't_ente_d',
+  't_interno_d',
+  'rework_cause'
+];
+
 var CONFIG_HEADERS = ['key', 'value', 'description'];
 
 function setupSigmaFlow() {
   var ss = getSpreadsheet_();
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CASES, CASE_HEADERS);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
   migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
