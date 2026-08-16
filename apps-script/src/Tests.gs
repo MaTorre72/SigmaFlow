@@ -185,7 +185,11 @@ function runAllTests() {
     testVisitConsegnaTsSetOnDoneWithoutClosingVisit,
     testVisitAccumulatesWaitTimeOnStandByExit,
     testVisitStandByToStandByDoesNotOpenNewVisit,
-    testVisitBootstrapCoincidingWithClosureNumbersCorrectly
+    testVisitBootstrapCoincidingWithClosureNumbersCorrectly,
+    testAddActivityEventAlignsOpenVisitStartTs,
+    testUpdateActivityEventAlignsOpenVisitField,
+    testDeleteActivityEventRealignsOpenVisit,
+    testMigrateToActivityLogAlignsOpenVisit
   ];
 
   tests.forEach(function(testFn) {
@@ -546,6 +550,87 @@ function testVisitStandByToStandByDoesNotOpenNewVisit() {
     assertEquals_(1, visite.length, 'spostamento tra due stand_by non apre una nuova visita');
     assertTrue_(!visite[0].chiusura_ts, 'la visita resta aperta');
     assertTrue_(Number(visite[0].t_cliente_d) >= 0, 't_cliente_d aggiornato sull\'uscita dalla prima attesa');
+  });
+}
+
+// --- Fase L3: allineamento delle correzioni manuali sulla visita aperta ---
+
+function testAddActivityEventAlignsOpenVisitStartTs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Allineamento visita aperta', size_class: 'M' });
+    var columns = readColumns_();
+    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var ts = testTsMinutesAgo_(60);
+
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: ts, to: wipCol.id });
+    assertTrue_(result.data.ok === true, 'move verso wip dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, jobId);
+    assertEquals_(1, visite.length, 'una visita (bootstrap) presente per il job');
+    assertEquals_(ts, visite[0].start_ts, 'start_ts della visita aperta allineato al valore suggerito dall\'evento, come su jobs');
+  });
+}
+
+function testUpdateActivityEventAlignsOpenVisitField() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Correzione allinea visita', size_class: 'M' });
+    moveJob({ job_id: jobId, status: 'todo' });
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    var autoMoveEvent = log.filter(function(e) { return e.source === 'auto' && e.to === 'todo'; })[0];
+
+    var correctedTs = testTsMinutesAgo_(45);
+    var result = updateActivityEvent({ job_id: jobId, event_id: autoMoveEvent.id, ts: correctedTs, to: autoMoveEvent.to });
+    assertTrue_(result.data.ok === true, 'la correzione dovrebbe riuscire');
+
+    var visite = readVisiteForJob_(ss, jobId);
+    assertEquals_(1, visite.length, 'una visita presente per il job');
+    assertEquals_(correctedTs, visite[0].prep_ts, 'prep_ts della visita aperta allineato alla correzione, come su jobs (todo = ruolo prep)');
+  });
+}
+
+function testDeleteActivityEventRealignsOpenVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Cancellazione allinea visita', size_class: 'M' });
+    var columns = readColumns_();
+    var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var waitCol = columns.filter(function(c) { return c.role === 'stand_by'; })[0];
+    var t1 = testTsMinutesAgo_(90);
+    var t2 = testTsMinutesAgo_(60);
+    var t3 = testTsMinutesAgo_(30);
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: wipCol.id });
+    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: waitCol.id });
+    addActivityEvent({ job_id: jobId, type: 'move', ts: t3, to: wipCol.id, force: true });
+
+    deleteActivityEvent({ job_id: jobId, event_id: e2.data.event.id });
+
+    var visite = readVisiteForJob_(ss, jobId);
+    assertEquals_(1, visite.length, 'una visita presente per il job');
+    assertEquals_(t3, visite[0].start_ts, 'start_ts della visita aperta riallineato dopo la cancellazione, come su jobs');
+  });
+}
+
+function testMigrateToActivityLogAlignsOpenVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Migrazione allinea visita', size_class: 'M' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    var pastArrival = testTsMinutesAgo_(180);
+    job.arrival_ts = pastArrival;
+    job.activity_log_json = '[]';
+    writeJobToRow_(sheet, row, headers, job);
+
+    migrateToActivityLog({ env: 'test' });
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'la migrazione Fase F allinea anche la visita aperta');
+    assertEquals_(pastArrival, visite[0].incarico_ts, 'incarico_ts della visita aperta allineato dal backfill, come su jobs');
   });
 }
 

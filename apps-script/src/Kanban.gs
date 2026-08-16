@@ -604,6 +604,44 @@ function applyStructuralAlignment_(job, warnings) {
       job[warning.field] = warning.suggestedValue;
     }
   });
+  alignOpenVisitFields_(job, warnings);
+}
+
+// Fase L3 (DESIGN_modello_caso_visita.md, sez. 11): le correzioni manuali
+// dell'utente in Cronologia (addActivityEvent/updateActivityEvent/
+// deleteActivityEvent) e il ricalcolo durante la migrazione Fase F
+// (migrateSingleJobActivityLog_, unico altro chiamante di
+// applyStructuralAlignment_) allineano lo stesso campo anche sulla
+// visita APERTA corrente del caso — non quella a cui l'evento corretto
+// apparteneva storicamente: identificarla con precisione, per un evento
+// che puo' risalire a una visita gia' chiusa da tempo, e' compito della
+// migrazione storica autorevole di L5, non di questo allineamento live.
+var JOB_FIELD_TO_VISIT_FIELD_ = {
+  incarico_ts: 'incarico_ts',
+  prep_ts: 'prep_ts',
+  start_ts: 'start_ts',
+  done_ts: 'consegna_ts'
+};
+
+function alignOpenVisitFields_(job, warnings) {
+  var visitWarnings = warnings.filter(function(warning) {
+    return JOB_FIELD_TO_VISIT_FIELD_[warning.field] !== undefined;
+  });
+  if (!visitWarnings.length) {
+    return;
+  }
+
+  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (!visiteSheet) {
+    return;
+  }
+
+  var opened = ensureOpenVisit_(visiteSheet, job, nowIso_(), job.visit_number);
+  var visit = opened.visit;
+  visitWarnings.forEach(function(warning) {
+    visit[JOB_FIELD_TO_VISIT_FIELD_[warning.field]] = warning.suggestedValue;
+  });
+  writeVisitToRow_(visiteSheet, opened.row, visit);
 }
 
 function getActivityLog(params) {
