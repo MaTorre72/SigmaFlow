@@ -1,12 +1,15 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 15:35
+Aggiornato: 2026-08-16 15:40
 
-Fase corrente: L5 (parte 1/2 — migrazione storica)
-Titolo: Modello caso/visita — materializzazione visite dal log
+Fase corrente: L5 — COMPLETATA (entrambe le parti)
+Titolo: Modello caso/visita — rimozione campi duplicati da JOB_HEADERS
 Branch: `codex/case-visit-model` (da `codex/activity-log-prep-role`)
 Documento di riferimento: `DESIGN_modello_caso_visita.md` (sezione 11, sotto-fasi L1-L6)
 
-Stato: IN_ATTESA_GATE_UMANO
+Stato: COMPLETATA — Fase L (L1-L5) chiusa su TEST. In attesa che Marco
+verifichi la board/dashboard live prima di considerare il lavoro
+definitivamente concluso; nessun'altra azione di codice prevista senza
+sua richiesta.
 
 Fase J e Fase K: chiuse. L1: chiusa, gate umano confermato da Marco
 ("verificato, tutto ok" sul foglio `visite` su TEST) prima di avviare L2.
@@ -362,16 +365,62 @@ incompleto di L2 aveva stimato in modo approssimato (chiusura_tipo
 passato da una stima parziale a quella corretta) — prova diretta che la
 migrazione funziona come da disegno.
 
-## Prossimo passo
+## L5 parte 2/2 — rimozione campi (eseguita, verificata su TEST)
 
-Marco ha chiesto di **non procedere ancora** con L5 parte 2/2 (rimozione
-campi duplicati da `JOB_HEADERS`): vuole verificare altro prima di
-autorizzare il passo irreversibile. **Fermo qui, in attesa.**
+Marco ha confermato esplicitamente ("prima chiudi L5 su TEST, poi
+pensiamo a PROD") dopo aver deciso di posticipare la valutazione PROD a
+una sessione separata (vedi nota sotto).
 
-Quando Marco conferma esplicitamente: **L5 parte 2/2** — rimozione dei
-campi duplicati da `JOB_HEADERS` (`incarico_ts`, `prep_ts`, `start_ts`,
-`done_ts`, `service_time_d`, `lead_time_d`, `wait_time_d`, `is_rework`,
-`rework_cause`, `visit_number`) — l'unico passo irreversibile del
-programma, solo TEST, sessione separata.
+Rimossi da `JOB_HEADERS`: `visit_number`, `start_ts`, `done_ts`,
+`service_time_d`, `lead_time_d`, `wait_time_d`, `is_rework`,
+`rework_cause`, `incarico_ts`, `prep_ts` — duplicati con `visite`
+(sez. 9.1). `SCHEMA_VERSION` 5->6.
 
-Nessuna scrittura su PROD.
+**Conseguenze a catena gestite nella stessa sessione** (altrimenti la
+board si sarebbe rotta subito dopo la rimozione):
+
+- `addJob` crea subito la visita 1 alla creazione (prima nasceva solo
+  al primo `moveJob`).
+- `moveJob`/`updateVisiteForMove_`/`ensureOpenVisit_`: il numero della
+  nuova visita si calcola da quella aperta trovata/creata
+  (`numero_visita+1`), non piu' da `job.visit_number` (che non esiste
+  piu' — elimina strutturalmente, non solo corregge, la classe di bug
+  del bootstrap di L2).
+- **`loadJobsWithVisitSummary_`** (nuova, `Kanban.gs`): `getBoard()` e
+  `getMetrics()` ricalcolano `visit_number`/`is_rework`/`rework_cause`/
+  `start_ts`/`done_ts` al volo dalla visita piu' recente del caso —
+  `client.html` (badge R1/R2, indicatore "fermo da N giorni") e
+  `pointsStatistics_`/`monthBuckets_` (`Model.gs`, restano su `jobs`
+  per L4) continuano a funzionare **senza alcuna modifica al
+  frontend**.
+- `checkStructuralAlignment_` semplificata; `correctJobTimestamps`
+  ridotta a solo `arrival_ts`; `migrateVisiteFromHistory_` non
+  sincronizza piu' verso `jobs` (`syncJobFieldsFromVisit_` eliminata,
+  ora priva di effetto).
+
+**Verifica**: 13 test adattati, 1 reso obsoleto e rimosso (bug ora
+strutturalmente impossibile). Verificato anche il riallineamento
+automatico dello schema (dati con l'intestazione vecchia a 34 colonne
+-> nuova a 25) e la migrazione+lettura end-to-end su 60 job demo,
+nessun crash. **60/60 test passati**. Push su TEST eseguito e
+verificato (13/13 identici).
+
+**Importante**: il riallineamento delle intestazioni sul foglio `jobs`
+reale di TEST avviene **automaticamente al prossimo caricamento della
+board** (o qualunque azione che triggera `ensureCurrentSchema_`, per
+via del bump di `SCHEMA_VERSION`) — le colonne rimosse spariranno dal
+foglio con i loro dati. E' il passo irreversibile del programma:
+verifica la board/dashboard su TEST dopo il primo caricamento.
+
+## Nota su PROD (discussa, non decisa)
+
+Marco ha chiesto di capire se/come migrare PROD. Emerso dai dati reali
+condivisi: **PROD e' su uno schema precedente persino alla Fase G**
+(nessun `activity_log_json`) — una migrazione PROD richiederebbe
+portare in sequenza Fase G, Fase K, L1-L5, non solo "rilanciare L5".
+Raccomandazione data: sequenza incrementale con gate ad ogni passo,
+come fatto qui, non un deploy unico. **Nessuna decisione presa,
+nessuna azione su PROD in questa sessione.** Da riprendere in una
+sessione dedicata quando Marco vorra'.
+
+Nessuna scrittura su PROD in questa sessione.
