@@ -66,7 +66,6 @@ function routeAction_(params) {
     moveColumn: moveColumn,
     updateOptionList: updateOptionList,
     seedTestData: seedTestData,
-    markRework: markRework,
     getMetrics: getMetrics
   };
 
@@ -126,7 +125,6 @@ function addJob(params) {
   var ss = getSpreadsheet_();
   var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
   var title = requireParam_(params, 'title');
-  var caseId = params.case_id || createImplicitCase_();
   var sizeClass = params.size_class || 'M';
   var status = validateColumnId_(params.status || firstColumnIdByRole_('backlog'));
   var now = nowIso_();
@@ -134,7 +132,6 @@ function addJob(params) {
   var priority = priorityFields_(params);
   var job = {
     job_id: generateJobId(),
-    case_id: caseId,
     title: title,
     client: params.client || '',
     ambassador: params.ambassador || '',
@@ -199,7 +196,7 @@ function addJob(params) {
     });
   }
 
-  return ok_({ job_id: job.job_id, case_id: caseId, job: job });
+  return ok_({ job_id: job.job_id, job: job });
 }
 
 function moveJob(params) {
@@ -922,61 +919,6 @@ function moveColumn(params) {
   columns[target] = current;
   columns = writeColumns_(columns);
   return ok_({ columns: columns });
-}
-
-function markRework(params) {
-  var ss = getSpreadsheet_();
-  var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-  var source = jobs.filter(function(job) {
-    return job.job_id === params.job_id;
-  })[0];
-
-  if (!source) {
-    throw new Error('Job sorgente non trovato: ' + params.job_id);
-  }
-
-  var caseJobs = jobs.filter(function(job) {
-    return job.case_id === source.case_id;
-  });
-  var nextVisit = caseJobs.reduce(function(max, job) {
-    return Math.max(max, Number(job.visit_number || 1));
-  }, 1) + 1;
-
-  return addJob({
-    title: params.title || source.title,
-    client: params.client || source.client,
-    case_id: source.case_id,
-    visit_number: nextVisit,
-    assignee: params.assignee || source.assignee,
-    ambassador: params.ambassador || source.ambassador,
-    tag: params.tag || source.tag,
-    size_class: params.size_class || source.size_class || 'M',
-    priority_class: params.priority_class || source.priority_class,
-    impact: params.impact || source.impact,
-    manageability: params.manageability || source.manageability,
-    description: params.description || source.description || '',
-    card_color: params.card_color || source.card_color || '',
-    rework_cause: params.rework_cause || 'manual',
-    notes: params.notes || ''
-  });
-}
-
-// Genera solo l'id: il foglio 'cases' e' stato dismesso (total_visits/
-// is_open erano ridondanti con quanto gia' derivabile da 'visite'/
-// 'jobs', mai letti dal frontend) — il "caso" resta un concetto valido
-// (job_id + case_id, piu' casi = stesso case_id), solo senza piu' una
-// riga propria da mantenere allineata ad ogni spostamento.
-function createImplicitCase_() {
-  return generateId_('C');
-}
-
-function markRowAsRework_(sheet, row, headers, cause) {
-  var visits = Math.max(1, Number(sheet.getRange(row, headers.visit_number).getValue() || 1));
-  sheet.getRange(row, headers.visit_number).setValue(visits + 1);
-  sheet.getRange(row, headers.is_rework).setValue(true);
-  if (!sheet.getRange(row, headers.rework_cause).getValue()) {
-    sheet.getRange(row, headers.rework_cause).setValue(cause);
-  }
 }
 
 function readJobFromRow_(sheet, row, headers) {

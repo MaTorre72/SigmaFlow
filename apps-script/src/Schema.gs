@@ -7,9 +7,14 @@
 // frontend o per le metriche di stato-corrente su jobs (punti/timeline).
 // Passo irreversibile: eseguito solo dopo che Marco ha verificato la
 // migrazione storica (L5 parte 1/2) su TEST.
+// case_id rimosso su richiesta di Marco: terminologia ufficiale/finale,
+// job = caso, 1:1 — case_id era un doppione di job_id, mai un legame
+// reale tra piu' righe (quel concetto non esiste nel modello attuale,
+// una card = un job = un caso). markRework/markRowAsRework_ (Kanban.gs),
+// l'unico codice che leggeva case_id per raggruppare righe "dello stesso
+// caso", rimossi insieme per lo stesso motivo.
 var JOB_HEADERS = [
   'job_id',
-  'case_id',
   'title',
   'client',
   'ambassador',

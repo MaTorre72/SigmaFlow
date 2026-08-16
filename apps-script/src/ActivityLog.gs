@@ -1,9 +1,9 @@
 // Helper per l'activity log delle card (Fase B del programma Activity Log).
 // Nota: la funzione id qui sotto si chiama generateActivityEventId_ e non
 // generateId_ come da specifica originale, perche' Utils.gs definisce gia'
-// generateId_(prefix) per job_id/case_id — un secondo generateId_() senza
+// generateId_(prefix) per job_id — un secondo generateId_() senza
 // parametri lo avrebbe sovrascritto silenziosamente (stesso scope globale
-// Apps Script), rompendo la generazione di job_id/case_id esistente.
+// Apps Script), rompendo la generazione di job_id esistente.
 
 function generateActivityEventId_() {
   return Utilities.getUuid();

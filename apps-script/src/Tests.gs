@@ -14,16 +14,35 @@ function generateTestDataset() {
   });
 }
 
+// Genera dati dimostrativi direttamente nello schema finale/ufficiale
+// (su richiesta di Marco, dopo la rimozione di case_id): niente campi
+// jobs ormai rimossi da JOB_HEADERS (case_id, visit_number, start_ts,
+// done_ts, service_time_d, lead_time_d, wait_time_d, is_rework,
+// rework_cause — tutti spostati su 'visite' fin dalla L5) e una vera
+// riga 'visite' per ogni job, coerente con quanto produce addJob/moveJob
+// in produzione: senza questo, il bottone dati demo lascerebbe 'visite'
+// vuota e la dashboard (che dalla L4 legge le metriche di governo da li')
+// mostrerebbe zeri per tutti i job generati.
 function seedTestDataset_(ss, replace) {
   if (replace) { resetTestDatabase_(ss); }
   var jobsSheet = ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
+  var visiteSheet = ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   var sizes = ['XS', 'S', 'M', 'L', 'XL'];
   var assignees = ['Alessandra', 'Giovanni D', 'Marco', 'Altro'];
   var tags = ['AIA', 'VIA', 'rifiuti', 'acque', 'aria', 'suolo'];
   var statuses = ['backlog', 'backlog', 'todo', 'todo', 'wip', 'wip', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done', 'done', 'done', 'done'];
+  var reworkCauses = ['wait_client', 'wait_authority', 'wait_internal'];
   var colors = SIGMAFLOW.CARD_COLORS;
   var jobRows = [];
   var now = new Date();
+  var columns = readColumns_();
+  var backlogColumn = findColumn_(columns, firstColumnIdByRole_('backlog'));
+
+  // Durata fissa (giorni) attribuita alla prima visita dei job con rework
+  // (i % 8 === 0, come nella generazione precedente): serve solo a
+  // collocare la visita 1 cronologicamente prima di arrival_ts (che per
+  // questi job resta la data della visita 1, non della visita 2 attuale).
+  var reworkGapDays = 10;
 
   for (var i = 0; i < 60; i++) {
     var size = sizes[(i * 3 + Math.floor(i / 7)) % sizes.length];
@@ -32,22 +51,30 @@ function seedTestDataset_(ss, replace) {
     var impact = 1 + (i % 4);
     var manageability = 1 + ((i * 3) % 4);
     var priority = priorityFields_({ impact: impact, manageability: manageability });
-    var visit = i % 8 === 0 ? 2 : 1;
+    var hasRework = i % 8 === 0;
     var arrival = testIsoDaysAgo_(now, arrivalDays);
     var started = ['todo', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done'].indexOf(status) >= 0
       ? testIsoDaysAgo_(now, Math.max(0, arrivalDays - (1 + i % 5))) : '';
+    var prep = ['todo', 'wip', 'wait_client', 'wait_authority', 'wait_internal', 'done'].indexOf(status) >= 0 ? started : '';
     var done = status === 'done' ? testIsoDaysAgo_(now, Math.max(0, arrivalDays - (3 + i % 12))) : '';
-    var caseId = 'CASE-DEMO-' + String(i + 1);
     var jobId = 'JOB-DEMO-' + String(i + 1);
-    var service = done ? diffDays(started, done) : '';
-    var lead = done ? diffDays(arrival, done) : '';
-    var wait = started ? diffDays(arrival, started) : '';
+    var targetColumn = findColumn_(columns, status) || backlogColumn;
+
+    var creationEvent = {
+      id: generateActivityEventId_(),
+      ts: hasRework ? testIsoDaysAgo_(now, arrivalDays + reworkGapDays) : arrival,
+      type: 'move',
+      source: 'auto',
+      to: targetColumn.id,
+      from: null,
+      note: ''
+    };
+
     var job = {
       job_id: jobId,
-      case_id: caseId,
-      visit_number: visit,
       title: 'Pratica dimostrativa ' + String(i + 1),
       client: 'Cliente ' + String(1 + i % 12),
+      ambassador: '',
       status: status,
       assignee: assignees[i % assignees.length],
       tag: tags[(i * 2 + 1) % tags.length],
@@ -60,19 +87,80 @@ function seedTestDataset_(ss, replace) {
       priority_score: priority.priority_score,
       description: i % 3 === 0 ? 'Attivita con note operative e dipendenze esterne.' : '',
       due_date: testDateDaysFromNow_(now, (i % 35) - 12),
-      arrival_ts: arrival,
-      start_ts: started,
-      done_ts: done,
+      // arrival_ts e' sempre la data del primo arrivo del caso (apertura
+      // della visita 1), non della visita corrente: per i job con rework
+      // coincide con l'apertura della visita 1 sintetica, arrivalDays +
+      // reworkGapDays giorni fa.
+      arrival_ts: hasRework ? testIsoDaysAgo_(now, arrivalDays + reworkGapDays) : arrival,
       invoiced: status === 'done' && i % 3 === 0,
-      service_time_d: service,
-      lead_time_d: lead,
-      wait_time_d: wait,
-      is_rework: visit > 1,
-      rework_cause: visit > 1 ? ['wait_client', 'wait_authority', 'wait_internal'][i % 3] : '',
       notes: '',
-      card_color: colors[(i % (colors.length - 1)) + 1]
+      card_color: colors[(i % (colors.length - 1)) + 1],
+      checklist_json: '[]',
+      correction_log_json: '[]',
+      activity_log_json: serializeActivityLog_([creationEvent]),
+      incarico_chiuso_ts: ''
     };
     jobRows.push(jobToRow_(job));
+
+    if (hasRework) {
+      // Visita 1: chiusa, con un rientro da una colonna di attesa —
+      // stessa dinamica di updateVisiteForMove_ in Kanban.gs.
+      var v1Apertura = testIsoDaysAgo_(now, arrivalDays + reworkGapDays);
+      var v1Rientro = testIsoDaysAgo_(now, arrivalDays);
+      var reworkCause = reworkCauses[i % reworkCauses.length];
+      appendVisitRow_(visiteSheet, {
+        job_id: jobId,
+        numero_visita: 1,
+        apertura_ts: v1Apertura,
+        incarico_ts: v1Apertura,
+        prep_ts: testIsoDaysAgo_(now, arrivalDays + reworkGapDays - 1),
+        start_ts: testIsoDaysAgo_(now, arrivalDays + reworkGapDays - 2),
+        consegna_ts: testIsoDaysAgo_(now, arrivalDays + reworkGapDays - 5),
+        rientro_ts: v1Rientro,
+        rientro_da: reworkCause,
+        t_cliente_d: 0,
+        t_ente_d: 0,
+        t_interno_d: 0,
+        rework_cause: ''
+      });
+
+      // Visita 2: quella attuale, aperta dal rientro della visita 1,
+      // valorizzata con lo stesso stato/date correnti del job.
+      appendVisitRow_(visiteSheet, {
+        job_id: jobId,
+        numero_visita: 2,
+        apertura_ts: v1Rientro,
+        incarico_ts: v1Rientro,
+        prep_ts: prep,
+        start_ts: started,
+        consegna_ts: done,
+        rientro_ts: '',
+        rientro_da: '',
+        t_cliente_d: 0,
+        t_ente_d: 0,
+        t_interno_d: 0,
+        rework_cause: reworkCause
+      });
+    } else {
+      // Visita 1: e' anche la visita corrente, ancora aperta (una card
+      // "done" puo' sempre rientrare: consegna_ts si valorizza ma
+      // rientro_ts resta vuoto, come da modello caso/visita).
+      appendVisitRow_(visiteSheet, {
+        job_id: jobId,
+        numero_visita: 1,
+        apertura_ts: arrival,
+        incarico_ts: arrival,
+        prep_ts: prep,
+        start_ts: started,
+        consegna_ts: done,
+        rientro_ts: '',
+        rientro_da: '',
+        t_cliente_d: 0,
+        t_ente_d: 0,
+        t_interno_d: 0,
+        rework_cause: ''
+      });
+    }
   }
 
   jobsSheet.getRange(jobsSheet.getLastRow() + 1, 1, jobRows.length, JOB_HEADERS.length).setValues(jobRows);
@@ -136,7 +224,6 @@ function runAllTests() {
     testSetupSchema,
     testAddJob,
     testMoveJobLifecycle,
-    testMarkRework,
     testAutomaticReworkFromStandBy,
     testStandByCannotReturnDirectlyToWip,
     testPriorityHelpers,
@@ -243,7 +330,6 @@ function testAddJob() {
 
     assertTrue_(response.success, 'addJob dovrebbe riuscire');
     assertTrue_(response.data.job_id.indexOf('JOB-') === 0, 'job_id dovrebbe iniziare con JOB-');
-    assertTrue_(response.data.case_id.indexOf('CASE-') === 0, 'case_id dovrebbe iniziare con CASE-');
 
     var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
     assertEquals_(1, jobs.length, 'jobs dovrebbe contenere una riga');
@@ -274,25 +360,6 @@ function testMoveJobLifecycle() {
     assertEquals_('done', afterDone.status, 'status done');
     var visitAfterDone = readVisiteForJob_(ss, created.job_id)[0];
     assertTrue_(Boolean(visitAfterDone.consegna_ts), 'consegna_ts valorizzato sulla visita (non piu\' done_ts su jobs, L5)');
-  });
-}
-
-function testMarkRework() {
-  withTestSpreadsheet_(function(ss) {
-    resetTestDatabase_(ss);
-    var created = addJob({ title: 'Rework source', size_class: 'L' }).data;
-    moveJob({ job_id: created.job_id, status: 'done' });
-
-    var rework = markRework({
-      job_id: created.job_id,
-      rework_cause: 'client_request',
-      size_class: 'S'
-    });
-
-    assertTrue_(rework.success, 'markRework dovrebbe riuscire');
-
-    var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-    assertEquals_(2, jobs.length, 'dovrebbero esserci due job');
   });
 }
 
@@ -845,7 +912,6 @@ function testSystemStateInsufficientData() {
   var now = new Date();
   var jobs = [{
     job_id: 'JOB-TEST-1',
-    case_id: 'CASE-TEST-1',
     status: 'backlog',
     arrival_ts: nowIso_(),
     visit_number: 1
@@ -902,9 +968,9 @@ function testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite() {
   var now = new Date();
   var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
   var jobs = [
-    { job_id: 'A', case_id: 'A', status: 'backlog', arrival_ts: arrival, visit_number: 1, size_points: 5 },
-    { job_id: 'B', case_id: 'B', status: 'wip', arrival_ts: arrival, visit_number: 1, size_points: 8 },
-    { job_id: 'C', case_id: 'C', status: 'done', arrival_ts: arrival, done_ts: nowIso_(), visit_number: 1, size_points: 3, invoiced: false }
+    { job_id: 'A', status: 'backlog', arrival_ts: arrival, visit_number: 1, size_points: 5 },
+    { job_id: 'B', status: 'wip', arrival_ts: arrival, visit_number: 1, size_points: 8 },
+    { job_id: 'C', status: 'done', arrival_ts: arrival, done_ts: nowIso_(), visit_number: 1, size_points: 3, invoiced: false }
   ];
   var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, {
     columns_json: JSON.stringify(SIGMAFLOW.DEFAULT_COLUMNS)
@@ -929,7 +995,6 @@ function testSystemStateSeparatesFlowFromTimeSamples() {
   var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
   var jobs = [{
     job_id: 'JOB-DONE-NO-TIME',
-    case_id: 'CASE-DONE-NO-TIME',
     status: 'done',
     arrival_ts: arrival,
     done_ts: nowIso_(),
@@ -959,7 +1024,6 @@ function testSystemStateWorkload() {
   for (var i = 0; i < 5; i++) {
     jobs.push({
       job_id: 'JOB-DONE-' + i,
-      case_id: 'CASE-DONE-' + i,
       status: 'done',
       arrival_ts: arrival,
       done_ts: nowIso_(),
@@ -968,10 +1032,10 @@ function testSystemStateWorkload() {
       invoiced: false
     });
   }
-  jobs.push({ job_id: 'READY', case_id: 'READY', status: 'backlog', arrival_ts: arrival, visit_number: 1 });
-  jobs.push({ job_id: 'PREP', case_id: 'PREP', status: 'todo', arrival_ts: arrival, visit_number: 1 });
-  jobs.push({ job_id: 'WIP', case_id: 'WIP', status: 'wip', arrival_ts: arrival, visit_number: 1 });
-  jobs.push({ job_id: 'WAIT', case_id: 'WAIT', status: 'wait_client', arrival_ts: arrival, visit_number: 1 });
+  jobs.push({ job_id: 'READY', status: 'backlog', arrival_ts: arrival, visit_number: 1 });
+  jobs.push({ job_id: 'PREP', status: 'todo', arrival_ts: arrival, visit_number: 1 });
+  jobs.push({ job_id: 'WIP', status: 'wip', arrival_ts: arrival, visit_number: 1 });
+  jobs.push({ job_id: 'WAIT', status: 'wait_client', arrival_ts: arrival, visit_number: 1 });
 
   // Le 5 visite "chiuse" corrispondenti ai job JOB-DONE-0..4: start_ts =
   // stesso istante di arrival_ts (2 giorni fa) e consegna_ts = adesso,
@@ -1802,7 +1866,6 @@ function appendCompletedJob_(ss, data) {
   var arrivalIso = Utilities.formatDate(arrival, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
   var startIso = Utilities.formatDate(start, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
 
-  var caseId = generateId_('C');
   var jobId = generateId_('J');
 
   // Usa jobToRow_ (mappa per nome di intestazione, come il codice di
@@ -1812,7 +1875,6 @@ function appendCompletedJob_(ss, data) {
   // solo su 'visite', scritte sotto).
   ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS).appendRow(jobToRow_({
     job_id: jobId,
-    case_id: caseId,
     title: data.title,
     client: data.client || 'Cliente test',
     ambassador: data.ambassador || '',

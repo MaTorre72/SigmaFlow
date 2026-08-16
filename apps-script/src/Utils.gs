@@ -65,9 +65,6 @@ function generateId_(prefix) {
   if (prefix === 'J') {
     return generateJobId();
   }
-  if (prefix === 'C') {
-    return generateCaseId();
-  }
   var stamp = Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd-HHmmss');
   var suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
   return prefix + '-' + stamp + '-' + suffix;
@@ -79,10 +76,6 @@ function nowRome() {
 
 function generateJobId() {
   return 'JOB-' + Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd') + '-' + randomSuffix_();
-}
-
-function generateCaseId() {
-  return 'CASE-' + Utilities.formatDate(new Date(), SIGMAFLOW.TZ, 'yyyyMMdd') + '-' + randomSuffix_();
 }
 
 function randomSuffix_() {
