@@ -157,15 +157,25 @@ ora nello schema corrente (`visite` popolata, `case_id`/campi duplicati
 rimossi da `jobs` come effetto automatico dello step3, vedi discussione
 sessione precedente su questo).
 
+## P6 chiusa (2026-08-16, poco dopo le 21:25)
+
+Marco ha verificato i casi campione sul foglio PROD vero, esito
+positivo ("verificato"). Sta aggiornando ora il deployment `@18`
+(Distribuisci -> Gestisci distribuzioni -> versione HEAD) perche' il
+codice nuovo diventi quello servito dall'URL pubblico
+`.../AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec`.
+Azione compiuta direttamente da Marco nell'editor, nessun intervento di
+Claude Code possibile ne' necessario qui.
+
 ## Prossimo passo
 
-**P6**: verifica di Marco sui casi campione reali (stesso giudizio gia'
-espresso per R4 — dato che l'esito e' identico alla prova sulla copia,
-puo' valere la stessa conclusione, ma la conferma esplicita resta sua).
-Solo dopo: aggiornare il deployment `@18` con la versione HEAD corrente
-(perche' il codice nuovo diventi quello servito dall'URL pubblico), poi
-P8 (comunicazione al team). Nessuna decisione ancora presa sul merge dei
-branch a `main`.
+Attesa conferma di Marco che il deployment `@18` e' aggiornato. Poi:
+- **P8**: comunicazione al team sul cambio di comportamento della board
+  (guardia estesa a `done`, rientri diretti da attesa/completato a WIP
+  bloccati, nuova casella "Chiuso").
+- Decisione, ancora aperta, sul merge di `codex/case-visit-model` (via
+  `codex/activity-log-prep-role`) a `main` — non affrontata finora in
+  questa sessione, da riprendere quando Marco lo chiede esplicitamente.
 
 ---
 
