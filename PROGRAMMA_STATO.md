@@ -1,11 +1,48 @@
 # Stato programma: SigmaFlow — Activity Log / Modello caso-visita
-Aggiornato: 2026-08-16 18:40
+Aggiornato: 2026-08-16 18:52
 
-Fase corrente: Migrazione PROD — R4 in corso (verifica a campione),
-trovato e corretto un problema nel fallback delle date mancanti
+Fase corrente: Migrazione PROD — R3 rieseguita su copia fresca con il
+fix del fallback date, esito pulito confermato da Marco. In attesa
+della verifica a campione (R4)
 Titolo: eseguiMigrazioneCompletaSuCopiaProd — vedi AUDIT_MIGRAZIONE_PROD.md v2
 
-## R4 — osservazione di Marco: date odierne diffuse, non un errore ma un limite noto (2026-08-16)
+## R3 rieseguita su copia fresca, fix confermato (2026-08-16 18:48)
+
+Marco ha ripristinato il foglio "Backup di SigmaFlow Database" allo
+stato pre-migrazione (dati vecchi ricopiati, foglio `visite` eliminato)
+e rieseguito `eseguiMigrazioneCompletaSuCopiaProd`. Stesso esito pulito
+di prima (50 card, 0 errori, 0 card saltate, 0 `coherence_warnings`,
+`columns_json` corretto), **confermato da Marco come "comportamento
+coerente con la richiesta"** — il fallback data-da-job_id funziona come
+atteso sui dati reali.
+
+```
+cards_processed: 50, corrections_migrated: 0, checklist_items_migrated: 11,
+creation_events_backfilled: 50, cards_skipped: 0, errors: []
+columns_json: corrected=true, todo: wip -> prep
+schema_alignment: success=true
+migrazione_visite: jobs_processed=50, jobs_without_log=0,
+  visite_written=50, coherence_warnings=[]
+```
+
+Nota: proposta di Marco di dismettere anche il foglio `cases` — non
+urgente, rimandata esplicitamente a una sessione successiva (annotato
+in `AUDIT_MIGRAZIONE_PROD.md` §8).
+
+## R4 — prossimo passo: verifica a campione di Marco
+
+Chiedere a Marco 3-5 casi reali noti per confrontare `jobs`/`visite`
+con la storia vera, **tenendo conto ora del nuovo fallback**: le card
+senza `arrival_ts` originale mostreranno le 9:00 del giorno codificato
+nel `job_id`, non necessariamente l'ora reale — atteso, dichiarato
+esplicitamente come approssimazione di primo passo (Marco: "sarà da
+ricostruire attraverso le mail... andiamo con ordine").
+
+---
+
+## Cronologia precedente (2026-08-16, prima del fix)
+
+## R4 — osservazione di Marco: date odierne diffuse, non un errore ma un limite noto
 
 Marco ha notato, verificando i dati della R3, che moltissime card
 mostrano `arrival_ts`/`apertura_ts` di oggi anche se il `job_id`
