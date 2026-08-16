@@ -9,30 +9,28 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 ### Produzione
 
 - Spreadsheet: `SigmaFlow Database`
-- ID: `1OSVDfy7fOWSBNfoFUNLNHxB5AcdR-q6U59BuJjWaR-Q`
+- ID: `15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g` (`DEFAULT_SPREADSHEET_ID` in Constants.gs)
 - Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
 
 ### Test
 
-Creare uno Spreadsheet separato chiamato `SigmaFlow Database - TEST` con gli stessi tab:
+Uno Spreadsheet separato, stessi tab creati automaticamente da `setupSigmaFlow()`:
 
 - `jobs`
-- `cases`
+- `visite`
 - `config`
 
-Poi impostare la Script Property:
+ID di default (`DEFAULT_TEST_SPREADSHEET_ID` in Constants.gs): `1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU`.
+
+Può essere sovrascritto con la Script Property:
 
 ```text
 SIGMAFLOW_TEST_SPREADSHEET_ID = <id spreadsheet test>
 ```
 
-I test in `Tests.gs` usano solo questo ID. Se la property manca, i test devono fermarsi.
-
-Ambiente TEST corrente:
-
-- Spreadsheet: `SigmaFlow Database - TEST`
-- ID: `15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g`
-- URL: <https://docs.google.com/spreadsheets/d/15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g>
+I test in `Tests.gs` usano solo questo ID (o il default se la property
+non è impostata). Se nessuno dei due risolve uno spreadsheet valido, i
+test si fermano.
 
 Per configurare la Script Property dall'editor Apps Script, eseguire:
 
@@ -43,66 +41,79 @@ configureTestEnvironment
 Poi eseguire:
 
 ```text
-runAllTests
+runAllTestsAndLog
 ```
+
+### Harness Node (senza editor Apps Script)
+
+`apps-script/test-harness/gas-harness.js` mocka `SpreadsheetApp`/
+`PropertiesService`/`Utilities` e carica i `.gs` reali via `vm`. Utile
+per verificare la logica senza clasp run:
+
+```js
+const { createHarness } = require('./apps-script/test-harness/gas-harness.js');
+const h = createHarness();
+h.scriptProperties['SIGMAFLOW_TEST_SPREADSHEET_ID'] = 'test-ss';
+const result = h.context.runAllTests();
+```
+
+Non sostituisce `runAllTestsAndLog` nel vero ambiente GAS, ma è il modo
+più rapido per verificare un cambiamento prima di `clasp push`.
 
 ## Smoke test Web App
 
 Eseguire dopo ogni deploy:
 
-1. Aprire la Web App in modalita' TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=test>
+1. Aprire la Web App in modalita' TEST: `<url-deployment>?env=test`.
 2. Verificare che la board carichi senza alert.
 3. Verificare che il badge ambiente mostri `TEST`.
 4. Creare un job di prova in `backlog`.
-5. Trascinare il job in `wip`.
+5. Trascinare il job in `wip`: verificare nel foglio `visite` che la
+   visita aperta abbia `start_ts` valorizzato.
 6. Trascinare il job in `wait_client`, poi di nuovo in `todo`.
-7. Verificare nello Sheet TEST che il job sia marcato come rework automatico:
-   - `visit_number` maggiore di `1`
-   - `is_rework` `TRUE`
-   - `rework_cause` `wait_client`
+7. Verificare nel foglio `visite` il rientro automatico:
+   - la visita 1 ha `rientro_ts` valorizzato e `rientro_da` = `wait_client`
+   - esiste una visita 2 con `rework_cause` = `wait_client`
+   - sulla board, il badge rientro mostra `R1`
 8. Trascinare il job in `done`.
-9. Verificare nello Sheet TEST:
-   - `arrival_ts` valorizzato
-   - `start_ts` valorizzato
-   - `done_ts` valorizzato
-   - `service_time_d`, `lead_time_d`, `wait_time_d` numerici
+9. Verificare nel foglio `visite` che la visita aperta abbia
+   `consegna_ts` valorizzato (senza chiudere la visita: `rientro_ts`
+   resta vuoto, il job può ancora rientrare).
 10. Verificare che ogni colonna mostri conteggio job e somma punti.
 11. Crea una nuova colonna con ruolo `stand_by`.
 12. Sposta la nuova colonna a sinistra/destra e verifica che l'ordine resti salvato dopo reload.
 13. Rinomina una colonna, ricarica la pagina e verifica che il nome resti salvato.
 14. Cambia il ruolo di una colonna a `WIP` o `Concluso` e verifica che la dashboard continui a renderizzare.
 15. Aprire Dashboard e verificare che le metriche renderizzino senza valori `NaN` e senza zero fittizi per i dati non stimabili.
-16. Aprire una card, modificare piu' campi e premere `Salva`: verificare che titolo, cliente, descrizione, assegnatario, tag, taglia, priorita', scadenza e fatturato siano aggiornati con una sola operazione.
+16. Aprire una card, modificare piu' campi e premere `Salva`: verificare che titolo, cliente, descrizione, assegnatario, tag, taglia, priorita', scadenza e la casella `Chiuso` siano aggiornati con una sola operazione.
 17. Verificare che i filtri rendano opache le card non corrispondenti senza rimuoverle dalla board.
 18. Verificare che impatto e gestibilita' aggiornino punteggio e classe quando la priorita' e' `Automatico`.
 19. Verificare l'ordinamento per priorita' e per scadenza.
-20. Verificare date `gg/mm/aaaa`, primo rientro `R1` e blocco del rientro diretto da attesa a `WIP`.
+20. Verificare date `gg/mm/aaaa`, primo rientro `R1` e blocco del rientro diretto da attesa/completato a `WIP`.
 
 ## Test backend
 
-I primi test automatici coprono:
+La suite copre, tra l'altro:
 
-- setup schema test
-- `addJob`
-- `moveJob` verso `wip`
-- `moveJob` verso `done`
-- rework automatico da `wait_client` verso una colonna `wip`
-- blocco del rientro diretto da una colonna di attesa a `wip`
+- setup/allineamento schema (jobs, visite, config, dismissione `cases`)
+- `addJob`/`moveJob`/`updateJob`/`deleteJob`
+- apertura/chiusura visita su rientro da stand_by/done verso backlog/prep
+- accumulatori di attesa per tipo (`t_cliente_d`/`t_ente_d`/`t_interno_d`)
+- blocco del rientro diretto da una colonna di attesa/completato a wip
+- Cronologia (`addActivityEvent`/`updateActivityEvent`/`deleteActivityEvent`), ricalcolo di `from`
+- migrazione storica `visite` da `activity_log_json`
+- migrazione completa PROD (`eseguiMigrazioneCompleta_`, backfill + correzione columns_json + allineamento schema + migrazione visite)
 - priorita' automatica e manuale
 - colonne dinamiche, ruoli e opzioni dropdown
-- `markRework`
-- `getMetrics`
-- stato unificato della dashboard con campione insufficiente
-- separazione tra lavori conclusi e campioni validi per i tempi
-- carico presente, capacita' e rientri nello stato unificato
+- `getMetrics` (stato unificato dashboard, campione insufficiente, tempi/capacita'/rientri)
 - validazione errori per parametri mancanti
 
-La suite corrente contiene 17 test. Dopo la sincronizzazione eseguire `setupSigmaFlow`, quindi `runAllTestsAndLog`, e verificare `passed: 17`, `failed: 0`.
+La suite corrente contiene 68 test. Dopo la sincronizzazione eseguire `setupSigmaFlow`, quindi `runAllTestsAndLog`, e verificare `passed: 68`, `failed: 0`.
 
 ## Smoke test dashboard
 
 1. Con database TEST quasi vuoto, verificare `DATI INSUFFICIENTI` e la dicitura `Dato non ancora stimabile` per tempi, capacita' e carico.
-2. Verificare che siano visibili i tre contenitori `Lavoro pronto`, `Lavoro in corso` e `Lavoro che puo' rientrare`.
+2. Verificare che siano visibili i contenitori `Lavoro pronto`, `Lavoro in preparazione`, `Lavoro in corso` e `Lavoro che puo' rientrare`.
 3. Verificare i blocchi flusso, rientri, tempi, capacita' e affidabilita' dei dati.
 4. Verificare che la qualita' sia `BASSA` sotto 10 iniziative, `MEDIA` da 10 a 30 e `BUONA` oltre 30.
 5. Verificare che gli scenari siano indicati come predisposti e che nessuna simulazione futura sia mostrata come attiva.
@@ -111,7 +122,7 @@ La suite corrente contiene 17 test. Dopo la sincronizzazione eseguire `setupSigm
 
 ## Dataset dimostrativo TEST
 
-Dal deployment con `?env=test`, aprire Dashboard e usare `Genera dati TEST`. L'operazione richiede conferma, ripristina il solo database TEST e genera 60 pratiche distribuite sugli ultimi sei mesi.
+Dal deployment con `?env=test`, aprire Dashboard e usare `Genera dati TEST`. L'operazione richiede conferma, ripristina il solo database TEST e genera 60 pratiche distribuite sugli ultimi sei mesi — nello schema corrente (nessun `case_id`), con vere righe `visite` per ognuna (incluse ~8 pratiche con un rientro simulato).
 
 In alternativa, dall'editor Apps Script eseguire `generateTestDataset()`. La funzione usa esclusivamente `SIGMAFLOW_TEST_SPREADSHEET_ID`; l'azione Web App `seedTestData` rifiuta l'ambiente PROD.
 
@@ -125,7 +136,7 @@ In alternativa, dall'editor Apps Script eseguire `generateTestDataset()`. La fun
 - Touch: verificare swipe orizzontale senza trascinamento involontario; il drag parte dopo pressione prolungata.
 - Menu: aggiungere un valore da `Aggiungi...` o `Altro`, riordinarlo e verificare il blocco della rimozione quando e' usato.
 
-Ogni test deve:
+Ogni test backend deve:
 
 1. pulire i fogli TEST;
 2. preparare dati minimi;

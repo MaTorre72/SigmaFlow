@@ -8,18 +8,21 @@ anche se il prompt di sessione non le ripete.
 
 ---
 
-## Regola principale
-**Eseguire una sola fase del programma per sessione.**
+## Stato del progetto
 
-Il programma attivo si trova in `PROGRAMMA_ACTIVITY_LOG.md`.
-Lo stato corrente si trova in `PROGRAMMA_STATO.md`.
+Il programma a fasi originale (Activity Log, Fasi A-K; modello
+caso/visita, Fasi L1-L5; migrazione PROD) è **completato**. SigmaFlow è
+in produzione. Non c'è più un "programma" da eseguire una fase alla
+volta: il lavoro prosegue come manutenzione/evoluzione ordinaria, su
+richiesta esplicita di Marco in ciascuna sessione.
 
-All'inizio di ogni sessione:
-1. Leggere `PROGRAMMA_STATO.md`
-2. Identificare la fase corrente
-3. Leggere la fase corrispondente in `PROGRAMMA_ACTIVITY_LOG.md`
-4. Eseguire solo quella fase
-5. Aggiornare `PROGRAMMA_STATO.md` a fine fase
+- Stato corrente e prossimi passi noti: `PROGRAMMA_STATO.md`
+- Cronologia completa delle fasi già chiuse: `docs/storico/PROGRAMMA_STATO_storico.md`
+
+All'inizio di ogni sessione, leggere `PROGRAMMA_STATO.md` per il
+contesto, poi seguire la richiesta di Marco. Aggiornare
+`PROGRAMMA_STATO.md` quando si chiude un pezzo di lavoro significativo
+(non ad ogni singola modifica).
 
 ---
 
@@ -34,72 +37,42 @@ All'inizio di ogni sessione:
 
 ## Regole di progetto
 
-- Mai modificare `main` direttamente
-- Ogni fase ha il suo branch — usare quello indicato nel programma
-- Ambiente TEST sempre separato da PROD
-- Nessuna scrittura su PROD senza gate umano esplicito
-- Se un file non esiste dove atteso: documentarlo, non inventarlo
-
----
-
-## Regole sui gate
-
-### Gate 🟢 AUTO
-Verificare tutti i criteri di accettazione della fase.
-Se tutti TRUE → aggiornare `PROGRAMMA_STATO.md` con esito COMPLETATA.
-Se anche uno solo FALSE → aggiornare con esito BLOCCATA e fermarsi.
-Non procedere alla fase successiva se la fase corrente è BLOCCATA.
-
-### Gate 🔴 UMANO
-Fermarsi sempre. Aggiornare `PROGRAMMA_STATO.md` con stato
-IN_ATTESA_GATE_UMANO. Non procedere senza risposta esplicita di Marco.
-
----
-
-## Formato aggiornamento `PROGRAMMA_STATO.md`
-
-Sovrascrivere il file con questo formato:
-
-```
-# Stato programma: SigmaFlow — Activity Log
-Aggiornato: [data e ora]
-
-Fase corrente: [lettera]
-Titolo: [titolo fase]
-Stato: COMPLETATA | BLOCCATA | IN_CORSO | IN_ATTESA_GATE_UMANO
-
-Criteri di accettazione:
-[x] Criterio 1
-[x] Criterio 2
-[ ] Criterio 3 — FALLITO: [motivo]
-
-Prossima fase: [lettera] | IN_ATTESA_GATE_UMANO | PROGRAMMA_COMPLETATO
-
-Note:
-[eventuale descrizione di errori, blocchi o osservazioni]
-```
-
----
-
-## Riferimenti tecnici
-
-- Specifica backend completa: `docs/codex_sigmaflow_activity_log_backend.md`
-- Specifica frontend completa: `docs/codex_sigmaflow_activity_log_frontend.md`
-- Ricognizione iniziale: `RICOGNIZIONE.md` (creato in Fase A)
-
-Consultare la specifica tecnica quando il programma rimanda ai dettagli
-di implementazione — non tenere tutto a memoria.
+- Mai modificare `main` direttamente — lavorare su un branch dedicato e
+  unire tramite pull request.
+- Ambiente TEST sempre separato da PROD.
+- Nessuna scrittura su PROD (dati o deployment) senza gate umano
+  esplicito — Marco esegue lui le azioni che toccano i dati reali o il
+  deployment pubblicato.
+- Se un file non esiste dove atteso: documentarlo, non inventarlo.
+- Prima di ogni consegna: eseguire la suite di test (harness Node o
+  `runAllTestsAndLog`), verificare il push su TEST con `clasp pull`
+  isolato + diff, poi aggiornare `PROGRAMMA_STATO.md`.
 
 ---
 
 ## In caso di ambiguità
 
-Se un'istruzione del programma è ambigua rispetto al codice trovato
-in ricognizione, seguire questo ordine di priorità:
+Se un'istruzione è ambigua rispetto al codice esistente, seguire questo
+ordine di priorità:
 
 1. Codice esistente (non rompere ciò che funziona)
-2. Specifica tecnica (`docs/codex_sigmaflow_activity_log_*.md`)
-3. Programma (`PROGRAMMA_ACTIVITY_LOG.md`)
+2. Documentazione tecnica in `docs/` (`architecture.md`,
+   `DESIGN_modello_caso_visita.md`, `dashboard-metrics.md`,
+   `testing-and-security.md`)
+3. Chiedere a Marco
 
-Se l'ambiguità non è risolvibile → aggiornare `PROGRAMMA_STATO.md`
-con stato BLOCCATA, descrivere il problema, fermarsi.
+Se l'ambiguità non è risolvibile con questi tre passi → documentare il
+problema in `PROGRAMMA_STATO.md` e fermarsi.
+
+---
+
+## Riferimenti tecnici
+
+- Architettura (schema fogli, backend, frontend): `docs/architecture.md`
+- Design del modello caso/visita: `docs/DESIGN_modello_caso_visita.md`
+- Metriche dashboard: `docs/dashboard-metrics.md`
+- Testing e sicurezza: `docs/testing-and-security.md`
+- Setup Google Workspace: `docs/google-workspace-setup.md`
+
+Consultare la documentazione tecnica quando serve un dettaglio di
+implementazione — non tenere tutto a memoria.
