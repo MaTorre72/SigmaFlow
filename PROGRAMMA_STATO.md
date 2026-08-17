@@ -15,13 +15,45 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva. **Collaudo M0-C su TEST fatto da Marco, con un
-piccolo follow-up di performance chiuso**: push su TEST eseguito e
-verificato (13/13 file identici via `clasp pull` isolato + diff). Suite
-completa passata via harness (81/81). Codice sul branch
-`feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B + M0-C + bugfix +
-follow-up salvataggio colonna), non ancora unito a `main` — decisione
-di merge non affrontata in questa sessione.
+**Gate umano pendente**: Marco deve eseguire `allineaSchemaSuProd()`
+dall'editor Apps Script sul foglio PROD vero (vedi sezione sotto) — lo
+schema di PROD non si è ancora allineato dopo l'ultimo deploy.
+
+`feat/m0-a-frontend-perf` (M0-A → M0-C + bugfix + follow-up salvataggio
+colonna) unito a `main` con PR #3 e deployato da Marco sul deployment
+pubblico. `fix/prod-schema-version-shared` (bugfix sotto) unito con PR
+#4. Suite completa passata via harness (81/81) a ogni passo.
+
+## Bugfix — PROP_SCHEMA_VERSION condivisa ha saltato il deploy su PROD (2026-08-17)
+
+Dopo che Marco ha aggiornato il deployment pubblico con `main`
+(comprendente M0-A → M0-C, `SCHEMA_VERSION` 8→12), ha segnalato che sul
+foglio PROD reale `notes`/`checklist_json`/`correction_log_json`
+risultavano ancora presenti e `status_since_ts` non esisteva — lo
+schema non si era allineato nonostante il codice nuovo fosse live.
+
+**Causa, esattamente il rischio già documentato in
+`AUDIT_MIGRAZIONE_PROD.md` §0.1**: `PROP_SCHEMA_VERSION` è una Script
+Property condivisa su tutto il progetto Apps Script, non separata per
+spreadsheet. Le sessioni di collaudo M0-A/B/C su TEST avevano già
+portato quella property al valore corrente (12); al primo caricamento
+reale di PROD dopo il deploy, `ensureCurrentSchema_()` ha visto
+"versione già allineata" (property globale, non del foglio PROD
+specifico) e saltato `setupSigmaFlow()` — pur non avendo mai toccato lo
+schema del foglio PROD vero.
+
+**Corretto**: `allineaSchemaSuProd()` (Schema.gs) esegue
+`setupSigmaFlow()` direttamente sul foglio PROD vero, bypassando il
+controllo sulla property condivisa — additivo/idempotente su ogni suo
+passo, nessun rischio nuovo rispetto a quanto già verificato su TEST e
+sulla copia di PROD nelle sessioni precedenti. Stesso pattern di
+sicurezza di `eseguiMigrazioneCompletaSuProd` (id/nome verificati
+indipendentemente, si ferma da sola se non corrispondono).
+
+81/81 test via harness Node. Push su TEST verificato (13/13 file
+identici). PR #4 unita a `main`. **Non ancora eseguita da nessuno**:
+Marco deve lanciare `allineaSchemaSuProd()` dall'editor Apps Script sul
+foglio PROD vero per chiudere l'allineamento.
 
 ## Collaudo M0-C su TEST — falso allarme + follow-up di performance reale (2026-08-17)
 
