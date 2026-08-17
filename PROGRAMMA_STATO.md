@@ -15,14 +15,14 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-**Gate umano pendente**: Marco deve eseguire `allineaSchemaSuProd()`
-dall'editor Apps Script sul foglio PROD vero (vedi sezione sotto) — lo
-schema di PROD non si è ancora allineato dopo l'ultimo deploy.
-
-`feat/m0-a-frontend-perf` (M0-A → M0-C + bugfix + follow-up salvataggio
-colonna) unito a `main` con PR #3 e deployato da Marco sul deployment
-pubblico. `fix/prod-schema-version-shared` (bugfix sotto) unito con PR
-#4. Suite completa passata via harness (81/81) a ogni passo.
+Nessuna fase attiva, nessun gate pendente. `feat/m0-a-frontend-perf`
+(M0-A → M0-C + bugfix + follow-up salvataggio colonna) unito a `main`
+con PR #3, deployato da Marco sul deployment pubblico.
+`fix/prod-schema-version-shared` (bugfix sotto) unito con PR #4, **già
+eseguito da Marco su PROD vero (`allineaSchemaSuProd()`) e verificato
+da lui direttamente sul foglio**: `notes`/`checklist_json`/
+`correction_log_json` rimossi, `status_since_ts` presente e popolato.
+Suite completa passata via harness (81/81) a ogni passo.
 
 ## Bugfix — PROP_SCHEMA_VERSION condivisa ha saltato il deploy su PROD (2026-08-17)
 
@@ -51,9 +51,8 @@ sicurezza di `eseguiMigrazioneCompletaSuProd` (id/nome verificati
 indipendentemente, si ferma da sola se non corrispondono).
 
 81/81 test via harness Node. Push su TEST verificato (13/13 file
-identici). PR #4 unita a `main`. **Non ancora eseguita da nessuno**:
-Marco deve lanciare `allineaSchemaSuProd()` dall'editor Apps Script sul
-foglio PROD vero per chiudere l'allineamento.
+identici). PR #4 unita a `main`. **Eseguita da Marco su PROD vero e
+confermata**: schema allineato, nessuna anomalia riscontrata.
 
 ## Collaudo M0-C su TEST — falso allarme + follow-up di performance reale (2026-08-17)
 
