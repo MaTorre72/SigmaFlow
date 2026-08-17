@@ -148,6 +148,47 @@ function ensureCurrentSchema_() {
   setupSigmaFlow();
 }
 
+// Bugfix: PROP_SCHEMA_VERSION e' una Script Property CONDIVISA su tutto
+// il progetto Apps Script, non separata per spreadsheet — rischio gia'
+// documentato (AUDIT_MIGRAZIONE_PROD.md §0.1), qui materializzato per
+// davvero. Le sessioni di collaudo su TEST (M0-A/B/C) hanno gia' portato
+// quella property al valore corrente: al primo caricamento reale di
+// PROD dopo il deploy, ensureCurrentSchema_() ha visto "versione gia'
+// allineata" e saltato setupSigmaFlow() — pur non avendo MAI toccato lo
+// schema del foglio PROD vero (notes/checklist_json/correction_log_json
+// ancora presenti, status_since_ts mai aggiunto).
+//
+// Esegue setupSigmaFlow() direttamente sul foglio PROD vero, bypassando
+// il controllo sulla property condivisa (setupSigmaFlow e' additiva e
+// idempotente su ogni suo singolo passo — nessun rischio nuovo rispetto
+// a quanto gia' verificato su TEST e sulla copia di PROD in sessioni
+// precedenti). Stesso pattern di sicurezza di
+// eseguiMigrazioneCompletaSuProd (ActivityLog.gs): id e nome scritti
+// come due valori indipendenti, si ferma da sola se non corrispondono;
+// nome senza underscore finale per restare visibile nel menu Esegui.
+function allineaSchemaSuProd() {
+  var ss = SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
+  if (ss.getName() !== 'SigmaFlow Database') {
+    throw new Error('Nome foglio inatteso ("' + ss.getName() + '"), controllo di sicurezza fallito. Nessuna modifica eseguita.');
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  var props = PropertiesService.getScriptProperties();
+  var previousSpreadsheetId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+  try {
+    return setupSigmaFlow();
+  } finally {
+    if (previousSpreadsheetId) {
+      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetId);
+    } else {
+      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+    }
+    lock.releaseLock();
+  }
+}
+
 function migrateJobDefaults_(sheet) {
   var jobs = readTable_(sheet);
   if (!jobs.length) { return; }
