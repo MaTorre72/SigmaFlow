@@ -15,16 +15,70 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva. **M0-B chiusa**: push su TEST eseguito e
+Nessuna fase attiva. **M0-C chiusa**: push su TEST eseguito e
 verificato (13/13 file identici via `clasp pull` isolato + diff). Suite
-completa passata via harness (69/69, nessuna modifica lato backend).
-Codice sul branch `feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B), non
-ancora unito a `main` — decisione di merge non affrontata in questa
-sessione. Restato sullo stesso branch invece di aprirne uno nuovo: M0-B
-è un proseguimento diretto dello stesso filone performance/rendering,
-tocca lo stesso file (`client.html`) e riusa il pattern
-`mergeJobIntoState` introdotto in M0-A2 — separarlo non avrebbe dato
-isolamento reale.
+completa passata via harness (77/77). Codice sul branch
+`feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B + M0-C), non ancora
+unito a `main` — decisione di merge non affrontata in questa sessione.
+Restato sullo stesso branch anche per M0-C, stesso motivo delle
+sessioni precedenti: proseguimento diretto dello stesso filone
+performance/rendering, riusa i pattern già introdotti (aggiornamento
+incrementale di M0-B per riflettere subito `status_since_ts`).
+
+## Sessione M0-C — aging configurabile per colonna (2026-08-17)
+
+Sostituisce la soglia fissa `role==='stand_by' && daysSince(start_ts||arrival_ts) > 5`
+— sbagliata sia nel riferimento temporale (misurava da inizio
+lavorazione, non da quando la card è entrata nella colonna attuale) sia
+nella soglia (uguale per tutte le attese) — con `aging_days`
+configurabile per colonna, applicabile a qualunque ruolo.
+
+**Ricognizione**: confermato che la regola "aging" viveva duplicata fra
+il ciclo colonne di `renderBoard()`, `renderCard()` e
+`updateColumnCounters_()` di M0-B (tre copie della stessa condizione).
+Unificata in `isJobAging_(job, column)`/`countAgingInColumn_(jobs, column)`,
+usate da tutti e tre i punti.
+
+**Backend**:
+- `status_since_ts` aggiunto a `JOB_HEADERS` (`SCHEMA_VERSION` 10->11).
+  `addJob` lo imposta alla creazione; `moveJob` solo sui cambi di
+  colonna reali, mai sul self-move. Il job restituito da `moveJob` lo
+  porta già aggiornato (stesso principio dei campi di rientro di
+  M0-A2), così l'aggiornamento incrementale di M0-B lo riflette senza
+  reload.
+- `aging_days` opzionale in `columns_json`. Migrazione una tantum in
+  `setupSigmaFlow` (`seedAgingDaysForStandByColumns_`): scrive 5 solo
+  sulle colonne `stand_by` ancora prive del campo, idempotente, non
+  tocca altri ruoli né colonne già configurate. `DEFAULT_COLUMNS` (solo
+  ambienti nuovi/vuoti) lo popola direttamente: 5/15/45 per attesa
+  interna/cliente/enti (valori di esempio di Marco).
+- **Bugfix trovato in ricognizione, non nell'elenco originale**:
+  `normalizeColumns_`/`writeColumns_` (Utils.gs) e `columnMeta` in
+  `getBoard()` (Kanban.gs) ricostruivano ogni colonna con un elenco
+  fisso di campi che non includeva `aging_days` — senza questa
+  correzione, leggere o scrivere QUALUNQUE colonna avrebbe
+  silenziosamente cancellato `aging_days` da tutte le altre. Tre copie
+  dello stesso problema, tutte e tre corrette.
+
+**Frontend**: badge di colonna mostra la soglia effettiva (`>15g`
+invece del fisso `>5g`). Campo "Evidenzia dopo (giorni)" nel pannello
+Impostazioni colonna, vuoto ammesso (evidenziazione disattivata per
+quella colonna).
+
+**Verifica manuale** (nessun test copre il DOM, come nelle sessioni
+precedenti): argomentata leggendo il codice — un solo punto costruisce
+il badge (`countAgingInColumn_`), un solo punto decide se una card è
+"in aging" (`isJobAging_`), entrambi usati sia dal redraw completo sia
+dall'aggiornamento incrementale di M0-B, nessuna copia residua
+(verificato via grep: zero occorrenze di `staleCount`/`isStale`/
+`role === 'stand_by'` fuori dalle due funzioni unificate).
+
+**77/77 test passati** (69 + 8 nuovi: `status_since_ts` su creazione/
+mossa reale/self-move, `aging_days` di default nel `column_meta`,
+colonna non configurata senza evidenziazione, migrazione una tantum
+solo sulle colonne prive e idempotente, regressione sul bug di
+`writeColumns_`). Commit `437fe2e`. Push su TEST eseguito e verificato
+(13/13 file identici).
 
 ## Sessione M0-B — rendering incrementale della board (2026-08-17)
 
