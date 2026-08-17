@@ -15,7 +15,13 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva, nessun gate pendente. `feat/m0-a-frontend-perf`
+Nessuna fase attiva, nessun gate pendente. Sessione diagnostica su
+`activity_log_json` chiusa (vedi sotto): numeri raccolti, nessuna
+proposta di soluzione ancora fatta — prossimo passo naturale è
+progettare l'archiviazione in una sessione dedicata, quando Marco
+vorrà.
+
+`feat/m0-a-frontend-perf`
 (M0-A → M0-C + bugfix + follow-up salvataggio colonna) unito a `main`
 con PR #3, deployato da Marco sul deployment pubblico.
 `fix/prod-schema-version-shared` (bugfix sotto) unito con PR #4, **già
@@ -239,17 +245,69 @@ coinvolte nell'operazione non vengono mai interrogate.
 `client.html`). Commit `b4ac93d`. Push su TEST eseguito e verificato
 (13/13 file identici).
 
-## Nota pendente — non affrontata in questa sessione
+## Sessione diagnostica — peso reale di activity_log_json su TEST (2026-08-17)
 
-Durante la ricognizione di M0-A2 sulla lentezza di `getActivityLog` era
-emersa un'ipotesi poi smentita per quella funzione specifica (legge
-già in modo mirato). Resta però un sospetto distinto, non ancora
-verificato, per `getBoard()`/`getMetrics()`: entrambe chiamano
-`readTable_` sull'intero foglio `jobs`, che include `activity_log_json`
-per OGNI card — un campo che cresce senza limite a ogni evento. Se
-questo pesa sensibilmente sul caricamento board/dashboard (non solo su
-un singolo job come in `getActivityLog`) è materia per una sessione
-diagnostica dedicata, non affrontata qui.
+Chiude la nota pendente lasciata da M0-A2 (sospetto su
+`getBoard()`/`getMetrics()`, mai verificato). Sessione **solo lettura**:
+nessuna modifica a schema/dati/codice di produzione. Misurato con
+funzioni temporanee (`Diagnostica.gs`, rimosso a fine sessione, dati
+sotto) eseguite da Marco dall'editor sul database TEST reale (50 job,
+dati migrati da PROD — non il dataset demo sintetico). Dove un dato non
+era misurabile in modo affidabile su questo dataset è dichiarato
+esplicitamente, non stimato.
+
+**1. Peso reale**: `activity_log_json` totale 7.643 byte su 50 card
+(media 152,86 byte/card, mediana 151, più pesante `JOB-20260707-0ZU7`
+con 323 byte). Rispetto al totale trasportato da una lettura completa
+di `jobs` (18.970 byte su tutti i campi, tutte le righe):
+**40,29%** — quasi metà del peso di ogni lettura è quel solo campo.
+
+**2. Distribuzione per stato**: card concluse (`done`, 9 card) 1.296
+byte totali, media 144/mediana 144. Card attive (41 card) 6.347 byte
+totali, media 154,8/mediana 153 — **le card attive sono leggermente
+più pesanti in media (+7,5%), non il contrario**, e la card più pesante
+in assoluto è tra le attive. Il peso totale è concentrato sulle attive
+solo perché sono la maggioranza (82% delle card, 83% dei byte — stessa
+proporzione, nessun eccesso). **Implicazione per l'archiviazione**:
+archiviare solo le card chiuse toglierebbe solo ~17% del peso totale,
+non risolverebbe la maggior parte del problema — conferma l'ipotesi di
+Marco sul rischio di una soluzione parziale.
+
+**3. Correlazione con numero di visite — NON misurabile su questo
+dataset**: tutte e 50 le card hanno `MAX(numero_visita) = 1` in
+`visite`, nessuna ha mai un rientro registrato in questo campione.
+Nessuna base di confronto tra bucket (2, 3, 4+ rientri tutti vuoti).
+Serve un dataset con job effettivamente rientrati per rispondere alla
+domanda "i log crescono con i rientri?" — non deducibile da questi
+numeri.
+
+**4. Costo di lettura reale**: `getBoard()` completo, media 852ms
+(mediana 696, dev.std 312,7, un campione a 1.453ms). Isolando solo la
+lettura del foglio `jobs`: **con** `activity_log_json`
+(`getDataRange()`) media 420ms/mediana 158ms/**dev.std 402,5**
+(campioni tra 123 e 1.179ms); **senza** quella colonna (due `getRange`
+mirati) media **9,8ms**/mediana 8ms/dev.std 2,7 (campioni tra 8 e
+15ms). **~40-50 volte più lento con il campo incluso, anche solo su 50
+righe e ~7,6KB totali** — e la variabilità stessa crolla di due ordini
+di grandezza togliendolo: `activity_log_json` non solo pesa in media,
+introduce anche imprevedibilità nel tempo di lettura. Misurato
+server-side (Apps Script + Sheets API); il vero round-trip da browser
+via `google.script.run` (che include il costo fisso di rete/dispatch
+già isolato in M0-A) non è stato raccolto in questa sessione — nessuno
+snippet lato browser eseguito da Marco.
+
+**5. Proiezione di crescita — NON affidabile su questo dataset**: solo
+1 card su 50 ha un log con almeno due eventi con timestamp validi
+(quindi un ritmo calcolabile: 1,43 eventi/mese). Le altre 49 hanno un
+log a un solo evento — verosimilmente l'evento di creazione ricostruito
+dalla migrazione storica di PROD, non una cronologia di uso reale
+accumulata dopo il deploy. Un tasso derivato da un singolo campione non
+è una stima di popolazione affidabile: **non è possibile proiettare il
+peso a 6/12 mesi da questi dati**. Servirà rimisurare quando ci sarà
+più uso reale post-deploy accumulato.
+
+Nessuna proposta di soluzione in questa sessione, come richiesto — solo
+numeri, per la sessione di design dell'archiviazione.
 
 ## Sessione M0-A2 — follow-up dall'uso reale (2026-08-17)
 
