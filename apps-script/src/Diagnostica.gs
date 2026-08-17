@@ -72,6 +72,16 @@ function runActivityLogDiagnostics() {
   };
 }
 
+// Wrapper pensati per essere lanciati dal menu Esegui: il valore di
+// ritorno di una funzione non compare da solo nel "Registro di
+// esecuzione" (solo avvio/fine) — Logger.log() si', sempre visibile in
+// Visualizza > Registri.
+function stampaDiagnosticaActivityLog() {
+  var result = runActivityLogDiagnostics();
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
 function byteLength_(str) {
   return Utilities.newBlob(str).getBytes().length;
 }
@@ -224,6 +234,12 @@ function runReadTimingDiagnostics() {
     jobs_sheet_without_activity_log_ms: timingSummary_(jobsWithoutLog),
     nota_metodologica: 'Tempi misurati server-side (Date.now() attorno alla chiamata Sheets API), NON un vero round-trip Web App via google.script.run da browser: manca il costo di dispatch/rete di una chiamata client reale, che secondo la diagnosi precedente (M0-A) e\' il costo dominante e fisso per ogni chiamata, indipendente dai byte trasportati. Questo dato isola quindi solo il contributo della lettura Sheets API stessa, utile per capire se activity_log_json pesa su QUELLA parte, non sul tempo totale percepito da chi usa la board.'
   };
+}
+
+function stampaDiagnosticaTempiLettura() {
+  var result = runReadTimingDiagnostics();
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
 function timingSummary_(samples) {
