@@ -15,13 +15,54 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva. **M0-C bugfix chiuso**: push su TEST eseguito e
+Nessuna fase attiva. **Collaudo M0-C su TEST fatto da Marco, con un
+piccolo follow-up di performance chiuso**: push su TEST eseguito e
 verificato (13/13 file identici via `clasp pull` isolato + diff). Suite
 completa passata via harness (81/81). Codice sul branch
-`feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B + M0-C + bugfix), non
-ancora unito a `main` — decisione di merge non affrontata in questa
-sessione. Restato sullo stesso branch: correzione diretta di M0-C,
-stesso file/area.
+`feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B + M0-C + bugfix +
+follow-up salvataggio colonna), non ancora unito a `main` — decisione
+di merge non affrontata in questa sessione.
+
+## Collaudo M0-C su TEST — falso allarme + follow-up di performance reale (2026-08-17)
+
+Marco ha segnalato che il badge aging "funziona ma è lentissimo ad
+aggiornarsi dopo una modifica a una colonna, serve ricaricare tutta la
+lavagna". Non avendo accesso al deployment TEST reale (richiede login
+del dominio sigmapiu.it), ho costruito una riproduzione interattiva
+fedele del codice reale — markup di `board.html` + script di
+`client.html` veri, `google.script.run` simulato, servita da un vero
+server HTTP locale (non uno snapshot statico) — ed eseguito lo stesso
+scenario nel Browser pane.
+
+**Primo giro**: nessun bug — il badge si aggiornava correttamente senza
+reload. Causa del malinteso di Marco: probabile tab del browser rimasta
+aperta da prima dell'ultimo push, quindi ancora su JS vecchio (confermato
+dopo un refresh forzato).
+
+**Secondo giro, dopo conferma di Marco** ("si aggiorna ma è molto molto
+lento"): trovata una causa reale di lentezza, non un'illusione.
+`saveColumnSettings`/`moveColumn` chiamavano `updateColumn`/`addColumn`/
+`moveColumn` e POI `loadBoard(true)` — un secondo round-trip completo
+(`getBoard()`, che rilegge jobs+visite oltre alle colonne) solo per
+riottenere `columns` che la risposta del primo salvataggio conteneva
+già. Su Apps Script ogni round-trip costa un paio di secondi fissi
+(stesso principio di M0-A): raddoppiarlo per un salvataggio di colonna
+si sentiva parecchio.
+
+**Corretto**: nuovo `applyColumnsResponse_` — aggiorna `state.columnMeta`
+dalla risposta già in mano e ridisegna in locale, un solo giro di rete
+invece di due. `show-hidden-columns-button` lasciato apposta su
+`loadBoard(true)`: più `updateColumn` in parallelo sullo stesso
+`columns_json` rischiano di sovrascriversi a vicenda lato server, un
+`getBoard()` dopo che tutte sono finite è l'unico modo sicuro di
+rileggere lo stato vero. Verificato di nuovo con la stessa riproduzione
+interattiva: un solo round-trip, badge aggiornato.
+
+**81/81 test passati** (nessuna modifica lato backend). Commit
+`a64786d`. Push su TEST eseguito e verificato (13/13 file identici). I
+file temporanei della riproduzione (server Node + pagina HTML +
+`.claude/launch.json`) sono stati rimossi a fine verifica, mai
+committati.
 
 ## Sessione M0-C bugfix — backfill status_since_ts (2026-08-17)
 
