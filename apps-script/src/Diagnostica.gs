@@ -56,10 +56,23 @@ function runActivityLogDiagnostics() {
     };
   });
 
+  var totalRowBytes = rows.reduce(function(a, r) { return a + r.row_bytes; }, 0);
+  var totalLogBytes = rows.reduce(function(a, r) { return a + r.log_bytes; }, 0);
+
   return {
     generated_at: nowIso_(),
     jobs_total: rows.length,
-    peso_reale: summarizeBytes_(rows.map(function(r) { return r.log_bytes; }), rows),
+    peso_reale: Object.assign(
+      summarizeBytes_(rows.map(function(r) { return r.log_bytes; }), rows),
+      {
+        // Richiesto al punto 1: quanto pesa activity_log_json sul
+        // totale trasportato da una lettura completa di jobs (somma di
+        // TUTTI i campi su TUTTE le righe, non la media per singola
+        // card di log_share_of_row).
+        total_row_bytes_tutti_i_campi: totalRowBytes,
+        share_of_full_jobs_read_percent: totalRowBytes > 0 ? round2_(totalLogBytes / totalRowBytes * 100) : null
+      }
+    ),
     distribuzione_per_stato: {
       done: summarizeBytes_(rows.filter(function(r) { return r.is_done; }).map(function(r) { return r.log_bytes; }), rows.filter(function(r) { return r.is_done; })),
       attive: summarizeBytes_(rows.filter(function(r) { return !r.is_done; }).map(function(r) { return r.log_bytes; }), rows.filter(function(r) { return !r.is_done; }))
