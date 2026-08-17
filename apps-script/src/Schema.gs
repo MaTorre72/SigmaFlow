@@ -135,6 +135,7 @@ function setupSigmaFlow() {
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
   seedAgingDaysForStandByColumns_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+  backfillStatusSinceTs_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SCHEMA_VERSION, SIGMAFLOW.SCHEMA_VERSION);
@@ -289,6 +290,52 @@ function seedAgingDaysForStandByColumns_(sheet) {
     }
     return;
   }
+}
+
+// M0-C, correzione post-collaudo su TEST: la migrazione additiva di
+// M0-C aggiungeva la sola colonna status_since_ts allo schema (giusto
+// per principio: mai inventare un valore per righe gia' esistenti), ma
+// lascia vuoti tutti i job gia' presenti — e daysSince('') ritorna 0,
+// quindi restano silenziosamente esclusi dall'aging finche' non
+// vengono spostati almeno una volta. Proprio le card ferme da piu'
+// tempo, che nessuno tocca, sono quelle che il meccanismo dovrebbe
+// segnalare.
+//
+// Backfill una tantum: per ogni job con status_since_ts vuoto, cerca
+// nel suo activity_log_json l'evento move piu' recente con to===status
+// attuale — stesso pattern di ricerca all'indietro gia' usato da
+// lastEntryTsForColumn_ (Kanban.gs, sez. 4 accumulo attese), riusato
+// cosi' com'e' invece di reimplementarlo (passando "adesso" come limite
+// superiore: ogni evento nel log e' per definizione nel passato,
+// esattamente l'uso per cui quella funzione e' gia' pensata). Se il log
+// non contiene un evento simile (dato storico incompleto o anomalo),
+// ricade su arrival_ts. Se anche quello e' vuoto, il campo resta
+// vuoto — nessuna base su cui stimare una data, meglio "non ancora
+// noto" che una data inventata (stesso principio applicato in tutta la
+// migrazione PROD di questa sessione).
+// Idempotente: un job che ha gia' status_since_ts (valorizzato da una
+// mossa reale successiva a M0-C) non viene toccato.
+function backfillStatusSinceTs_(sheet) {
+  var jobs = readTable_(sheet);
+  if (!jobs.length) { return { jobs_backfilled: 0, jobs_total: 0 }; }
+  var now = nowIso_();
+  var changed = false;
+  var backfilled = 0;
+  var rows = jobs.map(function(job) {
+    if (job.status_since_ts) { return jobToRow_(job); }
+    var log = parseActivityLog_(job.activity_log_json);
+    var entryTs = lastEntryTsForColumn_(log, job.status, now);
+    job.status_since_ts = entryTs || job.arrival_ts || '';
+    if (job.status_since_ts) {
+      backfilled++;
+      changed = true;
+    }
+    return jobToRow_(job);
+  });
+  if (changed) {
+    sheet.getRange(2, 1, rows.length, JOB_HEADERS.length).setValues(rows);
+  }
+  return { jobs_backfilled: backfilled, jobs_total: jobs.length };
 }
 
 function ensureConfigValueIfEmpty_(sheet, key, value) {

@@ -227,6 +227,10 @@ function runAllTests() {
     testStatusSinceTsSetOnCreation,
     testStatusSinceTsUpdatesOnRealMove,
     testStatusSinceTsNotResetOnSelfMove,
+    testBackfillStatusSinceTsUsesLastMoveToCurrentStatus,
+    testBackfillStatusSinceTsFallsBackToArrivalTsWhenStatusNeverReachedInLog,
+    testBackfillStatusSinceTsLeavesEmptyWhenNoBasisAtAll,
+    testBackfillStatusSinceTsIsIdempotentOnAlreadySetJobs,
     testDefaultColumnsCarryAgingDaysToBoardMeta,
     testColumnMetaOmitsAgingDaysWhenNotConfigured,
     testSeedAgingDaysMigrationFillsOnlyMissingStandByColumns,
@@ -478,6 +482,107 @@ function testStatusSinceTsNotResetOnSelfMove() {
     var selfMove = moveJob({ job_id: created.job_id, status: 'wip' });
 
     assertEquals_(afterRealMove, selfMove.data.job.status_since_ts, 'status_since_ts invariato su un self-move (la card non ha mai lasciato la colonna)');
+  });
+}
+
+// --- M0-C, correzione post-collaudo: backfill di status_since_ts per i
+// job gia' esistenti (la migrazione additiva di M0-C lascia vuoti
+// quelli mai spostati dopo il deploy, escludendoli silenziosamente
+// dall'aging finche' daysSince('') === 0) ---
+
+function testBackfillStatusSinceTsUsesLastMoveToCurrentStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Backfill da log', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Simula un job pre-M0-C: status_since_ts vuoto, log con un move
+    // verso 'backlog' (lo status attuale) non recente, seguito da un
+    // move verso un'altra colonna e poi di nuovo verso 'backlog' — il
+    // backfill deve trovare il PIU' RECENTE dei due verso lo status
+    // attuale, non il primo in assoluto.
+    job.status_since_ts = '';
+    job.activity_log_json = JSON.stringify([
+      { id: '1', ts: '2026-01-01T09:00:00+02:00', type: 'move', source: 'auto', to: 'backlog', from: null },
+      { id: '2', ts: '2026-01-05T09:00:00+02:00', type: 'move', source: 'auto', to: 'todo', from: 'backlog' },
+      { id: '3', ts: '2026-01-10T09:00:00+02:00', type: 'move', source: 'auto', to: 'backlog', from: 'todo' }
+    ]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = backfillStatusSinceTs_(sheet);
+
+    assertEquals_(1, result.jobs_backfilled, 'un job backfillato');
+    var after = readJobFromRow_(sheet, row, headers);
+    assertEquals_('2026-01-10T09:00:00+02:00', after.status_since_ts, 'status_since_ts = evento move piu\' recente verso lo status attuale, non il primo ne\' "ora"');
+  });
+}
+
+function testBackfillStatusSinceTsFallsBackToArrivalTsWhenStatusNeverReachedInLog() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Backfill senza match nel log', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Caso limite (dato storico anomalo/incompleto): il job e' in
+    // 'backlog' ma il log non contiene nessun move con to==='backlog'.
+    job.status_since_ts = '';
+    job.activity_log_json = JSON.stringify([
+      { id: '1', ts: '2026-01-05T09:00:00+02:00', type: 'move', source: 'auto', to: 'todo', from: null }
+    ]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    backfillStatusSinceTs_(sheet);
+
+    var after = readJobFromRow_(sheet, row, headers);
+    assertEquals_(after.arrival_ts, after.status_since_ts, 'nessun match nel log: fallback ad arrival_ts');
+  });
+}
+
+function testBackfillStatusSinceTsLeavesEmptyWhenNoBasisAtAll() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Backfill senza alcuna base', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Log vuoto E arrival_ts vuoto: nessuna base su cui stimare una
+    // data, il campo deve restare vuoto — non inventare.
+    job.status_since_ts = '';
+    job.activity_log_json = '[]';
+    job.arrival_ts = '';
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = backfillStatusSinceTs_(sheet);
+
+    assertEquals_(0, result.jobs_backfilled, 'nessun job backfillato: nessuna base disponibile');
+    var after = readJobFromRow_(sheet, row, headers);
+    assertTrue_(!after.status_since_ts, 'status_since_ts resta vuoto, non inventato');
+  });
+}
+
+function testBackfillStatusSinceTsIsIdempotentOnAlreadySetJobs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    // addJob valorizza gia' status_since_ts (comportamento normale
+    // post-M0-C): il backfill non deve toccarlo.
+    var created = addJob({ title: 'Gia\' valorizzato', size_class: 'S' }).data;
+    var before = created.job.status_since_ts;
+
+    var result = backfillStatusSinceTs_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+
+    assertEquals_(0, result.jobs_backfilled, 'nessun job toccato: aveva gia\' status_since_ts');
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var after = readJobFromRow_(sheet, row, getHeaderMap_(sheet));
+    assertEquals_(before, after.status_since_ts, 'status_since_ts invariato, idempotente');
   });
 }
 
