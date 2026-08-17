@@ -15,12 +15,12 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-**M0-A (manutenzione frontend/performance) — codice completato,
-verifica su TEST bloccata**: `clasp push` fallisce con
-`invalid_grant`/`invalid_rapt` (token scaduto) — serve un
-`clasp login` interattivo di Marco prima di poter verificare il push e
-chiudere la sessione. Codice gia' committato su un branch dedicato,
-suite completa passata via harness (67/67).
+Nessuna fase attiva. **M0-A chiusa**: `clasp login` rifatto da Marco
+dopo il blocco `invalid_rapt`, push su TEST eseguito e verificato (13/13
+file identici via `clasp pull` isolato + diff). Suite completa passata
+via harness (67/67). Codice sul branch `feat/m0-a-frontend-perf`, non
+ancora unito a `main` — decisione di merge non affrontata in questa
+sessione.
 
 ## Sessione M0-A — manutenzione frontend/performance (2026-08-17)
 
