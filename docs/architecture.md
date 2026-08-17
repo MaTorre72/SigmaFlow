@@ -36,10 +36,7 @@
 | `due_date` | Scadenza operativa in formato `yyyy-mm-dd` |
 | `arrival_ts` | Primo arrivo del caso (apertura della visita 1) |
 | `invoiced` | Booleano, casella "Chiuso" sulla card |
-| `notes` | Note libere (nessuna UI attuale) |
 | `card_color` | Colore opzionale della fascia superiore della card (`#RRGGBB`) |
-| `checklist_json` | Checklist storica (nessuna UI attuale) |
-| `correction_log_json` | Log correzioni storico, pre-Cronologia (nessuna UI attuale) |
 | `activity_log_json` | Cronologia eventi (move/correction), fonte per il ricalcolo di `from` |
 | `incarico_chiuso_ts` | Chiusura manuale e definitiva dell'incarico, indipendente dai movimenti board |
 

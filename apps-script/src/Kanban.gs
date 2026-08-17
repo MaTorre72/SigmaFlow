@@ -107,6 +107,12 @@ function getBoard() {
       order: column.order,
       color: column.color,
       hidden: coerceBoolean_(column.hidden),
+      // M0-C: terza copia dello stesso rischio gia' corretto in
+      // normalizeColumns_/writeColumns_ (Utils.gs) — column_meta e'
+      // l'oggetto che arriva davvero al frontend via getBoard(), senza
+      // questo campo aging_days non avrebbe mai avuto effetto visibile
+      // nonostante fosse gia' letto/scritto correttamente sul foglio.
+      aging_days: column.aging_days,
       count: (board[column.id] || []).length,
       points: points
     });
@@ -149,10 +155,10 @@ function addJob(params) {
     due_date: params.due_date || '',
     arrival_ts: now,
     invoiced: coerceBoolean_(params.invoiced),
-    notes: params.notes || '',
     card_color: normalizeCardColor_(params.card_color),
-    checklist_json: normalizeChecklistJson_(params.checklist_json),
-    correction_log_json: '[]'
+    // M0-C: la card nasce gia' in una colonna, quindi gia' "da quando"
+    // ci si trova — stesso principio del suo primo evento di creazione.
+    status_since_ts: now
   };
 
   // Evento automatico di creazione, stesso pattern dell'evento auto scritto
@@ -219,6 +225,13 @@ function moveJob(params) {
   // visivo immediato del drag: l'utente rilascia la card piu' volte
   // pensando che non si sia spostata (segnalato da Marco in collaudo).
   if (normalizeStatus_(job.status) === status) {
+    // Nessuna mutazione di 'visite', ma il job restituito deve comunque
+    // avere i campi di rientro (altrimenti il merge lato client — M0-A2,
+    // niente piu' reload completo dopo una mossa — sovrascriverebbe il
+    // badge Rnn gia' corretto sulla card con dei campi assenti).
+    var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+    var openRow = visiteSheet ? findOpenVisitRow_(visiteSheet, job.job_id) : -1;
+    applyVisitSummaryFields_(job, openRow > 0 ? readVisitFromRow_(visiteSheet, openRow) : null);
     return ok_({ job_id: params.job_id, status: status, job: job });
   }
 
@@ -247,6 +260,11 @@ function moveJob(params) {
   }
 
   job.status = status;
+  // M0-C: solo qui, non nel self-move sopra (early return, la card non
+  // ha mai lasciato la colonna) — "da quando" si trova nella colonna
+  // ATTUALE, non da quando e' stata creata o dall'ultimo cambio di
+  // qualunque altro campo.
+  job.status_since_ts = now;
   writeJobToRow_(sheet, row, headers, job);
   // Evento automatico per l'activity log: scrittura diretta (non passa da
   // addActivityEvent) per evitare la doppia validazione su un movimento
@@ -274,11 +292,18 @@ function moveJob(params) {
   // di questo stesso spostamento: la ricerca dell'ingresso nella colonna
   // di attesa lasciata (sez. 4) deve guardare solo eventi realmente
   // precedenti a "now".
-  updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
+  var activeVisit = updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
 
   log.push(autoEvent);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
   sheet.getRange(row, headers.activity_log_json).setValue(serializeActivityLog_(log));
+
+  // M0-A2: il job restituito porta gia' i campi di rientro ricalcolati
+  // (visit_number/is_rework/rework_cause/start_ts/done_ts) dalla visita
+  // appena aggiornata da updateVisiteForMove_ — nessuna lettura
+  // aggiuntiva, la visita e' gia' in mano. Permette al client di
+  // aggiornare la sola card spostata senza un reload completo.
+  applyVisitSummaryFields_(job, activeVisit);
 
   return ok_({ job_id: params.job_id, status: status, job: job });
 }
@@ -350,6 +375,7 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
   }
 
   writeVisitToRow_(visiteSheet, activeRow, activeVisit);
+  return activeVisit;
 }
 
 // Se non esiste ancora una visita aperta per questo caso (job creato
@@ -444,15 +470,23 @@ function loadJobsWithVisitSummary_() {
   });
 
   jobs.forEach(function(job) {
-    var latest = latestByJob[job.job_id];
-    job.visit_number = latest ? Number(latest.numero_visita || 1) : 1;
-    job.is_rework = job.visit_number > 1;
-    job.rework_cause = latest ? (latest.rework_cause || '') : '';
-    job.start_ts = latest ? (latest.start_ts || '') : '';
-    job.done_ts = latest ? (latest.consegna_ts || '') : '';
+    applyVisitSummaryFields_(job, latestByJob[job.job_id]);
   });
 
   return jobs;
+}
+
+// Fattorizzato da loadJobsWithVisitSummary_ (M0-A2): moveJob lo riusa per
+// restituire nella risposta il job gia' con i campi di rientro
+// ricalcolati, cosi' il client puo' aggiornare la sola card spostata
+// senza un reload completo della board (che leggerebbe di nuovo
+// jobs+visite solo per un dato che il server ha gia' in mano).
+function applyVisitSummaryFields_(job, visit) {
+  job.visit_number = visit ? Number(visit.numero_visita || 1) : 1;
+  job.is_rework = job.visit_number > 1;
+  job.rework_cause = visit ? (visit.rework_cause || '') : '';
+  job.start_ts = visit ? (visit.start_ts || '') : '';
+  job.done_ts = visit ? (visit.consegna_ts || '') : '';
 }
 
 // Sez. 4: durata della permanenza appena conclusa nella colonna stand_by
@@ -488,7 +522,7 @@ function updateJob(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
-  ['title', 'client', 'ambassador', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'notes', 'card_color', 'checklist_json'].forEach(function(field) {
+  ['title', 'client', 'ambassador', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'card_color'].forEach(function(field) {
     if (params[field] !== undefined && headers[field]) {
       job[field] = params[field];
     }
@@ -499,9 +533,6 @@ function updateJob(params) {
   }
   if (params.card_color !== undefined) {
     job.card_color = normalizeCardColor_(params.card_color);
-  }
-  if (params.checklist_json !== undefined) {
-    job.checklist_json = normalizeChecklistJson_(params.checklist_json);
   }
 
   if (params.invoiced !== undefined) {
@@ -806,13 +837,7 @@ function correctJobTimestamps(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
-  var log = parseJsonArray_(job.correction_log_json);
-  var correctionTs = nowIso_();
-
-  log.push({ ts: correctionTs, field: 'arrival_ts', old: job.arrival_ts || '', new: newArrival, reason: reason });
   job.arrival_ts = newArrival;
-
-  job.correction_log_json = JSON.stringify(log);
   writeJobToRow_(sheet, row, headers, job);
 
   return ok_({ job_id: jobId, corrections_applied: 1, job: job });
@@ -850,6 +875,9 @@ function addColumn(params) {
     color: params.color || '#E8E8E8',
     hidden: coerceBoolean_(params.hidden)
   };
+  if (params.aging_days !== undefined && params.aging_days !== '') {
+    column.aging_days = Number(params.aging_days);
+  }
   columns.push(column);
   columns = repositionColumn_(columns, id, params.after_status);
   columns = writeColumns_(columns);
@@ -875,6 +903,12 @@ function updateColumn(params) {
   }
   if (params.hidden !== undefined) {
     column.hidden = coerceBoolean_(params.hidden);
+  }
+  if (params.aging_days !== undefined) {
+    // Stringa vuota = "disattiva l'evidenziazione per questa colonna",
+    // scelta esplicita dell'utente dal pannello Impostazioni colonna —
+    // non "campo non inviato" (quel caso non entra in questo if).
+    column.aging_days = params.aging_days === '' ? undefined : Number(params.aging_days);
   }
   if (params.after_status !== undefined) {
     columns = repositionColumn_(columns, id, params.after_status);
@@ -1023,15 +1057,6 @@ function optionUsageCount_(kind, value) {
   return readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(job) {
     return String(job[field] || '') === value;
   }).length;
-}
-
-function normalizeChecklistJson_(value) {
-  var items;
-  try { items = typeof value === 'string' ? JSON.parse(value || '[]') : (value || []); } catch (err) { items = []; }
-  if (!Array.isArray(items)) { items = []; }
-  return JSON.stringify(items.map(function(item) {
-    return { text: String(item && item.text || '').trim(), done: coerceBoolean_(item && item.done) };
-  }).filter(function(item) { return item.text; }));
 }
 
 function normalizeCardColor_(value) {

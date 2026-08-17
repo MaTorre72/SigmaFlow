@@ -93,10 +93,7 @@ function seedTestDataset_(ss, replace) {
       // reworkGapDays giorni fa.
       arrival_ts: hasRework ? testIsoDaysAgo_(now, arrivalDays + reworkGapDays) : arrival,
       invoiced: status === 'done' && i % 3 === 0,
-      notes: '',
       card_color: colors[(i % (colors.length - 1)) + 1],
-      checklist_json: '[]',
-      correction_log_json: '[]',
       activity_log_json: serializeActivityLog_([creationEvent]),
       incarico_chiuso_ts: ''
     };
@@ -225,12 +222,26 @@ function runAllTests() {
     testAddJob,
     testMoveJobLifecycle,
     testAutomaticReworkFromStandBy,
+    testMoveJobResponseCarriesVisitSummary,
+    testMoveJobToSameColumnKeepsVisitSummaryInResponse,
+    testStatusSinceTsSetOnCreation,
+    testStatusSinceTsUpdatesOnRealMove,
+    testStatusSinceTsNotResetOnSelfMove,
+    testBackfillStatusSinceTsUsesLastMoveToCurrentStatus,
+    testBackfillStatusSinceTsFallsBackToArrivalTsWhenStatusNeverReachedInLog,
+    testBackfillStatusSinceTsLeavesEmptyWhenNoBasisAtAll,
+    testBackfillStatusSinceTsIsIdempotentOnAlreadySetJobs,
+    testDefaultColumnsCarryAgingDaysToBoardMeta,
+    testColumnMetaOmitsAgingDaysWhenNotConfigured,
+    testSeedAgingDaysMigrationFillsOnlyMissingStandByColumns,
+    testUpdateColumnPreservesOtherColumnsAgingDays,
+    testUpdateColumnSetsAndClearsAgingDays,
     testStandByCannotReturnDirectlyToWip,
     testPriorityHelpers,
     testPriorityUpdate,
     testCardColor,
     testUpdateJobInvoicedTogglesIncaricoChiusoTs,
-    testAmbassadorAndChecklist,
+    testAmbassadorOption,
     testEditableOptions,
     testDynamicColumnsAndOptions,
     testMetrics,
@@ -258,7 +269,6 @@ function runAllTests() {
     testGetActivityLogFromRicalcolato,
     testGetActivityLogFromResolvesTiedTimestamps,
     testMoveJobScriveEventoAuto,
-    testMigrateToActivityLogChecklist,
     testExtractDateFromJobIdParsesValidFormat,
     testExtractDateFromJobIdReturnsNullForInvalidFormat,
     testExtractDateFromJobIdReturnsNullForInvalidCalendarDate,
@@ -386,6 +396,280 @@ function testAutomaticReworkFromStandBy() {
 
     var visiteChiuse = readVisiteForJob_(ss, created.job_id).filter(function(v) { return Number(v.numero_visita) === 1; })[0];
     assertEquals_(startTsBeforeReturn, visiteChiuse.start_ts, 'start_ts della visita 1 non deve essere ringiovanito da un rientro in TO DO (prep)');
+  });
+}
+
+// M0-A2: bugfix badge Rnn fermo dopo una mossa (M0-A aveva tolto il
+// reload completo dopo moveJob, giustamente, ma senza questo la
+// risposta non portava i campi di rientro ricalcolati). Verifica
+// direttamente sulla risposta di moveJob, non su un getBoard()
+// successivo (gia' coperto da testAutomaticReworkFromStandBy).
+function testMoveJobResponseCarriesVisitSummary() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro nella risposta', size_class: 'S' }).data;
+
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    var returned = moveJob({ job_id: created.job_id, status: 'todo' });
+
+    assertTrue_(returned.success, 'moveJob dovrebbe riuscire');
+    assertEquals_(2, Number(returned.data.job.visit_number), 'visit_number gia\' nella risposta di moveJob');
+    assertTrue_(coerceBoolean_(returned.data.job.is_rework), 'is_rework gia\' nella risposta di moveJob');
+    assertEquals_('wait_client', returned.data.job.rework_cause, 'rework_cause gia\' nella risposta di moveJob');
+  });
+}
+
+// Spostamento verso la stessa colonna (no-op lato visite): il job
+// restituito deve comunque portare i campi di rientro gia' noti, non
+// lasciarli assenti — altrimenti il merge lato client sovrascriverebbe
+// un badge Rnn corretto con dei campi vuoti.
+function testMoveJobToSameColumnKeepsVisitSummaryInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Self-move con rework', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    moveJob({ job_id: created.job_id, status: 'todo' });
+
+    var selfMove = moveJob({ job_id: created.job_id, status: 'todo' });
+
+    assertTrue_(selfMove.success, 'self-move dovrebbe riuscire');
+    assertEquals_(2, Number(selfMove.data.job.visit_number), 'visit_number presente anche su un self-move');
+    assertTrue_(coerceBoolean_(selfMove.data.job.is_rework), 'is_rework presente anche su un self-move');
+  });
+}
+
+// --- M0-C: status_since_ts (da quando il job e' nella colonna ATTUALE) ---
+
+function testStatusSinceTsSetOnCreation() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Aging da creazione', size_class: 'S' }).data;
+    assertTrue_(Boolean(created.job.status_since_ts), 'status_since_ts valorizzato alla creazione');
+  });
+}
+
+function testStatusSinceTsUpdatesOnRealMove() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Aging su mossa reale', size_class: 'S' }).data;
+
+    // Valore artificiale nel passato invece di un semplice sleep: la
+    // risoluzione al secondo di nowIso_() nell'harness Node renderebbe
+    // fragile un confronto tra due timestamp presi a distanza di pochi
+    // millisecondi.
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.status_since_ts = '2020-01-01T09:00:00+02:00';
+    writeJobToRow_(sheet, row, headers, job);
+
+    var moved = moveJob({ job_id: created.job_id, status: 'wip' });
+
+    assertTrue_(moved.data.job.status_since_ts !== '2020-01-01T09:00:00+02:00', 'status_since_ts aggiornato su una mossa reale (colonna diversa)');
+  });
+}
+
+function testStatusSinceTsNotResetOnSelfMove() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Aging su self-move', size_class: 'S' }).data;
+    var moved = moveJob({ job_id: created.job_id, status: 'wip' });
+    var afterRealMove = moved.data.job.status_since_ts;
+
+    var selfMove = moveJob({ job_id: created.job_id, status: 'wip' });
+
+    assertEquals_(afterRealMove, selfMove.data.job.status_since_ts, 'status_since_ts invariato su un self-move (la card non ha mai lasciato la colonna)');
+  });
+}
+
+// --- M0-C, correzione post-collaudo: backfill di status_since_ts per i
+// job gia' esistenti (la migrazione additiva di M0-C lascia vuoti
+// quelli mai spostati dopo il deploy, escludendoli silenziosamente
+// dall'aging finche' daysSince('') === 0) ---
+
+function testBackfillStatusSinceTsUsesLastMoveToCurrentStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Backfill da log', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Simula un job pre-M0-C: status_since_ts vuoto, log con un move
+    // verso 'backlog' (lo status attuale) non recente, seguito da un
+    // move verso un'altra colonna e poi di nuovo verso 'backlog' — il
+    // backfill deve trovare il PIU' RECENTE dei due verso lo status
+    // attuale, non il primo in assoluto.
+    job.status_since_ts = '';
+    job.activity_log_json = JSON.stringify([
+      { id: '1', ts: '2026-01-01T09:00:00+02:00', type: 'move', source: 'auto', to: 'backlog', from: null },
+      { id: '2', ts: '2026-01-05T09:00:00+02:00', type: 'move', source: 'auto', to: 'todo', from: 'backlog' },
+      { id: '3', ts: '2026-01-10T09:00:00+02:00', type: 'move', source: 'auto', to: 'backlog', from: 'todo' }
+    ]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = backfillStatusSinceTs_(sheet);
+
+    assertEquals_(1, result.jobs_backfilled, 'un job backfillato');
+    var after = readJobFromRow_(sheet, row, headers);
+    assertEquals_('2026-01-10T09:00:00+02:00', after.status_since_ts, 'status_since_ts = evento move piu\' recente verso lo status attuale, non il primo ne\' "ora"');
+  });
+}
+
+function testBackfillStatusSinceTsFallsBackToArrivalTsWhenStatusNeverReachedInLog() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Backfill senza match nel log', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Caso limite (dato storico anomalo/incompleto): il job e' in
+    // 'backlog' ma il log non contiene nessun move con to==='backlog'.
+    job.status_since_ts = '';
+    job.activity_log_json = JSON.stringify([
+      { id: '1', ts: '2026-01-05T09:00:00+02:00', type: 'move', source: 'auto', to: 'todo', from: null }
+    ]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    backfillStatusSinceTs_(sheet);
+
+    var after = readJobFromRow_(sheet, row, headers);
+    assertEquals_(after.arrival_ts, after.status_since_ts, 'nessun match nel log: fallback ad arrival_ts');
+  });
+}
+
+function testBackfillStatusSinceTsLeavesEmptyWhenNoBasisAtAll() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Backfill senza alcuna base', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Log vuoto E arrival_ts vuoto: nessuna base su cui stimare una
+    // data, il campo deve restare vuoto — non inventare.
+    job.status_since_ts = '';
+    job.activity_log_json = '[]';
+    job.arrival_ts = '';
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = backfillStatusSinceTs_(sheet);
+
+    assertEquals_(0, result.jobs_backfilled, 'nessun job backfillato: nessuna base disponibile');
+    var after = readJobFromRow_(sheet, row, headers);
+    assertTrue_(!after.status_since_ts, 'status_since_ts resta vuoto, non inventato');
+  });
+}
+
+function testBackfillStatusSinceTsIsIdempotentOnAlreadySetJobs() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    // addJob valorizza gia' status_since_ts (comportamento normale
+    // post-M0-C): il backfill non deve toccarlo.
+    var created = addJob({ title: 'Gia\' valorizzato', size_class: 'S' }).data;
+    var before = created.job.status_since_ts;
+
+    var result = backfillStatusSinceTs_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+
+    assertEquals_(0, result.jobs_backfilled, 'nessun job toccato: aveva gia\' status_since_ts');
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var after = readJobFromRow_(sheet, row, getHeaderMap_(sheet));
+    assertEquals_(before, after.status_since_ts, 'status_since_ts invariato, idempotente');
+  });
+}
+
+// --- M0-C: aging_days configurabile per colonna ---
+
+function testDefaultColumnsCarryAgingDaysToBoardMeta() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var board = getBoard();
+    var byId = {};
+    board.data.column_meta.forEach(function(c) { byId[c.id] = c; });
+    assertEquals_(5, byId.wait_internal.aging_days, 'aging_days di default per attesa interna');
+    assertEquals_(15, byId.wait_client.aging_days, 'aging_days di default per attesa cliente');
+    assertEquals_(45, byId.wait_authority.aging_days, 'aging_days di default per attesa enti');
+  });
+}
+
+function testColumnMetaOmitsAgingDaysWhenNotConfigured() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var board = getBoard();
+    var wip = board.data.column_meta.filter(function(c) { return c.id === 'wip'; })[0];
+    assertTrue_(wip.aging_days === undefined, 'colonna senza aging_days configurato non lo riceve di default (nessuna evidenziazione)');
+  });
+}
+
+function testSeedAgingDaysMigrationFillsOnlyMissingStandByColumns() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var configSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
+    var headers = getHeaderMap_(configSheet);
+    var rows = readTable_(configSheet);
+    var rowIndex = -1;
+    rows.forEach(function(row, i) { if (row.key === 'columns_json') { rowIndex = i; } });
+
+    // Simula uno schema pre-M0-C: una colonna stand_by senza aging_days
+    // (deve riceverlo), una gia' configurata a un valore non standard
+    // (non deve essere toccata), una di altro ruolo (mai toccata).
+    var customColumns = [
+      { id: 'wait_client', label: 'ATTESA CLIENTE', role: 'stand_by', order: 5, color: '#FFD966' },
+      { id: 'wait_authority', label: 'ATTESA ENTI', role: 'stand_by', order: 6, color: '#F4B942', aging_days: 20 },
+      { id: 'wip', label: 'WIP', role: 'wip', order: 4, color: '#5B9BD5' }
+    ];
+    configSheet.getRange(rowIndex + 2, headers.value).setValue(JSON.stringify(customColumns));
+
+    seedAgingDaysForStandByColumns_(configSheet);
+
+    var after = JSON.parse(readTable_(configSheet).filter(function(row) { return row.key === 'columns_json'; })[0].value);
+    var afterById = {};
+    after.forEach(function(c) { afterById[c.id] = c; });
+
+    assertEquals_(5, afterById.wait_client.aging_days, 'colonna stand_by priva di aging_days riceve il default 5');
+    assertEquals_(20, afterById.wait_authority.aging_days, 'colonna stand_by gia\' configurata non viene sovrascritta');
+    assertTrue_(afterById.wip.aging_days === undefined, 'colonna non stand_by non riceve aging_days');
+
+    // Idempotenza: una seconda esecuzione non deve alterare un valore
+    // gia' impostato (ne' il 5 appena scritto, ne' il 20 preesistente).
+    seedAgingDaysForStandByColumns_(configSheet);
+    var afterSecond = JSON.parse(readTable_(configSheet).filter(function(row) { return row.key === 'columns_json'; })[0].value);
+    var afterSecondById = {};
+    afterSecond.forEach(function(c) { afterSecondById[c.id] = c; });
+    assertEquals_(5, afterSecondById.wait_client.aging_days, 'idempotente: seconda esecuzione non cambia il valore appena scritto');
+    assertEquals_(20, afterSecondById.wait_authority.aging_days, 'idempotente: seconda esecuzione non cambia il valore preesistente');
+  });
+}
+
+// Regressione: writeColumns_ ricostruiva ogni colonna con un elenco
+// fisso di campi che non includeva aging_days — salvare QUALUNQUE
+// colonna avrebbe cancellato aging_days da TUTTE le altre.
+function testUpdateColumnPreservesOtherColumnsAgingDays() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    updateColumn({ status: 'wip', label: 'WIP' });
+    var board = getBoard();
+    var waitClient = board.data.column_meta.filter(function(c) { return c.id === 'wait_client'; })[0];
+    assertEquals_(15, waitClient.aging_days, 'aging_days di un\'altra colonna non viene perso salvandone una diversa');
+  });
+}
+
+function testUpdateColumnSetsAndClearsAgingDays() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var updated = updateColumn({ status: 'wait_client', aging_days: 30 });
+    assertEquals_(30, updated.data.column.aging_days, 'aging_days impostato a un valore custom');
+
+    var cleared = updateColumn({ status: 'wait_client', aging_days: '' });
+    assertTrue_(cleared.data.column.aging_days === undefined, 'stringa vuota disattiva aging_days');
   });
 }
 
@@ -788,23 +1072,16 @@ function testUpdateJobInvoicedTogglesIncaricoChiusoTs() {
   });
 }
 
-function testAmbassadorAndChecklist() {
+function testAmbassadorOption() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     updateOptionList({ kind: 'ambassadors', operation: 'add', value: 'Referente Cliente' });
     var created = addJob({
       title: 'Progetto con referente',
       client: 'Cliente prova',
-      ambassador: 'Referente Cliente',
-      checklist_json: JSON.stringify([{ text: 'Controllo documenti', done: false }])
+      ambassador: 'Referente Cliente'
     }).data;
     assertEquals_('Referente Cliente', created.job.ambassador, 'ambasciatore in creazione');
-    var updated = updateJob({
-      job_id: created.job_id,
-      checklist_json: JSON.stringify([{ text: 'Controllo documenti', done: true }])
-    });
-    var checklist = JSON.parse(updated.data.job.checklist_json);
-    assertTrue_(checklist[0].done, 'checklist completata');
     assertTrue_(getBoard().data.options.ambassadors.indexOf('Referente Cliente') !== -1, 'ambasciatore nel menu');
   });
 }
@@ -1402,31 +1679,6 @@ function testMoveJobScriveEventoAuto() {
   });
 }
 
-function testMigrateToActivityLogChecklist() {
-  withTestSpreadsheet_(function(ss) {
-    resetTestDatabase_(ss);
-    var created = addJob({ title: 'Migrazione checklist', size_class: 'M', description: 'Testo originale della card' }).data;
-
-    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
-    var row = findRowById_(sheet, 'job_id', created.job_id);
-    var headers = getHeaderMap_(sheet);
-    var job = readJobFromRow_(sheet, row, headers);
-    job.checklist_json = JSON.stringify([{ text: 'Voce A', done: true }, { text: 'Voce B', done: false }]);
-    writeJobToRow_(sheet, row, headers, job);
-
-    var result = migrateToActivityLog({ env: 'test' });
-
-    assertTrue_(result.success, 'migrazione dovrebbe riuscire');
-    assertEquals_(2, result.data.checklist_items_migrated, 'due voci checklist migrate');
-
-    var after = readJobFromRow_(sheet, row, headers);
-    assertTrue_(after.description.indexOf('Testo originale della card') === 0, 'testo originale intatto in testa');
-    assertTrue_(after.description.indexOf('--- Checklist migrata ---') !== -1, 'separatore presente');
-    assertTrue_(after.description.indexOf('[x] Voce A') !== -1, 'voce completata con [x]');
-    assertTrue_(after.description.indexOf('[ ] Voce B') !== -1, 'voce non completata con [ ]');
-  });
-}
-
 // --- Indizio data dal job_id per il backfill (segnalato da Marco sulla
 // migrazione PROD reale: molte card storiche non hanno mai avuto
 // arrival_ts valorizzato, la migrazione ricadeva sulla data del giorno
@@ -1892,10 +2144,7 @@ function appendCompletedJob_(ss, data) {
     due_date: data.due_date || '',
     arrival_ts: arrivalIso,
     invoiced: Boolean(data.invoiced),
-    notes: '',
     card_color: '',
-    checklist_json: '[]',
-    correction_log_json: '[]',
     activity_log_json: '[]',
     incarico_chiuso_ts: ''
   }));

@@ -13,6 +13,20 @@
 // una card = un job = un caso). markRework/markRowAsRework_ (Kanban.gs),
 // l'unico codice che leggeva case_id per raggruppare righe "dello stesso
 // caso", rimossi insieme per lo stesso motivo.
+// notes/checklist_json/correction_log_json rimossi (sessione M0-A,
+// pulizia campi non usati): nessuna UI da tempo (Fase H). checklist_json/
+// correction_log_json erano ancora letti da migrateSingleJobActivityLog_
+// per la migrazione una tantum verso activity_log_json/description — ora
+// rimossa insieme ai campi, essendo la migrazione reale di PROD gia'
+// eseguita (nessun'altra riga di questo schema potra' mai piu' avere
+// queste colonne). correctJobTimestamps (Kanban.gs) non scrive piu' un
+// log a parte, solo arrival_ts (suo unico uso reale rimasto).
+// status_since_ts aggiunto in M0-C: quando il job e' entrato nella
+// colonna ATTUALE (non quando e' stato creato, non l'inizio
+// lavorazione) — base per l'evidenziazione "aging" configurabile per
+// colonna (aging_days in columns_json, vedi ensureCurrentSchema_ e
+// DEFAULT_COLUMNS in Constants.gs). Scritto da addJob (alla creazione)
+// e da moveJob solo sui cambi di colonna reali, mai sul self-move.
 var JOB_HEADERS = [
   'job_id',
   'title',
@@ -32,12 +46,10 @@ var JOB_HEADERS = [
   'due_date',
   'arrival_ts',
   'invoiced',
-  'notes',
   'card_color',
-  'checklist_json',
-  'correction_log_json',
   'activity_log_json',
-  'incarico_chiuso_ts'
+  'incarico_chiuso_ts',
+  'status_since_ts'
 ];
 
 // Foglio 'cases' dismesso su richiesta di Marco, dopo che 'visite' si e'
@@ -122,6 +134,8 @@ function setupSigmaFlow() {
   ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+  seedAgingDaysForStandByColumns_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+  backfillStatusSinceTs_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SCHEMA_VERSION, SIGMAFLOW.SCHEMA_VERSION);
@@ -244,6 +258,84 @@ function seedDefaultConfig_(sheet) {
       ensureConfigValueIfEmpty_(sheet, key, value);
     }
   });
+}
+
+// M0-C: migrazione una tantum, non un fallback a runtime — aggiunge
+// aging_days: 5 (stesso valore del comportamento fisso precedente,
+// nessun cambio osservabile al momento del deploy) alle sole colonne
+// con role 'stand_by' che ne sono ancora prive dentro columns_json.
+// Idempotente: una colonna che ha gia' aging_days (a 5 o a un valore
+// diverso scelto da Marco dal pannello Impostazioni colonna) non viene
+// toccata. Colonne di altro ruolo restano senza aging_days — nessuna
+// evidenziazione per loro, identico a oggi. A differenza di
+// ensureConfigValueIfEmpty_ (che sostituisce l'intero valore solo se
+// vuoto), qui si modifica il singolo campo dentro ogni colonna,
+// preservando etichetta/colore/ordine/ruolo gia' configurati.
+function seedAgingDaysForStandByColumns_(sheet) {
+  var rows = readTable_(sheet);
+  var headers = getHeaderMap_(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key !== 'columns_json') { continue; }
+    var columns = parseJsonArray_(rows[i].value);
+    if (!columns.length) { return; }
+    var changed = false;
+    columns.forEach(function(column) {
+      if (column.role === 'stand_by' && column.aging_days === undefined) {
+        column.aging_days = 5;
+        changed = true;
+      }
+    });
+    if (changed) {
+      sheet.getRange(i + 2, headers.value).setValue(JSON.stringify(columns));
+    }
+    return;
+  }
+}
+
+// M0-C, correzione post-collaudo su TEST: la migrazione additiva di
+// M0-C aggiungeva la sola colonna status_since_ts allo schema (giusto
+// per principio: mai inventare un valore per righe gia' esistenti), ma
+// lascia vuoti tutti i job gia' presenti — e daysSince('') ritorna 0,
+// quindi restano silenziosamente esclusi dall'aging finche' non
+// vengono spostati almeno una volta. Proprio le card ferme da piu'
+// tempo, che nessuno tocca, sono quelle che il meccanismo dovrebbe
+// segnalare.
+//
+// Backfill una tantum: per ogni job con status_since_ts vuoto, cerca
+// nel suo activity_log_json l'evento move piu' recente con to===status
+// attuale — stesso pattern di ricerca all'indietro gia' usato da
+// lastEntryTsForColumn_ (Kanban.gs, sez. 4 accumulo attese), riusato
+// cosi' com'e' invece di reimplementarlo (passando "adesso" come limite
+// superiore: ogni evento nel log e' per definizione nel passato,
+// esattamente l'uso per cui quella funzione e' gia' pensata). Se il log
+// non contiene un evento simile (dato storico incompleto o anomalo),
+// ricade su arrival_ts. Se anche quello e' vuoto, il campo resta
+// vuoto — nessuna base su cui stimare una data, meglio "non ancora
+// noto" che una data inventata (stesso principio applicato in tutta la
+// migrazione PROD di questa sessione).
+// Idempotente: un job che ha gia' status_since_ts (valorizzato da una
+// mossa reale successiva a M0-C) non viene toccato.
+function backfillStatusSinceTs_(sheet) {
+  var jobs = readTable_(sheet);
+  if (!jobs.length) { return { jobs_backfilled: 0, jobs_total: 0 }; }
+  var now = nowIso_();
+  var changed = false;
+  var backfilled = 0;
+  var rows = jobs.map(function(job) {
+    if (job.status_since_ts) { return jobToRow_(job); }
+    var log = parseActivityLog_(job.activity_log_json);
+    var entryTs = lastEntryTsForColumn_(log, job.status, now);
+    job.status_since_ts = entryTs || job.arrival_ts || '';
+    if (job.status_since_ts) {
+      backfilled++;
+      changed = true;
+    }
+    return jobToRow_(job);
+  });
+  if (changed) {
+    sheet.getRange(2, 1, rows.length, JOB_HEADERS.length).setValues(rows);
+  }
+  return { jobs_backfilled: backfilled, jobs_total: jobs.length };
 }
 
 function ensureConfigValueIfEmpty_(sheet, key, value) {

@@ -16,7 +16,8 @@
     touchGhost: null,
     touchTimer: null,
     touchStart: null,
-    suppressCardClick: false
+    suppressCardClick: false,
+    metricsLoaded: false
   };
 
   var defaultColumns = [
@@ -46,9 +47,42 @@
     bindToolbar();
     bindModal();
     loadBoard();
-    loadMetrics();
-    window.setInterval(function() { loadBoard(false); }, 45000);
+    bindVisibilityPolling_();
   });
+
+  // Il polling a 45s serviva a tenere la board aggiornata anche a tab
+  // in background, ma cosi' facendo continua a rileggere jobs+visite e
+  // a ridisegnare anche quando nessuno la sta guardando: piu' sessioni
+  // restano aperte in background, piu' cresce il carico sul backend
+  // senza alcun beneficio reale. Sospeso quando la tab non e' visibile,
+  // ripreso al ritorno in foreground con un refresh immediato (non solo
+  // la ripartenza del timer, altrimenti si aspetterebbero altri 45s
+  // prima di vedere dati aggiornati dopo un cambio tab).
+  var boardPollTimer_ = null;
+
+  function bindVisibilityPolling_() {
+    startBoardPolling_();
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'visible') {
+        loadBoard(false);
+        startBoardPolling_();
+      } else {
+        stopBoardPolling_();
+      }
+    });
+  }
+
+  function startBoardPolling_() {
+    if (boardPollTimer_ || document.visibilityState !== 'visible') {
+      return;
+    }
+    boardPollTimer_ = window.setInterval(function() { loadBoard(false); }, 45000);
+  }
+
+  function stopBoardPolling_() {
+    window.clearInterval(boardPollTimer_);
+    boardPollTimer_ = null;
+  }
 
   function callApi(action, payload) {
     return new Promise(function(resolve, reject) {
@@ -106,7 +140,7 @@
         callApi('seedTestData', { replace: true }).then(function(data) {
           showMessage('Creati ' + data.jobs + ' job TEST');
           loadBoard(true);
-          loadMetrics();
+          loadMetrics(true);
         }).catch(showError);
       });
     }
@@ -116,6 +150,7 @@
       document.getElementById('column-settings-color').value = '#E8E8E8';
       document.getElementById('column-settings-role').value = 'neutral';
       document.getElementById('column-settings-visible').checked = true;
+      document.getElementById('column-settings-aging-days').value = '';
       fillColumnPositionSelect('');
       document.getElementById('column-settings-modal').showModal();
     });
@@ -126,6 +161,13 @@
         showMessage('Non ci sono colonne nascoste');
         return;
       }
+      // Lasciato su loadBoard(true) apposta, a differenza di
+      // saveColumnSettings/moveColumn qui sotto: piu' updateColumn in
+      // PARALLELO sullo stesso columns_json rischiano di sovrascriversi
+      // a vicenda lato server (letto-modificato-scritto, non atomico) —
+      // fidarsi della risposta dell'ultima chiamata risolta potrebbe
+      // riflettere uno stato intermedio perso. Un getBoard() dopo che
+      // tutte sono finite rilegge lo stato vero, qualunque esso sia.
       Promise.all(hidden.map(function(column) {
         return callApi('updateColumn', { status: column.status, hidden: false });
       })).then(function() { loadBoard(true); }).catch(showError);
@@ -280,9 +322,7 @@
     }).forEach(function(column, index, visibleColumns) {
       var jobs = (state.board[column.status] || []);
       jobs = sortJobsForColumn(jobs.slice(), column.status);
-      var staleCount = jobs.filter(function(job) {
-        return column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
-      }).length;
+      var agingCount = countAgingInColumn_(jobs, column);
       var columnEl = document.createElement('section');
       columnEl.className = 'column role-' + (column.role || 'neutral');
       columnEl.style.setProperty('--column-color', column.color || '#E8E8E8');
@@ -311,10 +351,10 @@
       columnEl.querySelector('.column-title').textContent = column.label;
       columnEl.querySelector('.count-badge').textContent = jobs.length + ' card';
       columnEl.querySelector('.points-badge').textContent = sumPoints(jobs) + ' pt';
-      if (staleCount > 0) {
+      if (agingCount > 0) {
         var staleBadge = columnEl.querySelector('.stale-badge');
         staleBadge.hidden = false;
-        staleBadge.textContent = staleCount + ' >5g';
+        staleBadge.textContent = agingCount + ' >' + column.aging_days + 'g';
       }
       columnEl.querySelector('.column-menu-button').addEventListener('click', function() {
         openColumnMenu(column);
@@ -353,8 +393,8 @@
   function renderCard(job, column) {
     var card = document.createElement('article');
     var isLate = job.due_date && new Date(job.due_date + 'T23:59:59') < new Date();
-    var isStale = column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
-    card.className = 'card' + (isStale ? ' stale-card' : '');
+    var isAging = isJobAging_(job, column);
+    card.className = 'card' + (isAging ? ' stale-card' : '');
     if (job.card_color) {
       card.classList.add('custom-card-color');
       card.style.setProperty('--card-color', job.card_color);
@@ -382,7 +422,7 @@
     ].join('');
     card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
     card.querySelector('.card-client').textContent = job.client || '';
-    card.title = isStale ? 'Fermo da ' + daysSince(job.start_ts || job.arrival_ts) + ' giorni' : '';
+    card.title = isAging ? 'Fermo da ' + daysSince(job.status_since_ts) + ' giorni' : '';
 
     card.addEventListener('dragstart', function(event) {
       event.dataTransfer.setData('text/plain', job.job_id);
@@ -407,6 +447,73 @@
       deleteJob(job);
     });
     return card;
+  }
+
+  // M0-B: aggiornamento incrementale del DOM per le operazioni che
+  // riguardano UN SOLO job (spostamento, salvataggio, eliminazione,
+  // aggiunta) — tocca solo il nodo della card interessata e i badge
+  // della sua colonna, mai le altre colonne/card. Riusa renderCard (la
+  // stessa funzione del redraw completo, nessuna logica duplicata) per
+  // costruire il nodo, cosi' listener/marcatura restano identici.
+  // Il redraw completo (renderBoard) resta l'unica via per: cambio
+  // filtro, colonne (aggiunta/riordino/rimozione), caricamento
+  // iniziale/poll, rollback dopo errore — vedi ricognizione in cima al
+  // file per l'elenco completo dei chiamanti.
+
+  function findColumnMeta_(status) {
+    return getColumns().filter(function(column) { return column.status === status; })[0] || null;
+  }
+
+  function findColumnEl_(status) {
+    return document.querySelector('#kanban-board .column[data-status="' + status + '"]');
+  }
+
+  // Ricalcola conteggio/punti/badge "fermo da" di UNA colonna dal solo
+  // state.board locale, senza toccare le card gia' renderizzate al suo
+  // interno. Se la colonna non e' (ancora) nel DOM — nascosta, o
+  // nessuna board caricata — non fa nulla: il prossimo renderBoard()
+  // completo la riallineera' comunque.
+  function updateColumnCounters_(status) {
+    var columnEl = findColumnEl_(status);
+    var column = findColumnMeta_(status);
+    if (!columnEl || !column) { return; }
+    var jobs = sortJobsForColumn((state.board[status] || []).slice(), status);
+    var agingCount = countAgingInColumn_(jobs, column);
+    columnEl.querySelector('.count-badge').textContent = jobs.length + ' card';
+    columnEl.querySelector('.points-badge').textContent = sumPoints(jobs) + ' pt';
+    var staleBadge = columnEl.querySelector('.stale-badge');
+    staleBadge.hidden = agingCount <= 0;
+    if (agingCount > 0) {
+      staleBadge.textContent = agingCount + ' >' + column.aging_days + 'g';
+    }
+  }
+
+  // Rimuove (se presente) e reinserisce il nodo della card nella sua
+  // colonna corrente (job.status), nella posizione corretta per
+  // l'ordinamento/i filtri attivi — senza spostare le altre card gia'
+  // presenti. Se dopo i filtri la card non deve comparire, resta
+  // rimossa (stesso comportamento del redraw completo, che la esclude
+  // in partenza).
+  function placeCardInColumn_(job) {
+    var column = findColumnMeta_(job.status);
+    var columnEl = findColumnEl_(job.status);
+    if (!column || !columnEl || column.hidden) { return; }
+    var cardsRoot = columnEl.querySelector('.cards');
+    var existing = cardsRoot.querySelector('.card[data-job-id="' + job.job_id + '"]');
+    if (existing) { existing.remove(); }
+    if (!matchesFilters(job)) { return; }
+    var sortedFiltered = sortJobsForColumn((state.board[job.status] || []).slice(), job.status).filter(matchesFilters);
+    var index = sortedFiltered.findIndex(function(item) { return item.job_id === job.job_id; });
+    var referenceNode = index >= 0 ? cardsRoot.children[index] : null;
+    cardsRoot.insertBefore(renderCard(job, column), referenceNode || null);
+  }
+
+  // Rimuove il nodo della card da qualunque colonna si trovi oggi nel
+  // DOM (il chiamante puo' non conoscere la colonna, es. dopo una
+  // eliminazione con stato locale gia' aggiornato).
+  function removeCardEl_(jobId) {
+    var existing = document.querySelector('#kanban-board .cards .card[data-job-id="' + jobId + '"]');
+    if (existing) { existing.remove(); }
   }
 
   function priorityBadgeHtml(priorityClass) {
@@ -450,6 +557,7 @@
     document.getElementById('column-settings-color').value = column.color || '#E8E8E8';
     document.getElementById('column-settings-role').value = column.role || 'neutral';
     document.getElementById('column-settings-visible').checked = !column.hidden;
+    document.getElementById('column-settings-aging-days').value = column.aging_days || '';
     fillColumnPositionSelect(column.status);
     document.getElementById('column-settings-modal').showModal();
   }
@@ -463,7 +571,11 @@
       color: document.getElementById('column-settings-color').value,
       role: document.getElementById('column-settings-role').value,
       after_status: document.getElementById('column-settings-position').value,
-      hidden: !document.getElementById('column-settings-visible').checked
+      hidden: !document.getElementById('column-settings-visible').checked,
+      // Stringa vuota inclusa apposta (non omessa): per updateColumn e'
+      // il segnale esplicito di "disattiva l'evidenziazione", diverso
+      // da "campo non inviato" — vedi Kanban.gs.
+      aging_days: document.getElementById('column-settings-aging-days').value.trim()
     };
     if (!payload.label) {
       showError(new Error('Inserisci il nome della colonna'));
@@ -475,10 +587,11 @@
     } else {
       payload.role = document.getElementById('column-settings-role').value;
     }
-    callApi(action, payload).then(function() {
+    callApi(action, payload).then(function(data) {
       document.getElementById('column-settings-modal').close();
       state.columnSettings = null;
-      loadBoard(true);
+      applyColumnsResponse_(data.columns);
+      updateLastUpdated();
     }).catch(showError);
   }
 
@@ -567,6 +680,7 @@
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
+    loadActivityLogForModal_();
     document.querySelector('.modal-tabs').hidden = false;
     setModalTab_('info');
     document.getElementById('card-modal').showModal();
@@ -591,6 +705,10 @@
     document.getElementById('modal-card-color').value = '';
     document.getElementById('card-modal-context').textContent = 'Nuova card';
     document.getElementById('modal-rework-history').hidden = true;
+    // La Cronologia richiede un job_id gia' esistente, come il tab
+    // omonimo (nascosto poco sotto): niente anteprima in creazione.
+    document.getElementById('modal-recent-activity').hidden = true;
+    document.getElementById('modal-recent-activity-list').innerHTML = '';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
     resetCustomValueFields();
@@ -610,7 +728,11 @@
     document.getElementById('modal-tab-info-sidebar').hidden = tab !== 'info';
     document.getElementById('modal-tab-activity').hidden = tab !== 'activity';
     if (tab === 'activity') {
-      loadActivityLogForModal_();
+      // Nessuna nuova chiamata: il log e' gia' stato caricato
+      // all'apertura della card (loadActivityLogForModal_ in
+      // openCardModal) insieme all'anteprima in Informazioni — qui si
+      // ridisegna solo dalla cache in state.activityLog.
+      renderActivityLog_(state.activityLog || []);
     } else {
       closeActivityForm_();
     }
@@ -695,12 +817,16 @@
         } else {
           addJobIntoState(savedJob);
         }
+        // M0-B: solo il nodo di questa card + i badge della sua
+        // colonna (stessa colonna in modifica, nuova in creazione),
+        // non l'intera board.
+        placeCardInColumn_(savedJob);
+        updateColumnCounters_(savedJob.status);
       }
       document.getElementById('card-modal').close();
       state.activeJob = null;
       state.activeColumnId = null;
       renderToolbarFilters();
-      renderBoard();
       updateLastUpdated();
     }).catch(showError).finally(function() {
       state.pendingWrites--;
@@ -715,10 +841,6 @@
       description: document.getElementById('modal-description').value,
       assignee: document.getElementById('modal-assignee').value,
       ambassador: document.getElementById('modal-ambassador').value,
-      // Non c'e' piu' una UI per la checklist (Fase H): si rimanda invariato
-      // il valore che la card aveva gia', invece di ricostruirlo da un DOM
-      // che non esiste piu'. Su una card nuova non esiste ancora: '[]'.
-      checklist_json: state.activeJob ? state.activeJob.checklist_json : '[]',
       tag: document.getElementById('modal-tag').value,
       size_class: document.getElementById('modal-size').value,
       impact: document.getElementById('modal-impact').value,
@@ -773,6 +895,14 @@
   function renderReworkHistory(job) {
     var root = document.getElementById('modal-rework-history');
     var reworkCount = Math.max(0, Number(job.visit_number || 1) - 1);
+    // Stesso badge "Rnn" gia' presente sulla card nella board (era
+    // assente nel tab Informazioni, segnalato da Marco): il numero di
+    // rientri era leggibile solo su ogni riga di 'visite', non qui.
+    var badge = document.getElementById('modal-recent-activity-rework-badge');
+    badge.hidden = reworkCount <= 0;
+    if (reworkCount > 0) {
+      badge.textContent = 'R' + reworkCount;
+    }
     if (!coerceBool(job.is_rework) && reworkCount <= 0) {
       root.hidden = true;
       root.innerHTML = '';
@@ -786,6 +916,42 @@
     var lastCauseLabel = job.rework_cause ? columnLabelById_(job.rework_cause) : '';
     root.innerHTML = '<p class="rework-history-note">' + escapeHtml(label) +
       (lastCauseLabel ? ' — l\'ultimo da "' + escapeHtml(lastCauseLabel) + '"' : '') + '</p>';
+  }
+
+  // Anteprima nel tab Informazioni: gli ultimi eventi di Cronologia, in
+  // sola lettura (niente modifica/cancellazione — quelle restano nel
+  // tab Cronologia). Il campo Descrizione resta le note libere
+  // dell'utente, concettualmente separato da questa cronologia reale
+  // degli spostamenti.
+  var RECENT_ACTIVITY_PREVIEW_COUNT_ = 7;
+
+  function renderRecentActivityPreview_(events) {
+    var list = document.getElementById('modal-recent-activity-list');
+    var empty = document.getElementById('modal-recent-activity-empty');
+    list.innerHTML = '';
+    if (!events.length) {
+      empty.hidden = false;
+      empty.textContent = 'Nessun evento registrato.';
+      return;
+    }
+    empty.hidden = true;
+    // M0-A2: stesso verso della tab Cronologia (dal piu' vecchio al piu'
+    // recente) — segnalato da Marco come incoerenza tra le due viste.
+    // getActivityLog restituisce gia' il log in ordine cronologico
+    // crescente: gli ultimi N elementi sono i piu' recenti, l'ordine
+    // resta invariato, nessun reverse.
+    events.slice(-RECENT_ACTIVITY_PREVIEW_COUNT_).forEach(function(logEvent) {
+      var row = document.createElement('div');
+      row.className = 'recent-activity-row';
+      var ts = document.createElement('span');
+      ts.className = 'activity-log-ts';
+      ts.textContent = formatEventTimestamp_(logEvent.ts);
+      var description = document.createElement('span');
+      description.textContent = activityEventDescription_(logEvent);
+      row.appendChild(ts);
+      row.appendChild(description);
+      list.appendChild(row);
+    });
   }
 
   var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
@@ -829,7 +995,12 @@
 
   function activityEventDescription_(event) {
     if (event.type === 'move') {
-      return event.from ? ('da ' + columnLabelById_(event.from) + ' → ' + columnLabelById_(event.to)) : ('→ ' + columnLabelById_(event.to));
+      var move = event.from ? ('da ' + columnLabelById_(event.from) + ' → ' + columnLabelById_(event.to)) : ('→ ' + columnLabelById_(event.to));
+      // Bugfix (segnalato da Marco): la nota di uno spostamento veniva
+      // salvata e restava leggibile aprendo l'evento in modifica, ma
+      // spariva dalla riga della Cronologia — l'unico punto dove la si
+      // legge davvero scorrendo lo storico.
+      return event.note ? (move + ' — ' + event.note) : move;
     }
     if (event.type === 'correction') {
       var reason = event.reason ? ' — ' + event.reason : '';
@@ -838,17 +1009,38 @@
     return event.note || '';
   }
 
+  // M0-A2: unico punto che chiama getActivityLog per la card aperta —
+  // prima la Cronologia (al click sul tab) e l'anteprima in
+  // Informazioni (all'apertura della card) facevano ciascuna la propria
+  // chiamata per lo stesso job_id, raddoppiando un round-trip che su
+  // Apps Script costa 1-3s indipendentemente dalla quantita' di dati
+  // (segnalato da Marco come "Cronologia lenta" dopo M0-A: il
+  // rallentamento non era la lettura del foglio — gia' mirata su una
+  // sola riga tramite findRowById_/readJobFromRow_, non un readTable_
+  // sull'intero foglio jobs come si sospettava — ma il doppio round-trip
+  // introdotto proprio dall'anteprima aggiunta in M0-A). Chiamata
+  // all'apertura della card (vedi openCardModal) e dopo ogni mutazione
+  // dell'evento (submitActivityPayload_/confirmActivityDelete_); il
+  // cambio tab si limita a ridisegnare da state.activityLog, nessuna
+  // nuova chiamata.
   function loadActivityLogForModal_() {
     if (!state.activeJob) { return; }
     closeActivityForm_();
     document.getElementById('modal-activity-banner').hidden = true;
-    var list = document.getElementById('modal-activity-list');
-    list.innerHTML = '<p class="activity-log-status">Caricamento cronologia...</p>';
+    document.getElementById('modal-activity-list').innerHTML = '<p class="activity-log-status">Caricamento cronologia...</p>';
+    document.getElementById('modal-recent-activity').hidden = false;
+    document.getElementById('modal-recent-activity-list').innerHTML = '<p class="activity-log-status">Caricamento...</p>';
+    document.getElementById('modal-recent-activity-empty').hidden = true;
     callApi('getActivityLog', { job_id: state.activeJob.job_id }).then(function(data) {
       state.activityLog = data.log || [];
       renderActivityLog_(state.activityLog);
+      renderRecentActivityPreview_(state.activityLog);
     }).catch(function(error) {
-      list.innerHTML = '<p class="activity-log-status">Impossibile caricare la cronologia. Riprovare.</p>';
+      document.getElementById('modal-activity-list').innerHTML = '<p class="activity-log-status">Impossibile caricare la cronologia. Riprovare.</p>';
+      document.getElementById('modal-recent-activity-list').innerHTML = '';
+      var empty = document.getElementById('modal-recent-activity-empty');
+      empty.hidden = false;
+      empty.textContent = 'Impossibile caricare la cronologia.';
       showError(error);
     });
   }
@@ -1116,13 +1308,37 @@
       return;
     }
     var previousBoard = cloneBoard();
-    if (moveJobLocally(jobId, status)) {
-      renderBoard();
+    // M0-B: solo il nodo della card spostata + i badge delle due
+    // colonne coinvolte (provenienza e arrivo), non l'intera board.
+    var moveResult = moveJobLocally(jobId, status);
+    if (moveResult) {
+      placeCardInColumn_(moveResult.job);
+      updateColumnCounters_(moveResult.fromStatus);
+      updateColumnCounters_(status);
     }
-    callApi('moveJob', { job_id: jobId, status: status }).then(function() { loadBoard(true); }).catch(function(error) {
+    // Nessun loadBoard(true) sul successo: lo stato locale e' gia'
+    // aggiornato ottimisticamente (moveJobLocally), rileggere l'intera
+    // board da capo (2 fogli, jobs+visite) per confermare un dato gia'
+    // noto costa quanto un caricamento completo ad ogni singolo drag.
+    // Sul fallimento invece serve ririallinearsi allo stato server vero,
+    // non solo tornare indietro alla board precedente.
+    callApi('moveJob', { job_id: jobId, status: status }).then(function(data) {
+      // Bugfix M0-A2: senza questo il badge rientri (Rnn) restava fermo
+      // al valore di prima della mossa fino al prossimo poll — l'update
+      // ottimistico (moveJobLocally) sposta la card ma non porta con se'
+      // visit_number/is_rework/rework_cause, ricalcolati solo lato
+      // server. moveJob ora li restituisce gia' pronti nella risposta.
+      if (data.job) {
+        mergeJobIntoState(data.job);
+        placeCardInColumn_(data.job);
+        updateColumnCounters_(data.job.status);
+      }
+      updateLastUpdated();
+    }).catch(function(error) {
       state.board = previousBoard;
       renderBoard();
       showError(error);
+      loadBoard(true);
     });
   }
 
@@ -1131,12 +1347,18 @@
       return;
     }
     var previousBoard = cloneBoard();
-    removeJobLocally(job.job_id);
-    renderBoard();
-    callApi('deleteJob', { job_id: job.job_id }).then(function() { loadBoard(true); }).catch(function(error) {
+    // M0-B: rimuove solo il nodo della card eliminata e aggiorna i
+    // badge della sua colonna, non l'intera board.
+    var fromStatus = removeJobLocally(job.job_id);
+    removeCardEl_(job.job_id);
+    updateColumnCounters_(fromStatus);
+    callApi('deleteJob', { job_id: job.job_id }).then(function() {
+      updateLastUpdated();
+    }).catch(function(error) {
       state.board = previousBoard;
       renderBoard();
       showError(error);
+      loadBoard(true);
     });
   }
 
@@ -1204,14 +1426,42 @@
     return state.columnMeta && state.columnMeta.length ? state.columnMeta : defaultColumns;
   }
 
+  // Segnalato da Marco come "molto lento": salvare/spostare una colonna
+  // chiamava updateColumn/addColumn/moveColumn e POI loadBoard(true) —
+  // un secondo round-trip completo (getBoard, che rilegge jobs+visite
+  // oltre alle colonne) solo per riottenere qualcosa che la risposta
+  // del primo salvataggio conteneva gia' (data.columns). Su Apps
+  // Script ogni round-trip costa un paio di secondi fissi (vedi M0-A):
+  // raddoppiarlo per un salvataggio di colonna si sentiva parecchio.
+  // Aggiorna solo state.columnMeta dalla risposta gia' in mano e
+  // ridisegna in locale — redraw completo della board (non solo la
+  // colonna toccata: resta fuori scope di M0-B, un cambio colonna puo'
+  // riguardare l'intero layout), ma senza un secondo giro di rete.
+  // writeColumns_ (Kanban.gs) non include "status" (solo "id") a
+  // differenza di readColumns_ — qui si aggiunge sempre, cosi' il resto
+  // del codice (che legge column.status ovunque) continua a funzionare
+  // indipendentemente da quale delle due forme arriva.
+  function applyColumnsResponse_(columns) {
+    state.columnMeta = (columns || []).map(function(column) {
+      return Object.assign({ status: column.id }, column);
+    });
+    renderBoard();
+  }
+
+  // Redraw completo lasciato volutamente qui (fuori dallo scope di
+  // M0-B, che copre solo le operazioni su un singolo job): un cambio di
+  // ordinamento puo' riposizionare TUTTE le card della colonna, non
+  // una sola — un aggiornamento incrementale utile richiederebbe di
+  // ridisegnare comunque l'intera colonna (non l'intera board: un
+  // margine di ottimizzazione futura possibile, non necessario ora).
   function toggleColumnSort(columnId, mode) {
     state.sortModes[columnId] = state.sortModes[columnId] === mode ? '' : mode;
     renderBoard();
   }
 
   function moveColumn(columnId, direction) {
-    callApi('moveColumn', { status: columnId, direction: direction }).then(function() {
-      loadBoard(true);
+    callApi('moveColumn', { status: columnId, direction: direction }).then(function(data) {
+      applyColumnsResponse_(data.columns);
     }).catch(showError);
   }
 
@@ -1258,34 +1508,47 @@
     });
   }
 
+  // M0-B: restituisce anche la colonna di provenienza (non solo un
+  // booleano) — il chiamante ne ha bisogno per aggiornare i contatori
+  // della colonna lasciata, oltre a quella di arrivo.
   function moveJobLocally(jobId, status) {
     var moved = null;
+    var fromStatus = null;
     Object.keys(state.board || {}).forEach(function(column) {
       state.board[column] = (state.board[column] || []).filter(function(job) {
         if (job.job_id === jobId) {
           moved = job;
+          fromStatus = column;
           return false;
         }
         return true;
       });
     });
     if (!moved) {
-      return false;
+      return null;
     }
     moved.status = status;
     if (!state.board[status]) {
       state.board[status] = [];
     }
     state.board[status].push(moved);
-    return true;
+    return { job: moved, fromStatus: fromStatus };
   }
 
+  // M0-B: restituisce la colonna da cui il job e' stato tolto, serve al
+  // chiamante per aggiornare i contatori di quella sola colonna.
   function removeJobLocally(jobId) {
+    var fromStatus = null;
     Object.keys(state.board || {}).forEach(function(column) {
       state.board[column] = (state.board[column] || []).filter(function(job) {
-        return job.job_id !== jobId;
+        if (job.job_id === jobId) {
+          fromStatus = column;
+          return false;
+        }
+        return true;
       });
     });
+    return fromStatus;
   }
 
   function matchesFilters(job) {
@@ -1303,8 +1566,19 @@
     return Boolean(filter[String(value || '').toLowerCase()]);
   }
 
-  function loadMetrics() {
-    callApi('getMetrics').then(renderMetrics).catch(showError);
+  // Pigra: getMetrics() e' un secondo round-trip completo (rilegge
+  // jobs+visite da capo), inutile finche' nessuno guarda la Dashboard.
+  // Caricata la prima volta che si apre la tab, poi tenuta in cache per
+  // il resto della sessione — force=true (bottone dati demo TEST) la
+  // invalida esplicitamente perche' i dati sono davvero cambiati.
+  function loadMetrics(force) {
+    if (state.metricsLoaded && !force) {
+      return;
+    }
+    callApi('getMetrics').then(function(metrics) {
+      state.metricsLoaded = true;
+      renderMetrics(metrics);
+    }).catch(showError);
   }
 
   function renderMetrics(metrics) {
@@ -1547,6 +1821,23 @@
       return 0;
     }
     return Math.floor((new Date().getTime() - new Date(iso).getTime()) / 864e5);
+  }
+
+  // M0-C: regola "aging" unificata (prima duplicata fra il ciclo
+  // colonne di renderBoard, renderCard e updateColumnCounters_ di
+  // M0-B — stessa soglia fissa "role==='stand_by' && >5 giorni"
+  // ripetuta tre volte). aging_days e' opzionale per colonna
+  // (columns_json, non piu' legato al ruolo): assente/vuoto = nessuna
+  // evidenziazione per quella colonna, qualunque sia il ruolo.
+  // status_since_ts (M0-C, non piu' start_ts/arrival_ts): da quando la
+  // card e' entrata nella colonna ATTUALE, non nel sistema o in
+  // lavorazione.
+  function isJobAging_(job, column) {
+    return Boolean(column && column.aging_days) && daysSince(job.status_since_ts) > Number(column.aging_days);
+  }
+
+  function countAgingInColumn_(jobs, column) {
+    return jobs.filter(function(job) { return isJobAging_(job, column); }).length;
   }
 
   function initialsFor(value) {
