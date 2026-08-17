@@ -149,10 +149,7 @@ function addJob(params) {
     due_date: params.due_date || '',
     arrival_ts: now,
     invoiced: coerceBoolean_(params.invoiced),
-    notes: params.notes || '',
-    card_color: normalizeCardColor_(params.card_color),
-    checklist_json: normalizeChecklistJson_(params.checklist_json),
-    correction_log_json: '[]'
+    card_color: normalizeCardColor_(params.card_color)
   };
 
   // Evento automatico di creazione, stesso pattern dell'evento auto scritto
@@ -488,7 +485,7 @@ function updateJob(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
-  ['title', 'client', 'ambassador', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'notes', 'card_color', 'checklist_json'].forEach(function(field) {
+  ['title', 'client', 'ambassador', 'assignee', 'tag', 'size_class', 'description', 'due_date', 'card_color'].forEach(function(field) {
     if (params[field] !== undefined && headers[field]) {
       job[field] = params[field];
     }
@@ -499,9 +496,6 @@ function updateJob(params) {
   }
   if (params.card_color !== undefined) {
     job.card_color = normalizeCardColor_(params.card_color);
-  }
-  if (params.checklist_json !== undefined) {
-    job.checklist_json = normalizeChecklistJson_(params.checklist_json);
   }
 
   if (params.invoiced !== undefined) {
@@ -806,13 +800,7 @@ function correctJobTimestamps(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
-  var log = parseJsonArray_(job.correction_log_json);
-  var correctionTs = nowIso_();
-
-  log.push({ ts: correctionTs, field: 'arrival_ts', old: job.arrival_ts || '', new: newArrival, reason: reason });
   job.arrival_ts = newArrival;
-
-  job.correction_log_json = JSON.stringify(log);
   writeJobToRow_(sheet, row, headers, job);
 
   return ok_({ job_id: jobId, corrections_applied: 1, job: job });
@@ -1023,15 +1011,6 @@ function optionUsageCount_(kind, value) {
   return readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(job) {
     return String(job[field] || '') === value;
   }).length;
-}
-
-function normalizeChecklistJson_(value) {
-  var items;
-  try { items = typeof value === 'string' ? JSON.parse(value || '[]') : (value || []); } catch (err) { items = []; }
-  if (!Array.isArray(items)) { items = []; }
-  return JSON.stringify(items.map(function(item) {
-    return { text: String(item && item.text || '').trim(), done: coerceBoolean_(item && item.done) };
-  }).filter(function(item) { return item.text; }));
 }
 
 function normalizeCardColor_(value) {

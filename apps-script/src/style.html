@@ -550,6 +550,33 @@
 
   #modal-description { min-height: 220px; resize: vertical; }
 
+  .recent-activity-panel {
+    background: #f6f8fa;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+
+  .recent-activity-panel h3 {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 0 0 8px;
+    text-transform: uppercase;
+  }
+
+  .recent-activity-row {
+    align-items: baseline;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 10px;
+    grid-template-columns: auto 1fr;
+    padding: 6px 0;
+  }
+
+  .recent-activity-row:last-child {
+    border-bottom: none;
+  }
+
   .modal-context {
     color: var(--muted);
     font-size: 12px;

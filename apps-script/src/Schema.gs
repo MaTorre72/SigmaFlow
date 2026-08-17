@@ -13,6 +13,14 @@
 // una card = un job = un caso). markRework/markRowAsRework_ (Kanban.gs),
 // l'unico codice che leggeva case_id per raggruppare righe "dello stesso
 // caso", rimossi insieme per lo stesso motivo.
+// notes/checklist_json/correction_log_json rimossi (sessione M0-A,
+// pulizia campi non usati): nessuna UI da tempo (Fase H). checklist_json/
+// correction_log_json erano ancora letti da migrateSingleJobActivityLog_
+// per la migrazione una tantum verso activity_log_json/description — ora
+// rimossa insieme ai campi, essendo la migrazione reale di PROD gia'
+// eseguita (nessun'altra riga di questo schema potra' mai piu' avere
+// queste colonne). correctJobTimestamps (Kanban.gs) non scrive piu' un
+// log a parte, solo arrival_ts (suo unico uso reale rimasto).
 var JOB_HEADERS = [
   'job_id',
   'title',
@@ -32,10 +40,7 @@ var JOB_HEADERS = [
   'due_date',
   'arrival_ts',
   'invoiced',
-  'notes',
   'card_color',
-  'checklist_json',
-  'correction_log_json',
   'activity_log_json',
   'incarico_chiuso_ts'
 ];

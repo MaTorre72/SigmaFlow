@@ -15,27 +15,76 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva.
+**M0-A (manutenzione frontend/performance) — codice completato,
+verifica su TEST bloccata**: `clasp push` fallisce con
+`invalid_grant`/`invalid_rapt` (token scaduto) — serve un
+`clasp login` interattivo di Marco prima di poter verificare il push e
+chiudere la sessione. Codice gia' committato su un branch dedicato,
+suite completa passata via harness (67/67).
+
+## Sessione M0-A — manutenzione frontend/performance (2026-08-17)
+
+Cinque modifiche indipendenti, tutte implementate e testate via
+harness Node (67/67, verifica su TEST in sospeso per il blocco clasp
+sopra):
+
+1. **Niente reload dopo mosse ottimistiche** — `moveJob`/`deleteJob` in
+   `client.html` non richiamano piu' `loadBoard(true)` sul successo (lo
+   stato era gia' aggiornato in locale): risparmia una rilettura
+   completa di `jobs`+`visite` a ogni drag-and-drop/eliminazione. Sul
+   fallimento il rollback ora e' seguito da un `loadBoard(true)` per
+   riallinearsi allo stato server vero (prima si tornava solo alla
+   board precedente in locale).
+2. **Polling in pausa a tab nascosta** — il polling a 45s si ferma
+   quando `document.visibilityState !== 'visible'` e riparte al ritorno
+   in foreground con un refresh immediato (non solo la ripresa del
+   timer).
+3. **Metriche pigre** — `loadMetrics()` non parte piu' al caricamento
+   pagina: solo al primo click sulla tab Dashboard, con cache in
+   sessione (`state.metricsLoaded`); il bottone dati demo TEST forza un
+   refresh esplicito (`loadMetrics(true)`) perche' i dati sono
+   davvero cambiati.
+4. **Rimossi `notes`/`checklist_json`/`correction_log_json`** da
+   `JOB_HEADERS` (`SCHEMA_VERSION` 9->10). La ricognizione ha trovato
+   residui reali non previsti dalla nota precedente in questo file:
+   scritture in `addJob`/`updateJob`/`correctJobTimestamps` (Kanban.gs),
+   letture di migrazione in `migrateSingleJobActivityLog_`
+   (ActivityLog.gs, i due rami che spostavano `correction_log_json`
+   verso eventi di correzione e `checklist_json` in coda a
+   `description` — ora dead code, rimossi insieme ai campi, la
+   migrazione reale che li consumava e' gia' stata eseguita su PROD),
+   e due test che esercitavano `checklist_json` end-to-end
+   (`testAmbassadorAndChecklist` semplificato in `testAmbassadorOption`,
+   `testMigrateToActivityLogChecklist` rimosso). `setupOldProdShapedSheet_`
+   (fixture schema storico pre-migrazione) lasciata invariata apposta.
+5. **Bugfix + feature Cronologia**: `activityEventDescription_` in
+   `client.html` ignorava `event.note` sugli eventi di tipo `move` —
+   la nota si vedeva solo aprendo l'evento in modifica, mai scorrendo
+   la Cronologia. Corretto (append `— nota` alla descrizione). Aggiunto
+   un riquadro "Cronologia recente" nel tab Informazioni (sopra
+   Descrizione, che resta invariata — note libere dell'utente,
+   concettualmente separate), 7 eventi piu' recenti, sola lettura,
+   riusa `activityEventDescription_` senza duplicarla.
 
 ## Prossimi passi noti
 
-Raccolti da Marco il 16/08/2026, nessuna priorità assegnata:
+Raccolti da Marco il 16/08/2026, nessuna priorità assegnata (il punto
+sulla pulizia campi e' stato chiuso in M0-A, vedi sopra):
 
-- **Frontend lentissimo** — da profilare (board/dashboard), causa non
-  ancora indagata.
+- **Frontend lentissimo** — M0-A (punti 1-3 sopra) affronta le cause a
+  piu' alto impatto individuate in ricerca (reload ridondanti, polling
+  sempre attivo, metriche caricate a freddo). Restano, non affrontate:
+  rendering completo del DOM ad ogni `renderBoard()` (ricostruisce
+  tutte le colonne/card anche per una singola modifica) e la crescita
+  nel tempo dei fogli Google Sheets (`getDataRange().getValues()`
+  rilegge tutto ad ogni chiamata).
 - **Ricostruzione date reali delle card di PROD** — molte card reali
   hanno `arrival_ts`/`apertura_ts` mancanti; oltre al fallback già
   implementato (data dal nome del job, `extractDateFromJobId_`), mail e
   date di creazione delle cartelle di progetto sono fonti future per una
   ricostruzione più accurata caso per caso.
-- **Pulizia di vecchi campi non usati**: `notes` (nessuna UI, nessun
-  ruolo in migrazione — rimovibile senza rischio in qualunque momento);
-  `checklist_json`/`correction_log_json` (nessuna UI, ma consumati dalla
-  migrazione ormai eseguita su PROD — ora rimovibili anch'essi, la
-  cautela precedente non si applica più).
 - **Migliore allineamento e lettura della dashboard alla dispensa FSC**
-  — riferimento a un documento/manuale FSC esterno non ancora condiviso,
-  da riprendere quando Marco lo fornirà.
+  — riferimento a un documento/manuale FSC esterno da riprendere.
 
 ## Riferimenti tecnici correnti
 

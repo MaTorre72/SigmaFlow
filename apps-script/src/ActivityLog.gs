@@ -223,9 +223,9 @@ function checkStructuralAlignment_(job, candidate) {
   return warnings;
 }
 
-// Migrazione una tantum: correction_log_json -> activity_log_json e
-// checklist_json -> description (Fase F, gate umano). Da eseguire solo
-// su TEST, mai su PROD.
+// Migrazione una tantum: ricostruisce l'evento di creazione mancante in
+// activity_log_json (Fase F, gate umano). Da eseguire solo su TEST, mai
+// su PROD.
 
 // Azione Web App: rifiuta esplicitamente se non chiamata con env: 'test',
 // stesso pattern gia' usato da seedTestData in Tests.gs.
@@ -255,8 +255,6 @@ function migrateActivityLogData_(ss) {
   var jobs = readTable_(sheet);
   var summary = {
     cards_processed: 0,
-    corrections_migrated: 0,
-    checklist_items_migrated: 0,
     creation_events_backfilled: 0,
     cards_skipped: 0,
     errors: []
@@ -272,8 +270,6 @@ function migrateActivityLogData_(ss) {
     try {
       var result = migrateSingleJobActivityLog_(job, migrationTs);
       summary.cards_processed++;
-      summary.corrections_migrated += result.correctionsMigrated;
-      summary.checklist_items_migrated += result.checklistItemsMigrated;
       if (result.creationEventBackfilled) { summary.creation_events_backfilled++; }
       return jobToRow_(job);
     } catch (err) {
@@ -311,13 +307,15 @@ function extractDateFromJobId_(jobId) {
   return Utilities.formatDate(candidate, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
 }
 
-// Migra una singola card: aggiunge eventi 'correction' al log a partire
-// da correction_log_json (senza duplicare) e appende la checklist in
-// fondo a description. Muta l'oggetto job passato, ma NON tocca
-// checklist_json/correction_log_json, che restano invariati nel foglio.
+// Migra una singola card: ricostruisce l'evento di creazione mancante
+// nel log. Muta l'oggetto job passato.
+// Fino alla sessione M0-A migrava anche correction_log_json (verso
+// eventi 'correction') e checklist_json (in coda a description): campi
+// rimossi dallo schema, quel codice non poteva piu' fare nulla (la
+// migrazione reale di PROD, unica destinataria, e' gia' stata eseguita
+// e non lascia mai piu' queste colonne su un foglio in schema corrente).
 function migrateSingleJobActivityLog_(job, migrationTs) {
   var log = parseActivityLog_(job.activity_log_json);
-  var correctionsMigrated = 0;
   var creationEventBackfilled = false;
 
   // Ogni card deve avere un evento di creazione (from null) come primo
@@ -365,32 +363,6 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
     creationEventBackfilled = true;
   }
 
-  var corrections = parseJsonArray_(job.correction_log_json);
-  corrections.forEach(function(record) {
-    var ts = record.ts || job.arrival_ts || migrationTs;
-    var alreadyMigrated = log.some(function(event) {
-      return event.type === 'correction' &&
-        event.field === record.field &&
-        event.old === record.old &&
-        event.new === record.new &&
-        event.ts === ts;
-    });
-    if (alreadyMigrated) {
-      return;
-    }
-    log.push({
-      id: generateActivityEventId_(),
-      ts: ts,
-      type: 'correction',
-      source: 'manual',
-      field: record.field,
-      old: record.old,
-      new: record.new,
-      reason: record.reason || ''
-    });
-    correctionsMigrated++;
-  });
-
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
   // Ricalcola i campi strutturati rileggendo tutto il log dall'inizio,
@@ -409,22 +381,7 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
 
   job.activity_log_json = serializeActivityLog_(log);
 
-  // La spec non lo dice esplicitamente per la checklist (a differenza delle
-  // correzioni, dove la deduplicazione e' richiesta), ma senza questa guardia
-  // un secondo lancio della migrazione duplicherebbe il blocco in description.
-  var checklistItemsMigrated = 0;
-  var checklist = parseJsonArray_(job.checklist_json);
-  var checklistMarker = '--- Checklist migrata ---';
-  var alreadyAppended = String(job.description || '').indexOf(checklistMarker) !== -1;
-  if (checklist.length && !alreadyAppended) {
-    var lines = checklist.map(function(item) {
-      checklistItemsMigrated++;
-      return '[' + (coerceBoolean_(item.done) ? 'x' : ' ') + '] ' + String(item.text || '');
-    });
-    job.description = String(job.description || '') + '\n\n' + checklistMarker + '\n' + lines.join('\n');
-  }
-
-  return { correctionsMigrated: correctionsMigrated, checklistItemsMigrated: checklistItemsMigrated, creationEventBackfilled: creationEventBackfilled };
+  return { creationEventBackfilled: creationEventBackfilled };
 }
 
 // Fase L5 (DESIGN_modello_caso_visita.md, sez. 7): materializzazione UNA

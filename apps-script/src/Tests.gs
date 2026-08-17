@@ -93,10 +93,7 @@ function seedTestDataset_(ss, replace) {
       // reworkGapDays giorni fa.
       arrival_ts: hasRework ? testIsoDaysAgo_(now, arrivalDays + reworkGapDays) : arrival,
       invoiced: status === 'done' && i % 3 === 0,
-      notes: '',
       card_color: colors[(i % (colors.length - 1)) + 1],
-      checklist_json: '[]',
-      correction_log_json: '[]',
       activity_log_json: serializeActivityLog_([creationEvent]),
       incarico_chiuso_ts: ''
     };
@@ -230,7 +227,7 @@ function runAllTests() {
     testPriorityUpdate,
     testCardColor,
     testUpdateJobInvoicedTogglesIncaricoChiusoTs,
-    testAmbassadorAndChecklist,
+    testAmbassadorOption,
     testEditableOptions,
     testDynamicColumnsAndOptions,
     testMetrics,
@@ -258,7 +255,6 @@ function runAllTests() {
     testGetActivityLogFromRicalcolato,
     testGetActivityLogFromResolvesTiedTimestamps,
     testMoveJobScriveEventoAuto,
-    testMigrateToActivityLogChecklist,
     testExtractDateFromJobIdParsesValidFormat,
     testExtractDateFromJobIdReturnsNullForInvalidFormat,
     testExtractDateFromJobIdReturnsNullForInvalidCalendarDate,
@@ -788,23 +784,16 @@ function testUpdateJobInvoicedTogglesIncaricoChiusoTs() {
   });
 }
 
-function testAmbassadorAndChecklist() {
+function testAmbassadorOption() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     updateOptionList({ kind: 'ambassadors', operation: 'add', value: 'Referente Cliente' });
     var created = addJob({
       title: 'Progetto con referente',
       client: 'Cliente prova',
-      ambassador: 'Referente Cliente',
-      checklist_json: JSON.stringify([{ text: 'Controllo documenti', done: false }])
+      ambassador: 'Referente Cliente'
     }).data;
     assertEquals_('Referente Cliente', created.job.ambassador, 'ambasciatore in creazione');
-    var updated = updateJob({
-      job_id: created.job_id,
-      checklist_json: JSON.stringify([{ text: 'Controllo documenti', done: true }])
-    });
-    var checklist = JSON.parse(updated.data.job.checklist_json);
-    assertTrue_(checklist[0].done, 'checklist completata');
     assertTrue_(getBoard().data.options.ambassadors.indexOf('Referente Cliente') !== -1, 'ambasciatore nel menu');
   });
 }
@@ -1402,31 +1391,6 @@ function testMoveJobScriveEventoAuto() {
   });
 }
 
-function testMigrateToActivityLogChecklist() {
-  withTestSpreadsheet_(function(ss) {
-    resetTestDatabase_(ss);
-    var created = addJob({ title: 'Migrazione checklist', size_class: 'M', description: 'Testo originale della card' }).data;
-
-    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
-    var row = findRowById_(sheet, 'job_id', created.job_id);
-    var headers = getHeaderMap_(sheet);
-    var job = readJobFromRow_(sheet, row, headers);
-    job.checklist_json = JSON.stringify([{ text: 'Voce A', done: true }, { text: 'Voce B', done: false }]);
-    writeJobToRow_(sheet, row, headers, job);
-
-    var result = migrateToActivityLog({ env: 'test' });
-
-    assertTrue_(result.success, 'migrazione dovrebbe riuscire');
-    assertEquals_(2, result.data.checklist_items_migrated, 'due voci checklist migrate');
-
-    var after = readJobFromRow_(sheet, row, headers);
-    assertTrue_(after.description.indexOf('Testo originale della card') === 0, 'testo originale intatto in testa');
-    assertTrue_(after.description.indexOf('--- Checklist migrata ---') !== -1, 'separatore presente');
-    assertTrue_(after.description.indexOf('[x] Voce A') !== -1, 'voce completata con [x]');
-    assertTrue_(after.description.indexOf('[ ] Voce B') !== -1, 'voce non completata con [ ]');
-  });
-}
-
 // --- Indizio data dal job_id per il backfill (segnalato da Marco sulla
 // migrazione PROD reale: molte card storiche non hanno mai avuto
 // arrival_ts valorizzato, la migrazione ricadeva sulla data del giorno
@@ -1892,10 +1856,7 @@ function appendCompletedJob_(ss, data) {
     due_date: data.due_date || '',
     arrival_ts: arrivalIso,
     invoiced: Boolean(data.invoiced),
-    notes: '',
     card_color: '',
-    checklist_json: '[]',
-    correction_log_json: '[]',
     activity_log_json: '[]',
     incarico_chiuso_ts: ''
   }));

@@ -16,7 +16,8 @@
     touchGhost: null,
     touchTimer: null,
     touchStart: null,
-    suppressCardClick: false
+    suppressCardClick: false,
+    metricsLoaded: false
   };
 
   var defaultColumns = [
@@ -46,9 +47,42 @@
     bindToolbar();
     bindModal();
     loadBoard();
-    loadMetrics();
-    window.setInterval(function() { loadBoard(false); }, 45000);
+    bindVisibilityPolling_();
   });
+
+  // Il polling a 45s serviva a tenere la board aggiornata anche a tab
+  // in background, ma cosi' facendo continua a rileggere jobs+visite e
+  // a ridisegnare anche quando nessuno la sta guardando: piu' sessioni
+  // restano aperte in background, piu' cresce il carico sul backend
+  // senza alcun beneficio reale. Sospeso quando la tab non e' visibile,
+  // ripreso al ritorno in foreground con un refresh immediato (non solo
+  // la ripartenza del timer, altrimenti si aspetterebbero altri 45s
+  // prima di vedere dati aggiornati dopo un cambio tab).
+  var boardPollTimer_ = null;
+
+  function bindVisibilityPolling_() {
+    startBoardPolling_();
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'visible') {
+        loadBoard(false);
+        startBoardPolling_();
+      } else {
+        stopBoardPolling_();
+      }
+    });
+  }
+
+  function startBoardPolling_() {
+    if (boardPollTimer_ || document.visibilityState !== 'visible') {
+      return;
+    }
+    boardPollTimer_ = window.setInterval(function() { loadBoard(false); }, 45000);
+  }
+
+  function stopBoardPolling_() {
+    window.clearInterval(boardPollTimer_);
+    boardPollTimer_ = null;
+  }
 
   function callApi(action, payload) {
     return new Promise(function(resolve, reject) {
@@ -106,7 +140,7 @@
         callApi('seedTestData', { replace: true }).then(function(data) {
           showMessage('Creati ' + data.jobs + ' job TEST');
           loadBoard(true);
-          loadMetrics();
+          loadMetrics(true);
         }).catch(showError);
       });
     }
@@ -567,6 +601,7 @@
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
+    loadRecentActivityPreview_(job);
     document.querySelector('.modal-tabs').hidden = false;
     setModalTab_('info');
     document.getElementById('card-modal').showModal();
@@ -591,6 +626,10 @@
     document.getElementById('modal-card-color').value = '';
     document.getElementById('card-modal-context').textContent = 'Nuova card';
     document.getElementById('modal-rework-history').hidden = true;
+    // La Cronologia richiede un job_id gia' esistente, come il tab
+    // omonimo (nascosto poco sotto): niente anteprima in creazione.
+    document.getElementById('modal-recent-activity').hidden = true;
+    document.getElementById('modal-recent-activity-list').innerHTML = '';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
     resetCustomValueFields();
@@ -715,10 +754,6 @@
       description: document.getElementById('modal-description').value,
       assignee: document.getElementById('modal-assignee').value,
       ambassador: document.getElementById('modal-ambassador').value,
-      // Non c'e' piu' una UI per la checklist (Fase H): si rimanda invariato
-      // il valore che la card aveva gia', invece di ricostruirlo da un DOM
-      // che non esiste piu'. Su una card nuova non esiste ancora: '[]'.
-      checklist_json: state.activeJob ? state.activeJob.checklist_json : '[]',
       tag: document.getElementById('modal-tag').value,
       size_class: document.getElementById('modal-size').value,
       impact: document.getElementById('modal-impact').value,
@@ -788,6 +823,54 @@
       (lastCauseLabel ? ' — l\'ultimo da "' + escapeHtml(lastCauseLabel) + '"' : '') + '</p>';
   }
 
+  // Anteprima nel tab Informazioni: gli ultimi eventi di Cronologia, in
+  // sola lettura (niente modifica/cancellazione — quelle restano nel
+  // tab Cronologia). Il campo Descrizione resta le note libere
+  // dell'utente, concettualmente separato da questa cronologia reale
+  // degli spostamenti.
+  var RECENT_ACTIVITY_PREVIEW_COUNT_ = 7;
+
+  function loadRecentActivityPreview_(job) {
+    document.getElementById('modal-recent-activity').hidden = false;
+    document.getElementById('modal-recent-activity-list').innerHTML = '<p class="activity-log-status">Caricamento...</p>';
+    document.getElementById('modal-recent-activity-empty').hidden = true;
+    callApi('getActivityLog', { job_id: job.job_id }).then(function(data) {
+      renderRecentActivityPreview_(data.log || []);
+    }).catch(function() {
+      document.getElementById('modal-recent-activity-list').innerHTML = '';
+      var empty = document.getElementById('modal-recent-activity-empty');
+      empty.hidden = false;
+      empty.textContent = 'Impossibile caricare la cronologia.';
+    });
+  }
+
+  function renderRecentActivityPreview_(events) {
+    var list = document.getElementById('modal-recent-activity-list');
+    var empty = document.getElementById('modal-recent-activity-empty');
+    list.innerHTML = '';
+    if (!events.length) {
+      empty.hidden = false;
+      empty.textContent = 'Nessun evento registrato.';
+      return;
+    }
+    empty.hidden = true;
+    // getActivityLog restituisce il log in ordine cronologico crescente:
+    // gli ultimi N sono i piu' recenti, mostrati con il piu' recente in
+    // cima (stesso verso di lettura naturale di una cronologia).
+    events.slice(-RECENT_ACTIVITY_PREVIEW_COUNT_).reverse().forEach(function(logEvent) {
+      var row = document.createElement('div');
+      row.className = 'recent-activity-row';
+      var ts = document.createElement('span');
+      ts.className = 'activity-log-ts';
+      ts.textContent = formatEventTimestamp_(logEvent.ts);
+      var description = document.createElement('span');
+      description.textContent = activityEventDescription_(logEvent);
+      row.appendChild(ts);
+      row.appendChild(description);
+      list.appendChild(row);
+    });
+  }
+
   var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
   var STRUCTURAL_FIELD_LABELS_ = {
     arrival_ts: 'Data creazione (arrival_ts)',
@@ -829,7 +912,12 @@
 
   function activityEventDescription_(event) {
     if (event.type === 'move') {
-      return event.from ? ('da ' + columnLabelById_(event.from) + ' → ' + columnLabelById_(event.to)) : ('→ ' + columnLabelById_(event.to));
+      var move = event.from ? ('da ' + columnLabelById_(event.from) + ' → ' + columnLabelById_(event.to)) : ('→ ' + columnLabelById_(event.to));
+      // Bugfix (segnalato da Marco): la nota di uno spostamento veniva
+      // salvata e restava leggibile aprendo l'evento in modifica, ma
+      // spariva dalla riga della Cronologia — l'unico punto dove la si
+      // legge davvero scorrendo lo storico.
+      return event.note ? (move + ' — ' + event.note) : move;
     }
     if (event.type === 'correction') {
       var reason = event.reason ? ' — ' + event.reason : '';
@@ -1119,10 +1207,19 @@
     if (moveJobLocally(jobId, status)) {
       renderBoard();
     }
-    callApi('moveJob', { job_id: jobId, status: status }).then(function() { loadBoard(true); }).catch(function(error) {
+    // Nessun loadBoard(true) sul successo: lo stato locale e' gia'
+    // aggiornato ottimisticamente (moveJobLocally), rileggere l'intera
+    // board da capo (2 fogli, jobs+visite) per confermare un dato gia'
+    // noto costa quanto un caricamento completo ad ogni singolo drag.
+    // Sul fallimento invece serve ririallinearsi allo stato server vero,
+    // non solo tornare indietro alla board precedente.
+    callApi('moveJob', { job_id: jobId, status: status }).then(function() {
+      updateLastUpdated();
+    }).catch(function(error) {
       state.board = previousBoard;
       renderBoard();
       showError(error);
+      loadBoard(true);
     });
   }
 
@@ -1133,10 +1230,13 @@
     var previousBoard = cloneBoard();
     removeJobLocally(job.job_id);
     renderBoard();
-    callApi('deleteJob', { job_id: job.job_id }).then(function() { loadBoard(true); }).catch(function(error) {
+    callApi('deleteJob', { job_id: job.job_id }).then(function() {
+      updateLastUpdated();
+    }).catch(function(error) {
       state.board = previousBoard;
       renderBoard();
       showError(error);
+      loadBoard(true);
     });
   }
 
@@ -1303,8 +1403,19 @@
     return Boolean(filter[String(value || '').toLowerCase()]);
   }
 
-  function loadMetrics() {
-    callApi('getMetrics').then(renderMetrics).catch(showError);
+  // Pigra: getMetrics() e' un secondo round-trip completo (rilegge
+  // jobs+visite da capo), inutile finche' nessuno guarda la Dashboard.
+  // Caricata la prima volta che si apre la tab, poi tenuta in cache per
+  // il resto della sessione — force=true (bottone dati demo TEST) la
+  // invalida esplicitamente perche' i dati sono davvero cambiati.
+  function loadMetrics(force) {
+    if (state.metricsLoaded && !force) {
+      return;
+    }
+    callApi('getMetrics').then(function(metrics) {
+      state.metricsLoaded = true;
+      renderMetrics(metrics);
+    }).catch(showError);
   }
 
   function renderMetrics(metrics) {
