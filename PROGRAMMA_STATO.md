@@ -15,12 +15,54 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva. **M0-A chiusa**: `clasp login` rifatto da Marco
-dopo il blocco `invalid_rapt`, push su TEST eseguito e verificato (13/13
-file identici via `clasp pull` isolato + diff). Suite completa passata
-via harness (67/67). Codice sul branch `feat/m0-a-frontend-perf`, non
-ancora unito a `main` — decisione di merge non affrontata in questa
-sessione.
+Nessuna fase attiva. **M0-A2 chiusa**: push su TEST eseguito e
+verificato (13/13 file identici via `clasp pull` isolato + diff). Suite
+completa passata via harness (69/69). Codice sul branch
+`feat/m0-a-frontend-perf` (M0-A + M0-A2), non ancora unito a `main` —
+decisione di merge non affrontata in questa sessione.
+
+## Sessione M0-A2 — follow-up dall'uso reale (2026-08-17)
+
+Quattro correzioni, alcune collegate tra loro, emerse collaudando M0-A:
+
+1. **Cronologia lenta (ipotesi di partenza smentita in ricognizione)**:
+   il sospetto era che `getActivityLog` leggesse l'intero foglio `jobs`
+   (`readTable_`, incluso `activity_log_json` di ogni card) per poi
+   usarne una sola riga. Verificato che non è così: usa già
+   `findRowById_` + `readJobFromRow_`, lettura mirata a una singola
+   riga/colonna, nessuna scansione dell'intero foglio. **Causa reale
+   trovata**: M0-A stessa aveva introdotto un secondo round-trip
+   indipendente a `getActivityLog` per la stessa card — uno per
+   l'anteprima "Cronologia recente" all'apertura della card, uno per il
+   tab Cronologia al click. Su Apps Script il costo fisso per chiamata
+   (1-3s, dispatch server-side) pesa più della quantità di dati letti:
+   raddoppiarlo per la stessa card era il vero rallentamento. Unificato
+   in un solo fetch per apertura di card (`loadActivityLogForModal_`,
+   chiamato da `openCardModal`), riusato da entrambe le viste; il
+   cambio tab ora ridisegna solo dalla cache in `state.activityLog`,
+   nessuna nuova chiamata.
+2. **Bugfix — badge rientri (Rnn) fermo dopo una mossa**: effetto
+   collaterale di M0-A, come previsto nel ticket. `moveJob` ora
+   restituisce il job con `visit_number`/`is_rework`/`rework_cause`
+   già ricalcolati (fattorizzato `applyVisitSummaryFields_` da
+   `loadJobsWithVisitSummary_`, riusa la visita già in mano da
+   `updateVisiteForMove_` — nessuna lettura sheet aggiuntiva); il
+   client aggiorna solo la card spostata (`mergeJobIntoState` +
+   `renderBoard()`), senza reload completo. Gestito anche il caso
+   self-move (stessa colonna): senza i campi di rientro nella risposta,
+   il merge avrebbe cancellato un badge già corretto.
+3. **Gap colmato**: badge "Rnn" (stesso stile di quello sulla card)
+   aggiunto nel tab Informazioni, vicino al riquadro Cronologia
+   recente — prima il numero di rientri era leggibile solo nelle
+   `visite` o aprendo la tab Cronologia.
+4. **Coerenza**: l'anteprima Cronologia recente (M0-A) mostrava gli
+   eventi dal più recente al più vecchio; la tab Cronologia esistente
+   dal più vecchio al più recente. Uniformato all'ordine della tab
+   esistente (non toccata).
+
+**69/69 test passati** (67 + 2 nuovi, sulla risposta diretta di
+`moveJob`: mossa reale e self-move). Commit `26d2401`. Push su TEST
+eseguito e verificato (13/13 file identici).
 
 ## Sessione M0-A — manutenzione frontend/performance (2026-08-17)
 
