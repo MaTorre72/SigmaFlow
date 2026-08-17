@@ -125,7 +125,14 @@ function createHarness() {
   const Utilities = {
     formatDate,
     getUuid() { return 'uuid-' + Math.random().toString(36).slice(2, 10); },
-    sleep() {}
+    sleep() {},
+    // Solo la parte usata da Diagnostica.gs (byteLength_ via
+    // newBlob(str).getBytes().length): Buffer.byteLength con encoding
+    // 'utf8' ha la stessa semantica del conteggio byte reale di Apps
+    // Script per una stringa di testo.
+    newBlob(data) {
+      return { getBytes() { return { length: Buffer.byteLength(String(data), 'utf8') }; } };
+    }
   };
 
   const ContentService = {
