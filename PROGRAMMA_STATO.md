@@ -15,15 +15,51 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva. **M0-C chiusa**: push su TEST eseguito e
+Nessuna fase attiva. **M0-C bugfix chiuso**: push su TEST eseguito e
 verificato (13/13 file identici via `clasp pull` isolato + diff). Suite
-completa passata via harness (77/77). Codice sul branch
-`feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B + M0-C), non ancora
-unito a `main` — decisione di merge non affrontata in questa sessione.
-Restato sullo stesso branch anche per M0-C, stesso motivo delle
-sessioni precedenti: proseguimento diretto dello stesso filone
-performance/rendering, riusa i pattern già introdotti (aggiornamento
-incrementale di M0-B per riflettere subito `status_since_ts`).
+completa passata via harness (81/81). Codice sul branch
+`feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B + M0-C + bugfix), non
+ancora unito a `main` — decisione di merge non affrontata in questa
+sessione. Restato sullo stesso branch: correzione diretta di M0-C,
+stesso file/area.
+
+## Sessione M0-C bugfix — backfill status_since_ts (2026-08-17)
+
+Trovato in uso reale su TEST dopo M0-C: la migrazione additiva
+(corretta per principio — mai inventare dati per righe già esistenti)
+lasciava `status_since_ts` vuoto per tutti i job già presenti, ma
+`daysSince('')` ritorna 0 — quei job non risultavano mai in aging finché
+non venivano spostati almeno una volta. Proprio le card ferme da più
+tempo, che nessuno tocca, restavano silenziosamente escluse dal
+meccanismo che dovrebbe segnalarle.
+
+**Aggiunta `backfillStatusSinceTs_`** (Schema.gs, stesso punto di
+`setupSigmaFlow` dove vive già la migrazione di `aging_days`): per ogni
+job con `status_since_ts` vuoto, cerca nell'`activity_log_json` l'evento
+move più recente con `to` uguale allo status attuale — riusando
+`lastEntryTsForColumn_` (Kanban.gs) già esistente, nessuna
+reimplementazione della ricerca all'indietro nel log. Fallback ad
+`arrival_ts` se il log non ha un evento simile (dato storico anomalo);
+campo lasciato vuoto se anche `arrival_ts` manca — nessuna base su cui
+stimare, meglio "non ancora noto" di una data inventata. Idempotente:
+non tocca job che hanno già `status_since_ts` (mossa reale successiva a
+M0-C). `SCHEMA_VERSION` 11->12 perché la migrazione riparta
+automaticamente al prossimo controllo schema, senza azione manuale di
+Marco.
+
+**81/81 test passati** (77 + 4 nuovi: match nel log con timestamp
+esatto — non "ora" — quando c'è più di un evento verso lo status
+attuale; fallback ad `arrival_ts` quando lo status attuale non compare
+mai come `to` nel log; nessuna base disponibile → campo lasciato vuoto;
+idempotenza su job già valorizzati). Commit `6e27f59`. Push su TEST
+eseguito e verificato (13/13 file identici).
+
+**Tempo di backfill misurato** su un dataset realistico (60 job, harness
+Node, simulando lo stato pre-backfill di TEST): 4ms di puro calcolo JS.
+Il costo reale su Apps Script sarà dominato dalle due chiamate Sheets
+API (una lettura, una scrittura), non dal ciclo per-job — dato utile
+per la nota pendente sotto, anche se questa migrazione gira una volta
+sola e non è la stessa cosa di letture ripetute a ogni caricamento.
 
 ## Sessione M0-C — aging configurabile per colonna (2026-08-17)
 
