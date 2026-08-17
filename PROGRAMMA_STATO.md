@@ -15,11 +15,79 @@ Cronologia completa fase per fase (Fasi A-K, L1-L5, R0-R5/P4-P8):
 
 ## In corso
 
-Nessuna fase attiva. **M0-A2 chiusa**: push su TEST eseguito e
+Nessuna fase attiva. **M0-B chiusa**: push su TEST eseguito e
 verificato (13/13 file identici via `clasp pull` isolato + diff). Suite
-completa passata via harness (69/69). Codice sul branch
-`feat/m0-a-frontend-perf` (M0-A + M0-A2), non ancora unito a `main` —
-decisione di merge non affrontata in questa sessione.
+completa passata via harness (69/69, nessuna modifica lato backend).
+Codice sul branch `feat/m0-a-frontend-perf` (M0-A + M0-A2 + M0-B), non
+ancora unito a `main` — decisione di merge non affrontata in questa
+sessione. Restato sullo stesso branch invece di aprirne uno nuovo: M0-B
+è un proseguimento diretto dello stesso filone performance/rendering,
+tocca lo stesso file (`client.html`) e riusa il pattern
+`mergeJobIntoState` introdotto in M0-A2 — separarlo non avrebbe dato
+isolamento reale.
+
+## Sessione M0-B — rendering incrementale della board (2026-08-17)
+
+**Ricognizione**: mappati tutti gli 11 punti che chiamavano
+`renderBoard()` (redraw completo — svuota e ricostruisce l'intero DOM,
+tutte le colonne/card/listener). Sei legittimi così come sono e non
+toccati: cambio filtro (`reset-filters-button`, `filter-priority`,
+`toggleFilter`), caricamento board (`loadBoard`, usato sia per il primo
+caricamento sia per il polling — trattato come "caricamento", non come
+operazione su un job), rollback dopo errore su `moveJob`/`deleteJob`.
+Un settimo (`toggleColumnSort`) lasciato volutamente fuori scope e
+segnalato con una nota nel codice: un cambio di ordinamento può
+riposizionare tutte le card di una colonna, non una sola — un
+aggiornamento incrementale utile richiederebbe comunque di ridisegnare
+l'intera colonna (ottimizzazione futura possibile, non necessaria ora).
+I quattro rimanenti (`moveJob`, `deleteJob`, `saveCardFromModal` per
+salvataggio e creazione) riguardano tutti un singolo job: resi
+incrementali.
+
+**Implementazione**: nuovi helper `findColumnMeta_`/`findColumnEl_`
+(lookup), `updateColumnCounters_` (ricalcola conteggio/punti/badge
+"fermo da" di una sola colonna dal solo `state.board` locale, senza
+toccare le card già renderizzate), `placeCardInColumn_` (rimuove/
+reinserisce il nodo della card nella posizione corretta per
+ordinamento/filtri correnti, riusando `renderCard` — stessa funzione
+del redraw completo, nessuna logica duplicata), `removeCardEl_`.
+`moveJobLocally`/`removeJobLocally` ora restituiscono la colonna di
+provenienza (prima solo un booleano), necessaria per aggiornarne i
+contatori insieme a quelli della colonna di arrivo. I badge introdotti
+in M0-A2 (rework count in Informazioni, anteprima Cronologia) non sono
+nel loop di `renderBoard()`/`renderCard()`: verificato che restano
+invariati, non toccati.
+
+**Verifica manuale esplicita** (nessun test automatico copre il
+rendering DOM): per un singolo drag-and-drop, prima di M0-B
+`renderBoard()` svuotava `#kanban-board` e ricreava OGNI colonna
+visibile e OGNI card al loro interno (in un dataset da 50-60 card,
+decine di nodi DOM + listener ricreati per un solo spostamento). Dopo
+M0-B, `moveJob()` chiama `placeCardInColumn_` (che tocca al massimo 2
+nodi `.card`: quello vecchio rimosso, quello nuovo inserito — mai più
+di uno per colonna) e `updateColumnCounters_` (aggiorna 2-3 nodi di
+testo `.count-badge`/`.points-badge`/`.stale-badge` per le sole 2
+colonne coinvolte, provenienza e arrivo) — dimostrabile leggendo il
+codice: nessuna chiamata a `renderBoard()`/`root.innerHTML` resta nel
+percorso di successo di `moveJob`/`deleteJob`/`saveCardFromModal`,
+confermato anche dal grep sui chiamanti rimasti (sopra). Le colonne non
+coinvolte nell'operazione non vengono mai interrogate.
+
+**69/69 test passati** (nessuna modifica lato backend, solo
+`client.html`). Commit `b4ac93d`. Push su TEST eseguito e verificato
+(13/13 file identici).
+
+## Nota pendente — non affrontata in questa sessione
+
+Durante la ricognizione di M0-A2 sulla lentezza di `getActivityLog` era
+emersa un'ipotesi poi smentita per quella funzione specifica (legge
+già in modo mirato). Resta però un sospetto distinto, non ancora
+verificato, per `getBoard()`/`getMetrics()`: entrambe chiamano
+`readTable_` sull'intero foglio `jobs`, che include `activity_log_json`
+per OGNI card — un campo che cresce senza limite a ogni evento. Se
+questo pesa sensibilmente sul caricamento board/dashboard (non solo su
+un singolo job come in `getActivityLog`) è materia per una sessione
+diagnostica dedicata, non affrontata qui.
 
 ## Sessione M0-A2 — follow-up dall'uso reale (2026-08-17)
 
