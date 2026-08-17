@@ -443,6 +443,75 @@
     return card;
   }
 
+  // M0-B: aggiornamento incrementale del DOM per le operazioni che
+  // riguardano UN SOLO job (spostamento, salvataggio, eliminazione,
+  // aggiunta) — tocca solo il nodo della card interessata e i badge
+  // della sua colonna, mai le altre colonne/card. Riusa renderCard (la
+  // stessa funzione del redraw completo, nessuna logica duplicata) per
+  // costruire il nodo, cosi' listener/marcatura restano identici.
+  // Il redraw completo (renderBoard) resta l'unica via per: cambio
+  // filtro, colonne (aggiunta/riordino/rimozione), caricamento
+  // iniziale/poll, rollback dopo errore — vedi ricognizione in cima al
+  // file per l'elenco completo dei chiamanti.
+
+  function findColumnMeta_(status) {
+    return getColumns().filter(function(column) { return column.status === status; })[0] || null;
+  }
+
+  function findColumnEl_(status) {
+    return document.querySelector('#kanban-board .column[data-status="' + status + '"]');
+  }
+
+  // Ricalcola conteggio/punti/badge "fermo da" di UNA colonna dal solo
+  // state.board locale, senza toccare le card gia' renderizzate al suo
+  // interno. Se la colonna non e' (ancora) nel DOM — nascosta, o
+  // nessuna board caricata — non fa nulla: il prossimo renderBoard()
+  // completo la riallineera' comunque.
+  function updateColumnCounters_(status) {
+    var columnEl = findColumnEl_(status);
+    var column = findColumnMeta_(status);
+    if (!columnEl || !column) { return; }
+    var jobs = sortJobsForColumn((state.board[status] || []).slice(), status);
+    var staleCount = jobs.filter(function(job) {
+      return column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
+    }).length;
+    columnEl.querySelector('.count-badge').textContent = jobs.length + ' card';
+    columnEl.querySelector('.points-badge').textContent = sumPoints(jobs) + ' pt';
+    var staleBadge = columnEl.querySelector('.stale-badge');
+    staleBadge.hidden = staleCount <= 0;
+    if (staleCount > 0) {
+      staleBadge.textContent = staleCount + ' >5g';
+    }
+  }
+
+  // Rimuove (se presente) e reinserisce il nodo della card nella sua
+  // colonna corrente (job.status), nella posizione corretta per
+  // l'ordinamento/i filtri attivi — senza spostare le altre card gia'
+  // presenti. Se dopo i filtri la card non deve comparire, resta
+  // rimossa (stesso comportamento del redraw completo, che la esclude
+  // in partenza).
+  function placeCardInColumn_(job) {
+    var column = findColumnMeta_(job.status);
+    var columnEl = findColumnEl_(job.status);
+    if (!column || !columnEl || column.hidden) { return; }
+    var cardsRoot = columnEl.querySelector('.cards');
+    var existing = cardsRoot.querySelector('.card[data-job-id="' + job.job_id + '"]');
+    if (existing) { existing.remove(); }
+    if (!matchesFilters(job)) { return; }
+    var sortedFiltered = sortJobsForColumn((state.board[job.status] || []).slice(), job.status).filter(matchesFilters);
+    var index = sortedFiltered.findIndex(function(item) { return item.job_id === job.job_id; });
+    var referenceNode = index >= 0 ? cardsRoot.children[index] : null;
+    cardsRoot.insertBefore(renderCard(job, column), referenceNode || null);
+  }
+
+  // Rimuove il nodo della card da qualunque colonna si trovi oggi nel
+  // DOM (il chiamante puo' non conoscere la colonna, es. dopo una
+  // eliminazione con stato locale gia' aggiornato).
+  function removeCardEl_(jobId) {
+    var existing = document.querySelector('#kanban-board .cards .card[data-job-id="' + jobId + '"]');
+    if (existing) { existing.remove(); }
+  }
+
   function priorityBadgeHtml(priorityClass) {
     var key = priorityClass || 'p4_assess';
     var meta = state.priorityClasses[key] || { label: key || 'Priorita', color: '#CCCCCC' };
@@ -738,12 +807,16 @@
         } else {
           addJobIntoState(savedJob);
         }
+        // M0-B: solo il nodo di questa card + i badge della sua
+        // colonna (stessa colonna in modifica, nuova in creazione),
+        // non l'intera board.
+        placeCardInColumn_(savedJob);
+        updateColumnCounters_(savedJob.status);
       }
       document.getElementById('card-modal').close();
       state.activeJob = null;
       state.activeColumnId = null;
       renderToolbarFilters();
-      renderBoard();
       updateLastUpdated();
     }).catch(showError).finally(function() {
       state.pendingWrites--;
@@ -1225,8 +1298,13 @@
       return;
     }
     var previousBoard = cloneBoard();
-    if (moveJobLocally(jobId, status)) {
-      renderBoard();
+    // M0-B: solo il nodo della card spostata + i badge delle due
+    // colonne coinvolte (provenienza e arrivo), non l'intera board.
+    var moveResult = moveJobLocally(jobId, status);
+    if (moveResult) {
+      placeCardInColumn_(moveResult.job);
+      updateColumnCounters_(moveResult.fromStatus);
+      updateColumnCounters_(status);
     }
     // Nessun loadBoard(true) sul successo: lo stato locale e' gia'
     // aggiornato ottimisticamente (moveJobLocally), rileggere l'intera
@@ -1242,7 +1320,8 @@
       // server. moveJob ora li restituisce gia' pronti nella risposta.
       if (data.job) {
         mergeJobIntoState(data.job);
-        renderBoard();
+        placeCardInColumn_(data.job);
+        updateColumnCounters_(data.job.status);
       }
       updateLastUpdated();
     }).catch(function(error) {
@@ -1258,8 +1337,11 @@
       return;
     }
     var previousBoard = cloneBoard();
-    removeJobLocally(job.job_id);
-    renderBoard();
+    // M0-B: rimuove solo il nodo della card eliminata e aggiorna i
+    // badge della sua colonna, non l'intera board.
+    var fromStatus = removeJobLocally(job.job_id);
+    removeCardEl_(job.job_id);
+    updateColumnCounters_(fromStatus);
     callApi('deleteJob', { job_id: job.job_id }).then(function() {
       updateLastUpdated();
     }).catch(function(error) {
@@ -1334,6 +1416,12 @@
     return state.columnMeta && state.columnMeta.length ? state.columnMeta : defaultColumns;
   }
 
+  // Redraw completo lasciato volutamente qui (fuori dallo scope di
+  // M0-B, che copre solo le operazioni su un singolo job): un cambio di
+  // ordinamento puo' riposizionare TUTTE le card della colonna, non
+  // una sola — un aggiornamento incrementale utile richiederebbe di
+  // ridisegnare comunque l'intera colonna (non l'intera board: un
+  // margine di ottimizzazione futura possibile, non necessario ora).
   function toggleColumnSort(columnId, mode) {
     state.sortModes[columnId] = state.sortModes[columnId] === mode ? '' : mode;
     renderBoard();
@@ -1388,34 +1476,47 @@
     });
   }
 
+  // M0-B: restituisce anche la colonna di provenienza (non solo un
+  // booleano) — il chiamante ne ha bisogno per aggiornare i contatori
+  // della colonna lasciata, oltre a quella di arrivo.
   function moveJobLocally(jobId, status) {
     var moved = null;
+    var fromStatus = null;
     Object.keys(state.board || {}).forEach(function(column) {
       state.board[column] = (state.board[column] || []).filter(function(job) {
         if (job.job_id === jobId) {
           moved = job;
+          fromStatus = column;
           return false;
         }
         return true;
       });
     });
     if (!moved) {
-      return false;
+      return null;
     }
     moved.status = status;
     if (!state.board[status]) {
       state.board[status] = [];
     }
     state.board[status].push(moved);
-    return true;
+    return { job: moved, fromStatus: fromStatus };
   }
 
+  // M0-B: restituisce la colonna da cui il job e' stato tolto, serve al
+  // chiamante per aggiornare i contatori di quella sola colonna.
   function removeJobLocally(jobId) {
+    var fromStatus = null;
     Object.keys(state.board || {}).forEach(function(column) {
       state.board[column] = (state.board[column] || []).filter(function(job) {
-        return job.job_id !== jobId;
+        if (job.job_id === jobId) {
+          fromStatus = column;
+          return false;
+        }
+        return true;
       });
     });
+    return fromStatus;
   }
 
   function matchesFilters(job) {
