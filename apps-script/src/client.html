@@ -601,7 +601,7 @@
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
-    loadRecentActivityPreview_(job);
+    loadActivityLogForModal_();
     document.querySelector('.modal-tabs').hidden = false;
     setModalTab_('info');
     document.getElementById('card-modal').showModal();
@@ -649,7 +649,11 @@
     document.getElementById('modal-tab-info-sidebar').hidden = tab !== 'info';
     document.getElementById('modal-tab-activity').hidden = tab !== 'activity';
     if (tab === 'activity') {
-      loadActivityLogForModal_();
+      // Nessuna nuova chiamata: il log e' gia' stato caricato
+      // all'apertura della card (loadActivityLogForModal_ in
+      // openCardModal) insieme all'anteprima in Informazioni — qui si
+      // ridisegna solo dalla cache in state.activityLog.
+      renderActivityLog_(state.activityLog || []);
     } else {
       closeActivityForm_();
     }
@@ -808,6 +812,14 @@
   function renderReworkHistory(job) {
     var root = document.getElementById('modal-rework-history');
     var reworkCount = Math.max(0, Number(job.visit_number || 1) - 1);
+    // Stesso badge "Rnn" gia' presente sulla card nella board (era
+    // assente nel tab Informazioni, segnalato da Marco): il numero di
+    // rientri era leggibile solo su ogni riga di 'visite', non qui.
+    var badge = document.getElementById('modal-recent-activity-rework-badge');
+    badge.hidden = reworkCount <= 0;
+    if (reworkCount > 0) {
+      badge.textContent = 'R' + reworkCount;
+    }
     if (!coerceBool(job.is_rework) && reworkCount <= 0) {
       root.hidden = true;
       root.innerHTML = '';
@@ -830,20 +842,6 @@
   // degli spostamenti.
   var RECENT_ACTIVITY_PREVIEW_COUNT_ = 7;
 
-  function loadRecentActivityPreview_(job) {
-    document.getElementById('modal-recent-activity').hidden = false;
-    document.getElementById('modal-recent-activity-list').innerHTML = '<p class="activity-log-status">Caricamento...</p>';
-    document.getElementById('modal-recent-activity-empty').hidden = true;
-    callApi('getActivityLog', { job_id: job.job_id }).then(function(data) {
-      renderRecentActivityPreview_(data.log || []);
-    }).catch(function() {
-      document.getElementById('modal-recent-activity-list').innerHTML = '';
-      var empty = document.getElementById('modal-recent-activity-empty');
-      empty.hidden = false;
-      empty.textContent = 'Impossibile caricare la cronologia.';
-    });
-  }
-
   function renderRecentActivityPreview_(events) {
     var list = document.getElementById('modal-recent-activity-list');
     var empty = document.getElementById('modal-recent-activity-empty');
@@ -854,10 +852,12 @@
       return;
     }
     empty.hidden = true;
-    // getActivityLog restituisce il log in ordine cronologico crescente:
-    // gli ultimi N sono i piu' recenti, mostrati con il piu' recente in
-    // cima (stesso verso di lettura naturale di una cronologia).
-    events.slice(-RECENT_ACTIVITY_PREVIEW_COUNT_).reverse().forEach(function(logEvent) {
+    // M0-A2: stesso verso della tab Cronologia (dal piu' vecchio al piu'
+    // recente) — segnalato da Marco come incoerenza tra le due viste.
+    // getActivityLog restituisce gia' il log in ordine cronologico
+    // crescente: gli ultimi N elementi sono i piu' recenti, l'ordine
+    // resta invariato, nessun reverse.
+    events.slice(-RECENT_ACTIVITY_PREVIEW_COUNT_).forEach(function(logEvent) {
       var row = document.createElement('div');
       row.className = 'recent-activity-row';
       var ts = document.createElement('span');
@@ -926,17 +926,38 @@
     return event.note || '';
   }
 
+  // M0-A2: unico punto che chiama getActivityLog per la card aperta —
+  // prima la Cronologia (al click sul tab) e l'anteprima in
+  // Informazioni (all'apertura della card) facevano ciascuna la propria
+  // chiamata per lo stesso job_id, raddoppiando un round-trip che su
+  // Apps Script costa 1-3s indipendentemente dalla quantita' di dati
+  // (segnalato da Marco come "Cronologia lenta" dopo M0-A: il
+  // rallentamento non era la lettura del foglio — gia' mirata su una
+  // sola riga tramite findRowById_/readJobFromRow_, non un readTable_
+  // sull'intero foglio jobs come si sospettava — ma il doppio round-trip
+  // introdotto proprio dall'anteprima aggiunta in M0-A). Chiamata
+  // all'apertura della card (vedi openCardModal) e dopo ogni mutazione
+  // dell'evento (submitActivityPayload_/confirmActivityDelete_); il
+  // cambio tab si limita a ridisegnare da state.activityLog, nessuna
+  // nuova chiamata.
   function loadActivityLogForModal_() {
     if (!state.activeJob) { return; }
     closeActivityForm_();
     document.getElementById('modal-activity-banner').hidden = true;
-    var list = document.getElementById('modal-activity-list');
-    list.innerHTML = '<p class="activity-log-status">Caricamento cronologia...</p>';
+    document.getElementById('modal-activity-list').innerHTML = '<p class="activity-log-status">Caricamento cronologia...</p>';
+    document.getElementById('modal-recent-activity').hidden = false;
+    document.getElementById('modal-recent-activity-list').innerHTML = '<p class="activity-log-status">Caricamento...</p>';
+    document.getElementById('modal-recent-activity-empty').hidden = true;
     callApi('getActivityLog', { job_id: state.activeJob.job_id }).then(function(data) {
       state.activityLog = data.log || [];
       renderActivityLog_(state.activityLog);
+      renderRecentActivityPreview_(state.activityLog);
     }).catch(function(error) {
-      list.innerHTML = '<p class="activity-log-status">Impossibile caricare la cronologia. Riprovare.</p>';
+      document.getElementById('modal-activity-list').innerHTML = '<p class="activity-log-status">Impossibile caricare la cronologia. Riprovare.</p>';
+      document.getElementById('modal-recent-activity-list').innerHTML = '';
+      var empty = document.getElementById('modal-recent-activity-empty');
+      empty.hidden = false;
+      empty.textContent = 'Impossibile caricare la cronologia.';
       showError(error);
     });
   }
@@ -1213,7 +1234,16 @@
     // noto costa quanto un caricamento completo ad ogni singolo drag.
     // Sul fallimento invece serve ririallinearsi allo stato server vero,
     // non solo tornare indietro alla board precedente.
-    callApi('moveJob', { job_id: jobId, status: status }).then(function() {
+    callApi('moveJob', { job_id: jobId, status: status }).then(function(data) {
+      // Bugfix M0-A2: senza questo il badge rientri (Rnn) restava fermo
+      // al valore di prima della mossa fino al prossimo poll — l'update
+      // ottimistico (moveJobLocally) sposta la card ma non porta con se'
+      // visit_number/is_rework/rework_cause, ricalcolati solo lato
+      // server. moveJob ora li restituisce gia' pronti nella risposta.
+      if (data.job) {
+        mergeJobIntoState(data.job);
+        renderBoard();
+      }
       updateLastUpdated();
     }).catch(function(error) {
       state.board = previousBoard;

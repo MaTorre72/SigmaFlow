@@ -216,6 +216,13 @@ function moveJob(params) {
   // visivo immediato del drag: l'utente rilascia la card piu' volte
   // pensando che non si sia spostata (segnalato da Marco in collaudo).
   if (normalizeStatus_(job.status) === status) {
+    // Nessuna mutazione di 'visite', ma il job restituito deve comunque
+    // avere i campi di rientro (altrimenti il merge lato client — M0-A2,
+    // niente piu' reload completo dopo una mossa — sovrascriverebbe il
+    // badge Rnn gia' corretto sulla card con dei campi assenti).
+    var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+    var openRow = visiteSheet ? findOpenVisitRow_(visiteSheet, job.job_id) : -1;
+    applyVisitSummaryFields_(job, openRow > 0 ? readVisitFromRow_(visiteSheet, openRow) : null);
     return ok_({ job_id: params.job_id, status: status, job: job });
   }
 
@@ -271,11 +278,18 @@ function moveJob(params) {
   // di questo stesso spostamento: la ricerca dell'ingresso nella colonna
   // di attesa lasciata (sez. 4) deve guardare solo eventi realmente
   // precedenti a "now".
-  updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
+  var activeVisit = updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
 
   log.push(autoEvent);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
   sheet.getRange(row, headers.activity_log_json).setValue(serializeActivityLog_(log));
+
+  // M0-A2: il job restituito porta gia' i campi di rientro ricalcolati
+  // (visit_number/is_rework/rework_cause/start_ts/done_ts) dalla visita
+  // appena aggiornata da updateVisiteForMove_ — nessuna lettura
+  // aggiuntiva, la visita e' gia' in mano. Permette al client di
+  // aggiornare la sola card spostata senza un reload completo.
+  applyVisitSummaryFields_(job, activeVisit);
 
   return ok_({ job_id: params.job_id, status: status, job: job });
 }
@@ -347,6 +361,7 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
   }
 
   writeVisitToRow_(visiteSheet, activeRow, activeVisit);
+  return activeVisit;
 }
 
 // Se non esiste ancora una visita aperta per questo caso (job creato
@@ -441,15 +456,23 @@ function loadJobsWithVisitSummary_() {
   });
 
   jobs.forEach(function(job) {
-    var latest = latestByJob[job.job_id];
-    job.visit_number = latest ? Number(latest.numero_visita || 1) : 1;
-    job.is_rework = job.visit_number > 1;
-    job.rework_cause = latest ? (latest.rework_cause || '') : '';
-    job.start_ts = latest ? (latest.start_ts || '') : '';
-    job.done_ts = latest ? (latest.consegna_ts || '') : '';
+    applyVisitSummaryFields_(job, latestByJob[job.job_id]);
   });
 
   return jobs;
+}
+
+// Fattorizzato da loadJobsWithVisitSummary_ (M0-A2): moveJob lo riusa per
+// restituire nella risposta il job gia' con i campi di rientro
+// ricalcolati, cosi' il client puo' aggiornare la sola card spostata
+// senza un reload completo della board (che leggerebbe di nuovo
+// jobs+visite solo per un dato che il server ha gia' in mano).
+function applyVisitSummaryFields_(job, visit) {
+  job.visit_number = visit ? Number(visit.numero_visita || 1) : 1;
+  job.is_rework = job.visit_number > 1;
+  job.rework_cause = visit ? (visit.rework_cause || '') : '';
+  job.start_ts = visit ? (visit.start_ts || '') : '';
+  job.done_ts = visit ? (visit.consegna_ts || '') : '';
 }
 
 // Sez. 4: durata della permanenza appena conclusa nella colonna stand_by

@@ -51,7 +51,10 @@
       <input id="modal-client" class="modal-client-input" name="client" placeholder="Nome cliente">
       <input id="modal-title" class="modal-title-input" name="title" placeholder="Nome progetto">
       <section id="modal-recent-activity" class="recent-activity-panel" hidden>
-        <h3>Cronologia recente</h3>
+        <div class="recent-activity-heading">
+          <h3>Cronologia recente</h3>
+          <span id="modal-recent-activity-rework-badge" class="badge rework" hidden></span>
+        </div>
         <div id="modal-recent-activity-list" class="recent-activity-list"></div>
         <p id="modal-recent-activity-empty" class="activity-log-empty" hidden>Nessun evento registrato.</p>
       </section>

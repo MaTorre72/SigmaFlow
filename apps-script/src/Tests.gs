@@ -222,6 +222,8 @@ function runAllTests() {
     testAddJob,
     testMoveJobLifecycle,
     testAutomaticReworkFromStandBy,
+    testMoveJobResponseCarriesVisitSummary,
+    testMoveJobToSameColumnKeepsVisitSummaryInResponse,
     testStandByCannotReturnDirectlyToWip,
     testPriorityHelpers,
     testPriorityUpdate,
@@ -382,6 +384,47 @@ function testAutomaticReworkFromStandBy() {
 
     var visiteChiuse = readVisiteForJob_(ss, created.job_id).filter(function(v) { return Number(v.numero_visita) === 1; })[0];
     assertEquals_(startTsBeforeReturn, visiteChiuse.start_ts, 'start_ts della visita 1 non deve essere ringiovanito da un rientro in TO DO (prep)');
+  });
+}
+
+// M0-A2: bugfix badge Rnn fermo dopo una mossa (M0-A aveva tolto il
+// reload completo dopo moveJob, giustamente, ma senza questo la
+// risposta non portava i campi di rientro ricalcolati). Verifica
+// direttamente sulla risposta di moveJob, non su un getBoard()
+// successivo (gia' coperto da testAutomaticReworkFromStandBy).
+function testMoveJobResponseCarriesVisitSummary() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro nella risposta', size_class: 'S' }).data;
+
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    var returned = moveJob({ job_id: created.job_id, status: 'todo' });
+
+    assertTrue_(returned.success, 'moveJob dovrebbe riuscire');
+    assertEquals_(2, Number(returned.data.job.visit_number), 'visit_number gia\' nella risposta di moveJob');
+    assertTrue_(coerceBoolean_(returned.data.job.is_rework), 'is_rework gia\' nella risposta di moveJob');
+    assertEquals_('wait_client', returned.data.job.rework_cause, 'rework_cause gia\' nella risposta di moveJob');
+  });
+}
+
+// Spostamento verso la stessa colonna (no-op lato visite): il job
+// restituito deve comunque portare i campi di rientro gia' noti, non
+// lasciarli assenti — altrimenti il merge lato client sovrascriverebbe
+// un badge Rnn corretto con dei campi vuoti.
+function testMoveJobToSameColumnKeepsVisitSummaryInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Self-move con rework', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    moveJob({ job_id: created.job_id, status: 'todo' });
+
+    var selfMove = moveJob({ job_id: created.job_id, status: 'todo' });
+
+    assertTrue_(selfMove.success, 'self-move dovrebbe riuscire');
+    assertEquals_(2, Number(selfMove.data.job.visit_number), 'visit_number presente anche su un self-move');
+    assertTrue_(coerceBoolean_(selfMove.data.job.is_rework), 'is_rework presente anche su un self-move');
   });
 }
 
