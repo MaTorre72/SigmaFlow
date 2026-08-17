@@ -161,6 +161,13 @@
         showMessage('Non ci sono colonne nascoste');
         return;
       }
+      // Lasciato su loadBoard(true) apposta, a differenza di
+      // saveColumnSettings/moveColumn qui sotto: piu' updateColumn in
+      // PARALLELO sullo stesso columns_json rischiano di sovrascriversi
+      // a vicenda lato server (letto-modificato-scritto, non atomico) —
+      // fidarsi della risposta dell'ultima chiamata risolta potrebbe
+      // riflettere uno stato intermedio perso. Un getBoard() dopo che
+      // tutte sono finite rilegge lo stato vero, qualunque esso sia.
       Promise.all(hidden.map(function(column) {
         return callApi('updateColumn', { status: column.status, hidden: false });
       })).then(function() { loadBoard(true); }).catch(showError);
@@ -580,10 +587,11 @@
     } else {
       payload.role = document.getElementById('column-settings-role').value;
     }
-    callApi(action, payload).then(function() {
+    callApi(action, payload).then(function(data) {
       document.getElementById('column-settings-modal').close();
       state.columnSettings = null;
-      loadBoard(true);
+      applyColumnsResponse_(data.columns);
+      updateLastUpdated();
     }).catch(showError);
   }
 
@@ -1418,6 +1426,28 @@
     return state.columnMeta && state.columnMeta.length ? state.columnMeta : defaultColumns;
   }
 
+  // Segnalato da Marco come "molto lento": salvare/spostare una colonna
+  // chiamava updateColumn/addColumn/moveColumn e POI loadBoard(true) —
+  // un secondo round-trip completo (getBoard, che rilegge jobs+visite
+  // oltre alle colonne) solo per riottenere qualcosa che la risposta
+  // del primo salvataggio conteneva gia' (data.columns). Su Apps
+  // Script ogni round-trip costa un paio di secondi fissi (vedi M0-A):
+  // raddoppiarlo per un salvataggio di colonna si sentiva parecchio.
+  // Aggiorna solo state.columnMeta dalla risposta gia' in mano e
+  // ridisegna in locale — redraw completo della board (non solo la
+  // colonna toccata: resta fuori scope di M0-B, un cambio colonna puo'
+  // riguardare l'intero layout), ma senza un secondo giro di rete.
+  // writeColumns_ (Kanban.gs) non include "status" (solo "id") a
+  // differenza di readColumns_ — qui si aggiunge sempre, cosi' il resto
+  // del codice (che legge column.status ovunque) continua a funzionare
+  // indipendentemente da quale delle due forme arriva.
+  function applyColumnsResponse_(columns) {
+    state.columnMeta = (columns || []).map(function(column) {
+      return Object.assign({ status: column.id }, column);
+    });
+    renderBoard();
+  }
+
   // Redraw completo lasciato volutamente qui (fuori dallo scope di
   // M0-B, che copre solo le operazioni su un singolo job): un cambio di
   // ordinamento puo' riposizionare TUTTE le card della colonna, non
@@ -1430,8 +1460,8 @@
   }
 
   function moveColumn(columnId, direction) {
-    callApi('moveColumn', { status: columnId, direction: direction }).then(function() {
-      loadBoard(true);
+    callApi('moveColumn', { status: columnId, direction: direction }).then(function(data) {
+      applyColumnsResponse_(data.columns);
     }).catch(showError);
   }
 
