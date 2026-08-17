@@ -224,6 +224,14 @@ function runAllTests() {
     testAutomaticReworkFromStandBy,
     testMoveJobResponseCarriesVisitSummary,
     testMoveJobToSameColumnKeepsVisitSummaryInResponse,
+    testStatusSinceTsSetOnCreation,
+    testStatusSinceTsUpdatesOnRealMove,
+    testStatusSinceTsNotResetOnSelfMove,
+    testDefaultColumnsCarryAgingDaysToBoardMeta,
+    testColumnMetaOmitsAgingDaysWhenNotConfigured,
+    testSeedAgingDaysMigrationFillsOnlyMissingStandByColumns,
+    testUpdateColumnPreservesOtherColumnsAgingDays,
+    testUpdateColumnSetsAndClearsAgingDays,
     testStandByCannotReturnDirectlyToWip,
     testPriorityHelpers,
     testPriorityUpdate,
@@ -425,6 +433,138 @@ function testMoveJobToSameColumnKeepsVisitSummaryInResponse() {
     assertTrue_(selfMove.success, 'self-move dovrebbe riuscire');
     assertEquals_(2, Number(selfMove.data.job.visit_number), 'visit_number presente anche su un self-move');
     assertTrue_(coerceBoolean_(selfMove.data.job.is_rework), 'is_rework presente anche su un self-move');
+  });
+}
+
+// --- M0-C: status_since_ts (da quando il job e' nella colonna ATTUALE) ---
+
+function testStatusSinceTsSetOnCreation() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Aging da creazione', size_class: 'S' }).data;
+    assertTrue_(Boolean(created.job.status_since_ts), 'status_since_ts valorizzato alla creazione');
+  });
+}
+
+function testStatusSinceTsUpdatesOnRealMove() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Aging su mossa reale', size_class: 'S' }).data;
+
+    // Valore artificiale nel passato invece di un semplice sleep: la
+    // risoluzione al secondo di nowIso_() nell'harness Node renderebbe
+    // fragile un confronto tra due timestamp presi a distanza di pochi
+    // millisecondi.
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.status_since_ts = '2020-01-01T09:00:00+02:00';
+    writeJobToRow_(sheet, row, headers, job);
+
+    var moved = moveJob({ job_id: created.job_id, status: 'wip' });
+
+    assertTrue_(moved.data.job.status_since_ts !== '2020-01-01T09:00:00+02:00', 'status_since_ts aggiornato su una mossa reale (colonna diversa)');
+  });
+}
+
+function testStatusSinceTsNotResetOnSelfMove() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Aging su self-move', size_class: 'S' }).data;
+    var moved = moveJob({ job_id: created.job_id, status: 'wip' });
+    var afterRealMove = moved.data.job.status_since_ts;
+
+    var selfMove = moveJob({ job_id: created.job_id, status: 'wip' });
+
+    assertEquals_(afterRealMove, selfMove.data.job.status_since_ts, 'status_since_ts invariato su un self-move (la card non ha mai lasciato la colonna)');
+  });
+}
+
+// --- M0-C: aging_days configurabile per colonna ---
+
+function testDefaultColumnsCarryAgingDaysToBoardMeta() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var board = getBoard();
+    var byId = {};
+    board.data.column_meta.forEach(function(c) { byId[c.id] = c; });
+    assertEquals_(5, byId.wait_internal.aging_days, 'aging_days di default per attesa interna');
+    assertEquals_(15, byId.wait_client.aging_days, 'aging_days di default per attesa cliente');
+    assertEquals_(45, byId.wait_authority.aging_days, 'aging_days di default per attesa enti');
+  });
+}
+
+function testColumnMetaOmitsAgingDaysWhenNotConfigured() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var board = getBoard();
+    var wip = board.data.column_meta.filter(function(c) { return c.id === 'wip'; })[0];
+    assertTrue_(wip.aging_days === undefined, 'colonna senza aging_days configurato non lo riceve di default (nessuna evidenziazione)');
+  });
+}
+
+function testSeedAgingDaysMigrationFillsOnlyMissingStandByColumns() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var configSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
+    var headers = getHeaderMap_(configSheet);
+    var rows = readTable_(configSheet);
+    var rowIndex = -1;
+    rows.forEach(function(row, i) { if (row.key === 'columns_json') { rowIndex = i; } });
+
+    // Simula uno schema pre-M0-C: una colonna stand_by senza aging_days
+    // (deve riceverlo), una gia' configurata a un valore non standard
+    // (non deve essere toccata), una di altro ruolo (mai toccata).
+    var customColumns = [
+      { id: 'wait_client', label: 'ATTESA CLIENTE', role: 'stand_by', order: 5, color: '#FFD966' },
+      { id: 'wait_authority', label: 'ATTESA ENTI', role: 'stand_by', order: 6, color: '#F4B942', aging_days: 20 },
+      { id: 'wip', label: 'WIP', role: 'wip', order: 4, color: '#5B9BD5' }
+    ];
+    configSheet.getRange(rowIndex + 2, headers.value).setValue(JSON.stringify(customColumns));
+
+    seedAgingDaysForStandByColumns_(configSheet);
+
+    var after = JSON.parse(readTable_(configSheet).filter(function(row) { return row.key === 'columns_json'; })[0].value);
+    var afterById = {};
+    after.forEach(function(c) { afterById[c.id] = c; });
+
+    assertEquals_(5, afterById.wait_client.aging_days, 'colonna stand_by priva di aging_days riceve il default 5');
+    assertEquals_(20, afterById.wait_authority.aging_days, 'colonna stand_by gia\' configurata non viene sovrascritta');
+    assertTrue_(afterById.wip.aging_days === undefined, 'colonna non stand_by non riceve aging_days');
+
+    // Idempotenza: una seconda esecuzione non deve alterare un valore
+    // gia' impostato (ne' il 5 appena scritto, ne' il 20 preesistente).
+    seedAgingDaysForStandByColumns_(configSheet);
+    var afterSecond = JSON.parse(readTable_(configSheet).filter(function(row) { return row.key === 'columns_json'; })[0].value);
+    var afterSecondById = {};
+    afterSecond.forEach(function(c) { afterSecondById[c.id] = c; });
+    assertEquals_(5, afterSecondById.wait_client.aging_days, 'idempotente: seconda esecuzione non cambia il valore appena scritto');
+    assertEquals_(20, afterSecondById.wait_authority.aging_days, 'idempotente: seconda esecuzione non cambia il valore preesistente');
+  });
+}
+
+// Regressione: writeColumns_ ricostruiva ogni colonna con un elenco
+// fisso di campi che non includeva aging_days — salvare QUALUNQUE
+// colonna avrebbe cancellato aging_days da TUTTE le altre.
+function testUpdateColumnPreservesOtherColumnsAgingDays() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    updateColumn({ status: 'wip', label: 'WIP' });
+    var board = getBoard();
+    var waitClient = board.data.column_meta.filter(function(c) { return c.id === 'wait_client'; })[0];
+    assertEquals_(15, waitClient.aging_days, 'aging_days di un\'altra colonna non viene perso salvandone una diversa');
+  });
+}
+
+function testUpdateColumnSetsAndClearsAgingDays() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var updated = updateColumn({ status: 'wait_client', aging_days: 30 });
+    assertEquals_(30, updated.data.column.aging_days, 'aging_days impostato a un valore custom');
+
+    var cleared = updateColumn({ status: 'wait_client', aging_days: '' });
+    assertTrue_(cleared.data.column.aging_days === undefined, 'stringa vuota disattiva aging_days');
   });
 }
 

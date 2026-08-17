@@ -107,6 +107,12 @@ function getBoard() {
       order: column.order,
       color: column.color,
       hidden: coerceBoolean_(column.hidden),
+      // M0-C: terza copia dello stesso rischio gia' corretto in
+      // normalizeColumns_/writeColumns_ (Utils.gs) — column_meta e'
+      // l'oggetto che arriva davvero al frontend via getBoard(), senza
+      // questo campo aging_days non avrebbe mai avuto effetto visibile
+      // nonostante fosse gia' letto/scritto correttamente sul foglio.
+      aging_days: column.aging_days,
       count: (board[column.id] || []).length,
       points: points
     });
@@ -149,7 +155,10 @@ function addJob(params) {
     due_date: params.due_date || '',
     arrival_ts: now,
     invoiced: coerceBoolean_(params.invoiced),
-    card_color: normalizeCardColor_(params.card_color)
+    card_color: normalizeCardColor_(params.card_color),
+    // M0-C: la card nasce gia' in una colonna, quindi gia' "da quando"
+    // ci si trova — stesso principio del suo primo evento di creazione.
+    status_since_ts: now
   };
 
   // Evento automatico di creazione, stesso pattern dell'evento auto scritto
@@ -251,6 +260,11 @@ function moveJob(params) {
   }
 
   job.status = status;
+  // M0-C: solo qui, non nel self-move sopra (early return, la card non
+  // ha mai lasciato la colonna) — "da quando" si trova nella colonna
+  // ATTUALE, non da quando e' stata creata o dall'ultimo cambio di
+  // qualunque altro campo.
+  job.status_since_ts = now;
   writeJobToRow_(sheet, row, headers, job);
   // Evento automatico per l'activity log: scrittura diretta (non passa da
   // addActivityEvent) per evitare la doppia validazione su un movimento
@@ -861,6 +875,9 @@ function addColumn(params) {
     color: params.color || '#E8E8E8',
     hidden: coerceBoolean_(params.hidden)
   };
+  if (params.aging_days !== undefined && params.aging_days !== '') {
+    column.aging_days = Number(params.aging_days);
+  }
   columns.push(column);
   columns = repositionColumn_(columns, id, params.after_status);
   columns = writeColumns_(columns);
@@ -886,6 +903,12 @@ function updateColumn(params) {
   }
   if (params.hidden !== undefined) {
     column.hidden = coerceBoolean_(params.hidden);
+  }
+  if (params.aging_days !== undefined) {
+    // Stringa vuota = "disattiva l'evidenziazione per questa colonna",
+    // scelta esplicita dell'utente dal pannello Impostazioni colonna —
+    // non "campo non inviato" (quel caso non entra in questo if).
+    column.aging_days = params.aging_days === '' ? undefined : Number(params.aging_days);
   }
   if (params.after_status !== undefined) {
     columns = repositionColumn_(columns, id, params.after_status);

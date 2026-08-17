@@ -21,6 +21,12 @@
 // eseguita (nessun'altra riga di questo schema potra' mai piu' avere
 // queste colonne). correctJobTimestamps (Kanban.gs) non scrive piu' un
 // log a parte, solo arrival_ts (suo unico uso reale rimasto).
+// status_since_ts aggiunto in M0-C: quando il job e' entrato nella
+// colonna ATTUALE (non quando e' stato creato, non l'inizio
+// lavorazione) — base per l'evidenziazione "aging" configurabile per
+// colonna (aging_days in columns_json, vedi ensureCurrentSchema_ e
+// DEFAULT_COLUMNS in Constants.gs). Scritto da addJob (alla creazione)
+// e da moveJob solo sui cambi di colonna reali, mai sul self-move.
 var JOB_HEADERS = [
   'job_id',
   'title',
@@ -42,7 +48,8 @@ var JOB_HEADERS = [
   'invoiced',
   'card_color',
   'activity_log_json',
-  'incarico_chiuso_ts'
+  'incarico_chiuso_ts',
+  'status_since_ts'
 ];
 
 // Foglio 'cases' dismesso su richiesta di Marco, dopo che 'visite' si e'
@@ -127,6 +134,7 @@ function setupSigmaFlow() {
   ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+  seedAgingDaysForStandByColumns_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
   migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SCHEMA_VERSION, SIGMAFLOW.SCHEMA_VERSION);
@@ -249,6 +257,38 @@ function seedDefaultConfig_(sheet) {
       ensureConfigValueIfEmpty_(sheet, key, value);
     }
   });
+}
+
+// M0-C: migrazione una tantum, non un fallback a runtime — aggiunge
+// aging_days: 5 (stesso valore del comportamento fisso precedente,
+// nessun cambio osservabile al momento del deploy) alle sole colonne
+// con role 'stand_by' che ne sono ancora prive dentro columns_json.
+// Idempotente: una colonna che ha gia' aging_days (a 5 o a un valore
+// diverso scelto da Marco dal pannello Impostazioni colonna) non viene
+// toccata. Colonne di altro ruolo restano senza aging_days — nessuna
+// evidenziazione per loro, identico a oggi. A differenza di
+// ensureConfigValueIfEmpty_ (che sostituisce l'intero valore solo se
+// vuoto), qui si modifica il singolo campo dentro ogni colonna,
+// preservando etichetta/colore/ordine/ruolo gia' configurati.
+function seedAgingDaysForStandByColumns_(sheet) {
+  var rows = readTable_(sheet);
+  var headers = getHeaderMap_(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key !== 'columns_json') { continue; }
+    var columns = parseJsonArray_(rows[i].value);
+    if (!columns.length) { return; }
+    var changed = false;
+    columns.forEach(function(column) {
+      if (column.role === 'stand_by' && column.aging_days === undefined) {
+        column.aging_days = 5;
+        changed = true;
+      }
+    });
+    if (changed) {
+      sheet.getRange(i + 2, headers.value).setValue(JSON.stringify(columns));
+    }
+    return;
+  }
 }
 
 function ensureConfigValueIfEmpty_(sheet, key, value) {

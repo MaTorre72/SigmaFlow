@@ -2,7 +2,7 @@ var SIGMAFLOW = {
   TZ: 'Europe/Rome',
   PROP_SPREADSHEET_ID: 'SIGMAFLOW_SPREADSHEET_ID',
   PROP_SCHEMA_VERSION: 'SIGMAFLOW_SCHEMA_VERSION',
-  SCHEMA_VERSION: '10',
+  SCHEMA_VERSION: '11',
   DEFAULT_SPREADSHEET_ID: '15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g',
   DEFAULT_TEST_SPREADSHEET_ID: '1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU',
   PROP_TEST_SPREADSHEET_ID: 'SIGMAFLOW_TEST_SPREADSHEET_ID',
@@ -19,14 +19,22 @@ var SIGMAFLOW = {
     in_review: 'todo'
   },
   COLUMN_ROLES: ['backlog', 'wip', 'stand_by', 'done', 'neutral', 'prep'],
+  // aging_days (M0-C): solo per ambienti nuovi/vuoti che creano lo
+  // schema da questi default — chi esiste gia' passa invece dalla
+  // migrazione una tantum in ensureCurrentSchema_ (Schema.gs), che
+  // scrive lo stesso valore (5) solo sulle colonne stand_by ancora
+  // prive del campo. Valori di esempio scelti da Marco: 5 per attesa
+  // interna, 15 per attesa cliente, 45 per attesa enti — riflettono
+  // tempi di risposta attesi diversi per tipo di attesa, non un limite
+  // tecnico del modello.
   DEFAULT_COLUMNS: [
     { id: 'notes', label: 'NOTE', role: 'neutral', order: 1, color: '#E8E8E8' },
     { id: 'backlog', label: 'BACKLOG', role: 'backlog', order: 2, color: '#C8D8E8' },
     { id: 'todo', label: 'TO DO', role: 'prep', order: 3, color: '#A8C4E0' },
     { id: 'wip', label: 'WIP', role: 'wip', order: 4, color: '#5B9BD5' },
-    { id: 'wait_client', label: 'ATTESA CLIENTE', role: 'stand_by', order: 5, color: '#FFD966' },
-    { id: 'wait_authority', label: 'ATTESA ENTI', role: 'stand_by', order: 6, color: '#F4B942' },
-    { id: 'wait_internal', label: 'ATTESA MT/GC', role: 'stand_by', order: 7, color: '#E8A020' },
+    { id: 'wait_client', label: 'ATTESA CLIENTE', role: 'stand_by', order: 5, color: '#FFD966', aging_days: 15 },
+    { id: 'wait_authority', label: 'ATTESA ENTI', role: 'stand_by', order: 6, color: '#F4B942', aging_days: 45 },
+    { id: 'wait_internal', label: 'ATTESA MT/GC', role: 'stand_by', order: 7, color: '#E8A020', aging_days: 5 },
     { id: 'done', label: 'DA INVIARE / DA FATTURARE', role: 'done', order: 8, color: '#70AD47' }
   ],
   PRIORITY_CLASSES: {

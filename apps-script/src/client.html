@@ -150,6 +150,7 @@
       document.getElementById('column-settings-color').value = '#E8E8E8';
       document.getElementById('column-settings-role').value = 'neutral';
       document.getElementById('column-settings-visible').checked = true;
+      document.getElementById('column-settings-aging-days').value = '';
       fillColumnPositionSelect('');
       document.getElementById('column-settings-modal').showModal();
     });
@@ -314,9 +315,7 @@
     }).forEach(function(column, index, visibleColumns) {
       var jobs = (state.board[column.status] || []);
       jobs = sortJobsForColumn(jobs.slice(), column.status);
-      var staleCount = jobs.filter(function(job) {
-        return column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
-      }).length;
+      var agingCount = countAgingInColumn_(jobs, column);
       var columnEl = document.createElement('section');
       columnEl.className = 'column role-' + (column.role || 'neutral');
       columnEl.style.setProperty('--column-color', column.color || '#E8E8E8');
@@ -345,10 +344,10 @@
       columnEl.querySelector('.column-title').textContent = column.label;
       columnEl.querySelector('.count-badge').textContent = jobs.length + ' card';
       columnEl.querySelector('.points-badge').textContent = sumPoints(jobs) + ' pt';
-      if (staleCount > 0) {
+      if (agingCount > 0) {
         var staleBadge = columnEl.querySelector('.stale-badge');
         staleBadge.hidden = false;
-        staleBadge.textContent = staleCount + ' >5g';
+        staleBadge.textContent = agingCount + ' >' + column.aging_days + 'g';
       }
       columnEl.querySelector('.column-menu-button').addEventListener('click', function() {
         openColumnMenu(column);
@@ -387,8 +386,8 @@
   function renderCard(job, column) {
     var card = document.createElement('article');
     var isLate = job.due_date && new Date(job.due_date + 'T23:59:59') < new Date();
-    var isStale = column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
-    card.className = 'card' + (isStale ? ' stale-card' : '');
+    var isAging = isJobAging_(job, column);
+    card.className = 'card' + (isAging ? ' stale-card' : '');
     if (job.card_color) {
       card.classList.add('custom-card-color');
       card.style.setProperty('--card-color', job.card_color);
@@ -416,7 +415,7 @@
     ].join('');
     card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
     card.querySelector('.card-client').textContent = job.client || '';
-    card.title = isStale ? 'Fermo da ' + daysSince(job.start_ts || job.arrival_ts) + ' giorni' : '';
+    card.title = isAging ? 'Fermo da ' + daysSince(job.status_since_ts) + ' giorni' : '';
 
     card.addEventListener('dragstart', function(event) {
       event.dataTransfer.setData('text/plain', job.job_id);
@@ -472,15 +471,13 @@
     var column = findColumnMeta_(status);
     if (!columnEl || !column) { return; }
     var jobs = sortJobsForColumn((state.board[status] || []).slice(), status);
-    var staleCount = jobs.filter(function(job) {
-      return column.role === 'stand_by' && daysSince(job.start_ts || job.arrival_ts) > 5;
-    }).length;
+    var agingCount = countAgingInColumn_(jobs, column);
     columnEl.querySelector('.count-badge').textContent = jobs.length + ' card';
     columnEl.querySelector('.points-badge').textContent = sumPoints(jobs) + ' pt';
     var staleBadge = columnEl.querySelector('.stale-badge');
-    staleBadge.hidden = staleCount <= 0;
-    if (staleCount > 0) {
-      staleBadge.textContent = staleCount + ' >5g';
+    staleBadge.hidden = agingCount <= 0;
+    if (agingCount > 0) {
+      staleBadge.textContent = agingCount + ' >' + column.aging_days + 'g';
     }
   }
 
@@ -553,6 +550,7 @@
     document.getElementById('column-settings-color').value = column.color || '#E8E8E8';
     document.getElementById('column-settings-role').value = column.role || 'neutral';
     document.getElementById('column-settings-visible').checked = !column.hidden;
+    document.getElementById('column-settings-aging-days').value = column.aging_days || '';
     fillColumnPositionSelect(column.status);
     document.getElementById('column-settings-modal').showModal();
   }
@@ -566,7 +564,11 @@
       color: document.getElementById('column-settings-color').value,
       role: document.getElementById('column-settings-role').value,
       after_status: document.getElementById('column-settings-position').value,
-      hidden: !document.getElementById('column-settings-visible').checked
+      hidden: !document.getElementById('column-settings-visible').checked,
+      // Stringa vuota inclusa apposta (non omessa): per updateColumn e'
+      // il segnale esplicito di "disattiva l'evidenziazione", diverso
+      // da "campo non inviato" — vedi Kanban.gs.
+      aging_days: document.getElementById('column-settings-aging-days').value.trim()
     };
     if (!payload.label) {
       showError(new Error('Inserisci il nome della colonna'));
@@ -1789,6 +1791,23 @@
       return 0;
     }
     return Math.floor((new Date().getTime() - new Date(iso).getTime()) / 864e5);
+  }
+
+  // M0-C: regola "aging" unificata (prima duplicata fra il ciclo
+  // colonne di renderBoard, renderCard e updateColumnCounters_ di
+  // M0-B — stessa soglia fissa "role==='stand_by' && >5 giorni"
+  // ripetuta tre volte). aging_days e' opzionale per colonna
+  // (columns_json, non piu' legato al ruolo): assente/vuoto = nessuna
+  // evidenziazione per quella colonna, qualunque sia il ruolo.
+  // status_since_ts (M0-C, non piu' start_ts/arrival_ts): da quando la
+  // card e' entrata nella colonna ATTUALE, non nel sistema o in
+  // lavorazione.
+  function isJobAging_(job, column) {
+    return Boolean(column && column.aging_days) && daysSince(job.status_since_ts) > Number(column.aging_days);
+  }
+
+  function countAgingInColumn_(jobs, column) {
+    return jobs.filter(function(job) { return isJobAging_(job, column); }).length;
   }
 
   function initialsFor(value) {

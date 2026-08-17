@@ -298,7 +298,8 @@ function normalizeColumns_(config) {
         id: column.id,
         label: config['column_' + column.id] || column.label,
         role: column.role,
-        order: column.order
+        order: column.order,
+        aging_days: column.aging_days
       };
     });
   }
@@ -310,7 +311,7 @@ function normalizeColumns_(config) {
       id = uniqueColumnId_(slugify_(column.label || 'colonna'), seen);
     }
     seen[id] = true;
-    return {
+    var normalized = {
       id: id,
       status: id,
       label: String(column.label || id),
@@ -319,6 +320,14 @@ function normalizeColumns_(config) {
       color: column.color || '#E8E8E8',
       hidden: coerceBoolean_(column.hidden)
     };
+    // M0-C: come in writeColumns_, opzionale — assente = evidenziazione
+    // disattivata per questa colonna. Deve arrivare al frontend intatto
+    // (getBoard() espone column_meta costruito da qui), altrimenti
+    // aging_days configurato non avrebbe mai effetto visibile.
+    if (column.aging_days !== undefined && column.aging_days !== null && column.aging_days !== '') {
+      normalized.aging_days = Number(column.aging_days);
+    }
+    return normalized;
   }).sort(function(a, b) {
     return a.order - b.order;
   });
@@ -328,7 +337,7 @@ function normalizeColumns_(config) {
 
 function writeColumns_(columns) {
   columns = ensureRequiredColumnRoles_(columns).map(function(column, index) {
-    return {
+    var normalized = {
       id: column.id,
       label: column.label,
       role: normalizeColumnRole_(column.role),
@@ -336,6 +345,16 @@ function writeColumns_(columns) {
       color: column.color || '#E8E8E8',
       hidden: coerceBoolean_(column.hidden)
     };
+    // M0-C: aging_days e' opzionale (vuoto = evidenziazione
+    // disattivata per quella colonna) — a differenza degli altri campi
+    // sopra, senza questo ogni salvataggio di QUALUNQUE colonna
+    // (addColumn/updateColumn/moveColumn passano tutti da qui)
+    // avrebbe cancellato silenziosamente aging_days da TUTTE le
+    // colonne, non solo da quella toccata.
+    if (column.aging_days !== undefined && column.aging_days !== null && column.aging_days !== '') {
+      normalized.aging_days = Number(column.aging_days);
+    }
+    return normalized;
   });
   writeConfigValue_('columns_json', JSON.stringify(columns));
   return columns;
