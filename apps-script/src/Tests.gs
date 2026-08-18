@@ -366,6 +366,11 @@ function testSetupSchemaCreaFogliArchivioECestino() {
     // solo setupSigmaFlow, qui chiamata esplicitamente per verificare
     // il comportamento reale di setup su un database altrimenti vuoto.
     setupSigmaFlow();
+    // N1: setupSigmaFlow() apre un proprio riferimento indipendente
+    // allo spreadsheet — riapertura esplicita prima di riusare 'ss'
+    // per le verifiche (stessa causa gia' trovata e corretta in
+    // eseguiMigrazioneCompleta_/testEseguiMigrazioneCompletaEndToEndOnOldSchemaData).
+    ss = SpreadsheetApp.openById(ss.getId());
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO), JOB_ARCHIVIO_HEADERS);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO), VISITE_ARCHIVIO_HEADERS);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO), JOB_CESTINO_HEADERS);
@@ -380,6 +385,7 @@ function testSetupSchemaSeedaArchiviazioneGiorniDefault() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
     var config = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
     var row = config.filter(function(r) { return r.key === 'archiviazione_giorni_default'; })[0];
     assertTrue_(Boolean(row), 'archiviazione_giorni_default dovrebbe esistere in config dopo il setup');
@@ -2184,6 +2190,14 @@ function testEseguiMigrazioneCompletaEndToEndOnOldSchemaData() {
     assertTrue_(summary.step2_columns_json.corrected, 'step2: ruolo prep corretto');
     assertEquals_('todo', summary.step2_columns_json.column_id, 'step2: colonna todo');
 
+    // N1: 'ss' qui e' il riferimento preso da withTestSpreadsheet_
+    // PRIMA di eseguiMigrazioneCompleta_/setupSigmaFlow — con le
+    // cancellazioni/creazioni di fogli che N1 aggiunge, e' rimasto
+    // agganciato a una struttura non piu' valida (stessa causa gia'
+    // corretta dentro eseguiMigrazioneCompleta_ stessa, qui e' un
+    // secondo riferimento indipendente, del test). Riapertura esplicita
+    // prima di riusarlo per le verifiche post-migrazione.
+    ss = SpreadsheetApp.openById(ss.getId());
     var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
     assertHeaders_(jobsSheet, JOB_HEADERS, 'jobs deve avere lo schema corrente dopo step3');
     var visiteSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
