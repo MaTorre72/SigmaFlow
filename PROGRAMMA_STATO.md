@@ -1,7 +1,7 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
-## In corso — N1 (archiviazione), codice e test completi, verifica push TEST bloccata
+## N1 (archiviazione) — DONE, in attesa del gate umano di §9
 
 Sessione autonoma (scheduled task, RUNBOOK_esecuzione_autonoma.md) su
 `feat/n1-archiviazione-schema`, a partire da lavoro di sotto-fase N1
@@ -37,33 +37,31 @@ già presente non committato nel working tree. Riferimento:
 `testAddActivityEventCorrectionDataNonValida`. **87/87 test passati**
 (81 preesistenti + 6 nuovi, nessuna regressione).
 
-**Bloccato — punto 3 della Definition of Done (RUNBOOK, "push su TEST
-verificato con `clasp pull` isolato + diff — 0 differenze") non
-verificabile in questa sessione**: `clasp push` fallisce con
-`invalid_grant`/`invalid_rapt` (Google richiede un nuovo login
-interattivo, il token salvato non basta più). Non essendo
-un'operazione che questa sessione può completare (richiede consenso
-OAuth interattivo di Marco, non credenziali che questa sessione possa
-o debba gestire), il push reale su TEST e la sua verifica via `clasp
-pull` restano da fare. **Nessun codice è stato eseguito contro lo
-spreadsheet TEST o PROD reale in questa sessione** — solo harness Node
-locale.
+**Push su TEST — inizialmente bloccato, poi risolto nella stessa
+sessione**: il primo `clasp push` era fallito con
+`invalid_grant`/`invalid_rapt` (token OAuth scaduto). Su richiesta
+esplicita di Marco ("run clasp login") ho eseguito `clasp login`: ha
+riconosciuto una sessione già valida (`You are logged in as
+marco@sigmapiu.it`) e rigenerato il token — nessuna credenziale
+gestita da me, solo l'esecuzione del comando. Il `clasp push`
+successivo è riuscito (13 file). **Verificato con `clasp pull` isolato
+in `/tmp/sf-scratch/clasp-verify/` + diff contro `apps-script/src/`:
+13/13 file identici, 0 differenze.**
 
-**Non ancora committato su git**: le modifiche restano nel working
-tree di `feat/n1-archiviazione-schema`, non ancora `git commit` — in
-attesa di verificare prima che valga la pena fissarle (vedi sotto,
-prossimo passo).
+Commit `aa8f486` su `feat/n1-archiviazione-schema` (locale, non unito
+a `main`).
+
+**I quattro punti della Definition of Done (RUNBOOK) sono tutti
+soddisfatti**: criteri di accettazione N1 verificati, 87/87 test senza
+regressioni, push TEST verificato 0 differenze, questo aggiornamento.
 
 **Fuori scope di N1, per §9 del design**: §8c (svuotamento automatico
 di `incarico_chiuso_ts` su rientro reale) è N2, non N1 — non toccato
 qui nonostante compaia nello stesso documento.
 
-**Prossimo passo**: Marco deve eseguire `clasp login` (reauth
-interattivo) prima che una sessione futura possa completare il push
-su TEST e la verifica con `clasp pull` isolato. Fatto quello, N1 potrà
-essere marcata DONE per intero (gate 🔴 Umano di §9 comunque previsto
-subito dopo, indipendentemente da questo blocco tecnico) e si potrà
-passare a N2.
+**Gate 🔴 Umano di §9, dopo N1**: mi fermo qui come da runbook — N1 è
+DONE ma ha un gate esplicito, non si procede a N2 senza una conferma
+esplicita di Marco.
 
 ## Stato generale
 
