@@ -143,6 +143,14 @@ function setupSigmaFlow() {
   var ss = getSpreadsheet_();
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
   removeCasesSheet_(ss);
+  // N1: da qui in poi setupSigmaFlow crea fino a cinque fogli nuovi in
+  // sequenza (visite, se assente, + i quattro di archivio/cestino)
+  // subito dopo una cancellazione — su Apps Script reale (non
+  // riproducibile nell'harness Node, che e' sincrono per costruzione)
+  // questa sequenza ha causato un errore transitorio "Sheet non
+  // trovato" in fase di collaudo N1. flush() forza Sheets a scrivere la
+  // cancellazione prima di procedere con le creazioni successive.
+  SpreadsheetApp.flush();
   renameVisiteChiusuraFields_(ss);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, JOB_ARCHIVIO_HEADERS);

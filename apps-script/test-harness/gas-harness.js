@@ -103,7 +103,8 @@ function createHarness() {
       if (!spreadsheets[id]) { spreadsheets[id] = new MockSpreadsheet(id); }
       return spreadsheets[id];
     },
-    getActiveSpreadsheet() { return null; }
+    getActiveSpreadsheet() { return null; },
+    flush() {} // mock sincrono: nulla da forzare, no-op
   };
 
   const PropertiesService = {
