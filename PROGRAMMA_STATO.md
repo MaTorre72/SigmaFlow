@@ -1,7 +1,7 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
-## N1 (archiviazione) — DONE, in attesa del gate umano di §9
+## N1 (archiviazione) — CHIUSA, gate confermato da Marco (2026-08-18)
 
 Sessione autonoma (scheduled task, RUNBOOK_esecuzione_autonoma.md) su
 `feat/n1-archiviazione-schema`, a partire da lavoro di sotto-fase N1
@@ -34,8 +34,8 @@ già presente non committato nel working tree. Riferimento:
 `testAddActivityEventCorrectionArrivalTsValida`,
 `testAddActivityEventCorrectionIncaricoChiusoTsValida`,
 `testAddActivityEventCorrectionCampoNonCorreggibile`,
-`testAddActivityEventCorrectionDataNonValida`. **87/87 test passati**
-(81 preesistenti + 6 nuovi, nessuna regressione).
+`testAddActivityEventCorrectionDataNonValida`. **87/87 test passati
+nell'harness Node** (81 preesistenti + 6 nuovi, nessuna regressione).
 
 **Push su TEST — inizialmente bloccato, poi risolto nella stessa
 sessione**: il primo `clasp push` era fallito con
@@ -43,25 +43,121 @@ sessione**: il primo `clasp push` era fallito con
 esplicita di Marco ("run clasp login") ho eseguito `clasp login`: ha
 riconosciuto una sessione già valida (`You are logged in as
 marco@sigmapiu.it`) e rigenerato il token — nessuna credenziale
-gestita da me, solo l'esecuzione del comando. Il `clasp push`
-successivo è riuscito (13 file). **Verificato con `clasp pull` isolato
-in `/tmp/sf-scratch/clasp-verify/` + diff contro `apps-script/src/`:
-13/13 file identici, 0 differenze.**
+gestita da me, solo l'esecuzione del comando. Push riuscito da quel
+momento in poi. **Ogni push di questa sessione è stato verificato con
+`clasp pull` isolato in `/tmp/sf-scratch/clasp-verify/` + diff contro
+`apps-script/src/`: sempre 13/13 file identici, 0 differenze.**
 
-Commit `aa8f486` su `feat/n1-archiviazione-schema` (locale, non unito
-a `main`).
+**Collaudo reale su GAS (Marco) — due problemi trovati e corretti,
+non solo cosmetici**:
 
-**I quattro punti della Definition of Done (RUNBOOK) sono tutti
-soddisfatti**: criteri di accettazione N1 verificati, 87/87 test senza
-regressioni, push TEST verificato 0 differenze, questo aggiornamento.
+1. **UI poco chiara**: l'opzione "Correzione" nel menu tipo-evento non
+   spiegava cosa correggesse. Marco l'aveva scambiata per un residuo
+   da rimuovere. Corretto: etichette senza nomi tecnici
+   (`arrival_ts`/`incarico_chiuso_ts`) e una riga esplicativa nel form
+   (`board.html`) — "corregge solo data di creazione o chiusura
+   incarico, non sposta la card".
+2. **Bug reale trovato da Marco durante `runAllTestsAndLog` su GAS
+   reale**, non riproducibile nell'harness Node (sincrono per
+   costruzione): `testEseguiMigrazioneCompletaEndToEndOnOldSchemaData`
+   falliva con `Sheet <gid> not found`. Causa vera, non un hiccup di
+   servizio come ipotizzato al primo tentativo: `setupSigmaFlow()` apre
+   un proprio riferimento indipendente allo spreadsheet
+   (`getSpreadsheet_()`), separato da qualunque riferimento `ss` che il
+   chiamante teneva già in mano da prima. Finché `setupSigmaFlow`
+   toccava poco lo schema il riferimento vecchio del chiamante restava
+   comunque valido; con N1 (cancella `cases` e crea cinque fogli nuovi
+   nella stessa chiamata) il riferimento vecchio può restare agganciato
+   a una struttura non più valida. Corretto in due punti — dentro
+   `eseguiMigrazioneCompleta_` (ActivityLog.gs) e nei tre test che
+   tengono un `ss` esterno da riusare dopo aver chiamato
+   `setupSigmaFlow()`/`eseguiMigrazioneCompleta_()` (Tests.gs) —
+   riaprendo esplicitamente `ss = SpreadsheetApp.openById(ss.getId())`
+   dopo la chiamata. Aggiunto anche `SpreadsheetApp.flush()` in
+   `setupSigmaFlow` subito dopo la cancellazione di `cases`, difesa
+   aggiuntiva sullo stesso tipo di rischio ma sul riferimento interno.
+   **Verificato da Marco**: il test rilanciato singolarmente su GAS
+   reale ora passa pulito, due volte di seguito.
+3. **Fix minore collegato**: `runAllTestsAndLog` scriveva un solo
+   `Logger.log` con l'intero risultato JSON — superava il limite di
+   dimensione di un log nell'editor e troncava proprio a metà dei
+   falliti (il problema che ha reso necessari più giri per isolare il
+   bug sopra). Ora tre log separati (riepilogo, falliti in dettaglio,
+   nomi dei passati), nessuno rischia più il troncamento.
+
+**Nota per le sessioni future**: Marco non rilancia l'intera suite
+`runAllTestsAndLog` su GAS reale come verifica di routine (20+ minuti,
+latenza fissa delle chiamate Sheets per ciascuno degli 87 test) — lo fa
+solo su richiesta mirata a un singolo test o a un numero ridotto.
+L'harness Node resta la verifica di routine (sub-secondo, 87/87 ad ogni
+fix di questa sessione). Salvato in memoria
+(`feedback_gas_test_suite_time.md`) per non richiederlo di nuovo per
+abitudine.
+
+Commit su `feat/n1-archiviazione-schema` (locale, non unito a `main`):
+`aa8f486`, `5eda886`, `0d519a1`, `3dd33a3`, `d448ebc`, `d13f8e0`,
+`4886929`.
+
+**I quattro punti della Definition of Done (RUNBOOK) sono soddisfatti**:
+criteri di accettazione N1 verificati (incluso il giudizio esplicito di
+Marco sullo schema, "ok"), 87/87 test nell'harness senza regressioni +
+il test problematico su GAS reale confermato pulito da Marco dopo il
+fix, push TEST verificato 0 differenze ad ogni commit, questo
+aggiornamento.
 
 **Fuori scope di N1, per §9 del design**: §8c (svuotamento automatico
 di `incarico_chiuso_ts` su rientro reale) è N2, non N1 — non toccato
 qui nonostante compaia nello stesso documento.
 
-**Gate 🔴 Umano di §9, dopo N1**: mi fermo qui come da runbook — N1 è
-DONE ma ha un gate esplicito, non si procede a N2 senza una conferma
-esplicita di Marco.
+**Aperto, non bloccante, da riprendere eventualmente in una sessione
+UI dedicata**: se dare a "Correzione" un punto di ingresso dedicato
+(icona accanto alla spunta "Chiuso" e alla data di creazione) invece
+del menu generico attuale — proposto a Marco durante il collaudo N1,
+nessuna decisione presa. Non è un criterio di accettazione di N1 (§10
+non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
+`cestinaJob_` non toccano questo form.
+
+**Gate 🔴 Umano di §9, dopo N1 — CONFERMATO da Marco il 2026-08-18**
+("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
+tutti gli effetti.
+
+## Prossima esecuzione — parte da N2
+
+Nessun lavoro di N2 iniziato in questa sessione — su richiesta di
+Marco ("prepara tutto per la prossima esecuzione di N2 e seguenti"),
+questa sessione si è fermata a documentare e chiudere N1, non a
+iniziare N2.
+
+**Punto di ingresso per la prossima sessione** (autonoma o manuale):
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md) §9, riga
+N2 — "`moveJobToSheet_` core; `archiveJob_`/`cestinaJob_`/
+`ripristinaJob_` come wrapper; bottone 'Archivia' collegato
+(eleggibilità su `incarico_chiuso_ts`); `deleteJob` riconvertita a
+'Sposta nel cestino'; svuotamento automatico di `incarico_chiuso_ts`
+su rientro reale (§8c); test". **Nessun gate su N2** — per il runbook,
+una volta completata e verificata (stessi quattro punti della
+Definition of Done di N1) si procede automaticamente a N3 senza
+fermarsi, fino al gate esplicito dopo N3 (attivazione del trigger).
+
+**Prerequisiti già pronti per N2** (non richiede altra ricognizione):
+- Schema di destinazione (`jobs_archivio`/`visite_archivio`/
+  `jobs_cestino`/`visite_cestino`) già in produzione su TEST, headers
+  verificati.
+- Il bottone `archive-button` in UI è già presente come segnaposto
+  (§4.1 del design) — va solo abilitato/collegato, non creato da zero
+  (verificare comunque lo stato reale in ricognizione, non assumere).
+- **Attenzione nota per chi scrive `moveJobToSheet_`**: leggere la nota
+  tecnica appena aggiunta in
+  [docs/architecture.md](docs/architecture.md), sezione
+  `jobs_archivio`/`visite_archivio`/`jobs_cestino`/`visite_cestino` —
+  riferimenti allo spreadsheet tenuti attraverso una chiamata che
+  ristruttura i fogli (come farà `moveJobToSheet_`, spostando righe fra
+  tre fogli) vanno riaperti esplicitamente dopo, stesso bug trovato e
+  corretto in questa sessione su `eseguiMigrazioneCompleta_`.
+- Verifica tempo test: non richiedere a Marco di rilanciare l'intera
+  suite su GAS reale come routine (vedi memoria
+  `feedback_gas_test_suite_time.md`) — harness Node per la verifica ad
+  ogni modifica, `runAllTestsAndLog` mirato solo per conferme puntuali.
 
 ## Stato generale
 

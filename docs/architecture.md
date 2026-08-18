@@ -82,6 +82,7 @@ l'unica fonte.
 | `ambassadors_json` | Ambasciatori dei menu |
 | `tags_json` | Tag suggeriti per dropdown |
 | `scenarios_json` | Scenari ottimistico/medio/pessimistico, predisposti ma non ancora usati per traiettorie future |
+| `archiviazione_giorni_default` | Giorni dopo `incarico_chiuso_ts` oltre cui un caso è eleggibile all'archiviazione automatica (default `30`) — [DESIGN_archiviazione.md](DESIGN_archiviazione.md) |
 
 Le colonne sono configurabili dalla Web App. Il campo `role` determina il comportamento modellistico:
 
@@ -97,6 +98,45 @@ vietato: deve passare prima da una colonna `prep`/`backlog` (dove si
 apre la nuova visita).
 
 La scala della priorita' automatica e' divisa uniformemente sull'intervallo 1-5: `1 <= valore < 2` non urgente, `2 <= valore < 3` da pianificare, `3 <= valore < 4` urgente con margine, `4 <= valore <= 5` urgente. Il menu segue sempre questo ordine crescente.
+
+### `jobs_archivio` / `visite_archivio` / `jobs_cestino` / `visite_cestino`
+
+Fogli additivi (N1, [DESIGN_archiviazione.md](DESIGN_archiviazione.md)
+§3): destinazione fisica di un job + tutte le sue visite quando esce da
+`jobs`/`visite`. Solo lo schema esiste ad oggi (creato da
+`setupSigmaFlow()`) — nessuna funzione di spostamento riga ancora
+scritta, arriva in N2.
+
+- `jobs_archivio` — `jobs` (stesso `JOB_HEADERS`) + `archiviato_ts`.
+  Solo chiusure vere (`incarico_chiuso_ts` valorizzato al momento
+  dell'archiviazione).
+- `visite_archivio` — stessa intestazione di `visite`, invariata.
+- `jobs_cestino` — `jobs` (stesso `JOB_HEADERS`) + `cestinato_ts`.
+  Qualunque card lasci la board senza una conclusione vera (compresa
+  l'attuale `deleteJob`, che N2 riconverte a "sposta nel cestino").
+- `visite_cestino` — stessa intestazione di `visite`, invariata.
+
+Nessuna metrica legge mai il cestino. Le metriche storiche (non lo
+stato corrente) leggono anche l'archivio quando la finestra osservata
+può includerlo — dettaglio in [DESIGN_archiviazione.md](DESIGN_archiviazione.md) §8.
+
+**Nota per chi tocca `setupSigmaFlow()` o scrive `moveJobToSheet_`
+(N2)**: `setupSigmaFlow()` chiama `getSpreadsheet_()` internamente,
+aprendo un riferimento allo spreadsheet indipendente da qualunque `ss`
+che il chiamante tenga già in mano da prima. Con più cancellazioni/
+creazioni di fogli nella stessa chiamata (com'è oggi, con
+`jobs_archivio`/`visite_archivio`/`jobs_cestino`/`visite_cestino`), un
+riferimento `ss` tenuto dal chiamante *da prima* della chiamata può
+restare agganciato a una struttura non più valida — errore reale
+`Sheet <gid> not found`, trovato in collaudo N1, non un semplice hiccup
+del servizio. Rimedio: se il chiamante deve riusare `ss` *dopo* aver
+chiamato `setupSigmaFlow()`, va riaperto esplicitamente
+(`ss = SpreadsheetApp.openById(ss.getId())`) — vedi
+`eseguiMigrazioneCompleta_` (ActivityLog.gs) per il pattern.
+`moveJobToSheet_` (N2) sposterà righe fra `jobs`/`jobs_archivio`/
+`jobs_cestino` nella stessa chiamata: stesso rischio, stesso rimedio se
+tiene un riferimento allo spreadsheet attraverso una chiamata che
+potrebbe restrutturare i fogli.
 
 Configurazione colonne default:
 

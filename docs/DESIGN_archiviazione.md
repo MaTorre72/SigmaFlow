@@ -325,12 +325,13 @@ umana su TEST prima di essere lasciato scattare senza supervisione).
 
 ## 10. Criteri di accettazione
 
-- [ ] `incarico_chiuso_ts` sincronizzato con la spunta "Chiuso" — già
+- [x] `incarico_chiuso_ts` sincronizzato con la spunta "Chiuso" — già
       verificato esistente e corretto in `updateJob` (Kanban.gs)
-- [ ] `incarico_chiuso_ts` correggibile via Cronologia (vecchio/nuovo
+- [x] `incarico_chiuso_ts` correggibile via Cronologia (vecchio/nuovo
       valore + motivo, visibile in lista), stesso meccanismo già usato
       per `arrival_ts` — verificato in ricognizione lo stato reale del
-      modulo "Correzione timestamp" prima di estenderlo
+      modulo "Correzione timestamp" prima di estenderlo (N1, chiuso e
+      confermato da Marco il 2026-08-18)
 - [ ] `moveJob` svuota automaticamente `incarico_chiuso_ts` quando un
       caso già chiuso riceve un rientro reale (nuova visita aperta) —
       un caso tornato in lavorazione non resta eleggibile
