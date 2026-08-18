@@ -209,9 +209,30 @@ function configureTestEnvironment() {
   };
 }
 
+// Un solo Logger.log con l'intero risultato (87 test, uno per riga)
+// supera il limite di dimensione di un singolo log nell'editor Apps
+// Script ("Logging output too large. Truncating output.") — tronca
+// proprio a meta' dei falliti, i piu' importanti da vedere. Log
+// separati, uno per riga: il riepilogo e il dettaglio dei falliti (se
+// ce ne sono) non rischiano mai di essere troncati dal singolo blocco
+// piu' grande (l'elenco dei nomi passati, l'unico che puo' crescere
+// senza limite col numero di test).
 function runAllTestsAndLog() {
   var result = runAllTests();
-  Logger.log(JSON.stringify(result, null, 2));
+  var failed = result.results.filter(function(r) { return !r.passed; });
+
+  Logger.log('SigmaFlow test suite: ' + result.passed + '/' + result.results.length + ' passati, ' + result.failed + ' falliti.');
+
+  if (failed.length) {
+    Logger.log('--- TEST FALLITI ---');
+    failed.forEach(function(r) {
+      Logger.log(r.name + ': ' + r.error);
+    });
+  }
+
+  Logger.log('--- TEST PASSATI ---');
+  Logger.log(result.results.filter(function(r) { return r.passed; }).map(function(r) { return r.name; }).join(', '));
+
   return result;
 }
 
