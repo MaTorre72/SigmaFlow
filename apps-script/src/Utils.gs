@@ -172,6 +172,16 @@ function normalizeCell_(value) {
   return value;
 }
 
+// Svuota un foglio mantenendo solo l'intestazione — usata sia dai test
+// (resetTestDatabase_) sia da svuotaCestino_ (§6b, N4: azione di gruppo
+// "Svuota cestino"), da qui invece che da Tests.gs perche' e' codice di
+// produzione, non solo di test.
+function clearDataRows_(sheet, headers) {
+  sheet.clear();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
+}
+
 function getHeaderMap_(sheet) {
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var map = {};

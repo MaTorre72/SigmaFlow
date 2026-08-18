@@ -1,6 +1,101 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
+## N4 (archiviazione) — DONE, nessun gate (2026-08-18)
+
+Proseguita automaticamente dopo la conferma del gate N3 (nessuna nuova
+richiesta di Marco necessaria tra una sotto-fase e l'altra, come
+chiarito nella sezione "Nessuna conferma in chat" di CLAUDE.md, scritta
+in questa stessa sessione). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §6, §6b,
+§9 (N4).
+
+**Backend** (Kanban.gs):
+- `getArchivio()`/`getCestino()` — liste sola lettura, lette
+  direttamente da `jobs_archivio`/`visite_archivio` o
+  `jobs_cestino`/`visite_cestino` (§6: "nessuna ricostruzione dal log
+  necessaria"). Fattorizzate in un solo helper `readArchivedList_`
+  (§6b: "stessa forma della vista Archivio"), non due implementazioni
+  parallele. Ogni riga: anagrafica (titolo, cliente, assegnatario, tag,
+  descrizione), stato al momento dello spostamento, `arrival_ts`,
+  `incarico_chiuso_ts`, il timestamp specifico al percorso
+  (`archiviato_ts` o `cestinato_ts`), numero totale di visite (contato
+  da `visite_archivio`/`visite_cestino`, non ricostruito dal log).
+- `ripristinaJob(params)` — wrapper sottile su `ripristinaJob_` (già
+  scritta in N2), stesso pattern di `archiveJob(params)`.
+- `eliminaJobDefinitivamente(params)` — cancellazione vera di una
+  singola riga dal Cestino (job + tutte le sue visite), mai
+  dall'Archivio (il design non la prevede lì, solo Duplica in N5).
+- `svuotaCestino()` — azione di gruppo, azzera `jobs_cestino`/
+  `visite_cestino` in un colpo solo. Insieme a
+  `eliminaJobDefinitivamente`, l'unico punto di reale perdita di dati
+  in tutto il programma (§4.3) — sotto lock, come le altre funzioni di
+  spostamento/cancellazione.
+- `clearDataRows_` spostata da Tests.gs a Utils.gs: `svuotaCestino()` è
+  codice di produzione, non doveva dipendere da un helper vissuto solo
+  nei test.
+- Tutte e cinque registrate in `routeAction_`.
+
+**Frontend** (`index.html`/`client.html` + due file nuovi
+`archivio.html`/`cestino.html`): due voci di navigazione "Archivio"/
+"Cestino" accanto a Board/Dashboard, caricamento pigro con cache (stesso
+pattern di `loadMetrics`, §6: "consultata molto raramente" — non
+ricaricare ad ogni apertura del tab). Vista Archivio: tabella sola
+lettura, nessuna azione (Duplica resta N5). Vista Cestino: stessa
+tabella + colonna Azioni per riga ("Ripristina", conferma leggera
+essendo reversibile; "Elimina definitivamente", conferma pesante) e
+bottone di gruppo "Svuota cestino" (stessa conferma pesante) — entrambe
+le conferme pesanti nominano esplicitamente l'irreversibilità
+dell'azione, come da design (§6b, §4.3).
+
+**Test aggiunti** (`Tests.gs`, harness Node), 6 nuovi:
+`testGetArchivioReturnsAnagraficaAndVisitCount`,
+`testGetCestinoReturnsAnagraficaAndVisitCount`,
+`testRipristinaJobApiActionRestoresJob`,
+`testEliminaJobDefinitivamenteRemovesJobAndVisiteFromCestino`,
+`testEliminaJobDefinitivamenteThrowsWhenJobNotInCestino`,
+`testSvuotaCestinoRemovesAllRowsFromCestino`. **110/110 test passati
+nell'harness Node** (104 preesistenti + 6 nuovi, nessuna regressione).
+
+**Verifica UI reale, non solo lettura del codice**: essendo una sessione
+senza accesso al deployment TEST reale (richiede login del dominio
+sigmapiu.it), stessa tecnica già usata nella sessione M0-C — server
+HTTP locale temporaneo (sotto `/tmp/sf-scratch/`, rimosso a fine
+verifica) che serve il markup vero (`index`/`archivio`/`cestino`/
+`client`/`style` .html) con `google.script.run.api(...)` inoltrato a un
+endpoint locale che esegue la logica reale (`routeAction_`) via
+l'harness Node — non dati finti. Le cinque azioni verificate end-to-end
+via richieste dirette all'endpoint reale: `getArchivio`/`getCestino`
+(anagrafica e riepilogo corretti), `ripristinaJob` (torna su `jobs`,
+sparisce dal Cestino), `eliminaJobDefinitivamente` (riga e visite
+cancellate, Cestino torna coerente), `svuotaCestino` (`deleted_count`
+corretto, Cestino azzerato). Un bug reale trovato e corretto proprio in
+questa verifica — non nel codice di produzione, nello script di
+riproduzione stesso: il seed iniziale chiamava `setupSigmaFlow()`/
+`addJob()` fuori da `withEnvironment_('test', ...)`, scrivendo su uno
+spreadsheet mock diverso da quello letto dalle chiamate `/api` reali
+(stesso genere di rischio già documentato per `PROP_SCHEMA_VERSION`
+condivisa, §"Bugfix" più sotto in questo file) — corretto avvolgendo il
+seed nello stesso wrapper che il codice reale usa sempre.
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(15/15 file, inclusi i due nuovi `archivio.html`/`cestino.html`).
+**Bug trovato nello script stesso durante questa verifica**: l'elenco
+file di `verify-test-push.sh` era cablato (13 nomi fissi, scritto prima
+che N4 aggiungesse i due file nuovi) — avrebbe dichiarato "13/13
+identici" ignorando in silenzio gli unici due file che questa
+sotto-fase ha aggiunto. Corretto: lo script ora scopre i file da
+verificare leggendo `apps-script/src/` invece di un elenco fisso, cosa
+che l'avrebbe reso corretto automaticamente anche stavolta.
+
+**Criteri di accettazione §10 chiusi da N4**: "Vista Archivio e vista
+Cestino mostrano anagrafica + riepilogo cronologia, nessuna board
+Kanban" — verificato TRUE.
+
+**Fuori scope di N4, per §9**: N5 (Duplica, solo da Archivio) e N6
+(metriche estese all'archivio) restano aperte, come da tabella. Nessun
+gate dopo N4 — si procede a N5.
+
 ## N3 (archiviazione) — CHIUSA, gate confermato da Marco (2026-08-18)
 
 Dopo il fix dello scope OAuth (sotto), Marco ha rieseguito

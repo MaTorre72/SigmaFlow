@@ -281,6 +281,12 @@ function runAllTests() {
     testArchiveEligibleJobsUsesConfiguredThreshold,
     testArchiveEligibleJobsNeverTouchesCestino,
     testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult,
+    testGetArchivioReturnsAnagraficaAndVisitCount,
+    testGetCestinoReturnsAnagraficaAndVisitCount,
+    testRipristinaJobApiActionRestoresJob,
+    testEliminaJobDefinitivamenteRemovesJobAndVisiteFromCestino,
+    testEliminaJobDefinitivamenteThrowsWhenJobNotInCestino,
+    testSvuotaCestinoRemovesAllRowsFromCestino,
     testAmbassadorOption,
     testEditableOptions,
     testDynamicColumnsAndOptions,
@@ -1525,6 +1531,131 @@ function testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult() {
   });
 }
 
+// --- N4 (DESIGN_archiviazione.md, §6/§6b): viste Archivio/Cestino
+// (getArchivio/getCestino) e azioni Ripristina/Elimina definitivamente/
+// Svuota cestino. jobs_archivio/jobs_cestino non vengono svuotati tra un
+// test e l'altro (nota gia' presente sopra, da N2) - le asserzioni
+// filtrano sempre per job_id, tranne dopo svuotaCestino() stessa, che
+// azzera davvero il foglio nello stesso test che la chiama. ---
+
+function testGetArchivioReturnsAnagraficaAndVisitCount() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Caso in archivio', client: 'Cliente X', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'done' });
+    updateJob({ job_id: created.job_id, invoiced: true });
+    archiveJob_(created.job_id);
+
+    var result = getArchivio();
+    assertTrue_(result.success, 'getArchivio deve riuscire');
+    var item = result.data.items.filter(function(i) { return i.job_id === created.job_id; })[0];
+    assertTrue_(Boolean(item), 'il caso archiviato deve comparire nella lista');
+    assertEquals_('Caso in archivio', item.title, 'anagrafica: titolo');
+    assertEquals_('Cliente X', item.client, 'anagrafica: cliente');
+    assertTrue_(Boolean(item.archiviato_ts), 'riepilogo: archiviato_ts valorizzato');
+    assertTrue_(Boolean(item.incarico_chiuso_ts), 'riepilogo: incarico_chiuso_ts valorizzato');
+    assertTrue_(item.total_visits >= 1, 'riepilogo: numero totale di visite');
+    assertEquals_(undefined, item.cestinato_ts, 'un caso in archivio non ha cestinato_ts');
+  });
+}
+
+function testGetCestinoReturnsAnagraficaAndVisitCount() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Caso nel cestino', client: 'Cliente Y', size_class: 'S' }).data;
+    cestinaJob_(created.job_id);
+
+    var result = getCestino();
+    assertTrue_(result.success, 'getCestino deve riuscire');
+    var item = result.data.items.filter(function(i) { return i.job_id === created.job_id; })[0];
+    assertTrue_(Boolean(item), 'il caso cestinato deve comparire nella lista');
+    assertEquals_('Caso nel cestino', item.title, 'anagrafica: titolo');
+    assertTrue_(Boolean(item.cestinato_ts), 'riepilogo: cestinato_ts valorizzato');
+    assertEquals_(undefined, item.archiviato_ts, 'un caso nel cestino non ha archiviato_ts');
+  });
+}
+
+function testRipristinaJobApiActionRestoresJob() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Via azione API ripristinaJob', size_class: 'S' }).data;
+    cestinaJob_(created.job_id);
+
+    var result = ripristinaJob({ job_id: created.job_id });
+    assertTrue_(result.success, 'l\'azione ripristinaJob deve riuscire, stessa regola di ripristinaJob_');
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, jobsAfter.length, 'il job deve essere tornato su jobs');
+  });
+}
+
+function testEliminaJobDefinitivamenteRemovesJobAndVisiteFromCestino() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Da eliminare definitivamente', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    var visiteBefore = readVisiteForJob_(ss, created.job_id);
+    assertTrue_(visiteBefore.length >= 1, 'il job deve avere almeno una visita prima di cestinarlo');
+    cestinaJob_(created.job_id);
+
+    var result = eliminaJobDefinitivamente({ job_id: created.job_id });
+    assertTrue_(result.success, 'eliminaJobDefinitivamente deve riuscire su un job presente nel Cestino');
+
+    var cestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(0, cestino.length, 'il job non deve piu\' essere nel Cestino');
+    var visiteCestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO)).filter(function(v) { return v.job_id === created.job_id; });
+    assertEquals_(0, visiteCestino.length, 'anche le visite del job devono essere state eliminate dal Cestino');
+  });
+}
+
+function testEliminaJobDefinitivamenteThrowsWhenJobNotInCestino() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+
+    var failed = false;
+    try {
+      eliminaJobDefinitivamente({ job_id: 'JOB-INESISTENTE' });
+    } catch (err) {
+      failed = err.message.indexOf('non trovato nel Cestino') !== -1;
+    }
+    assertTrue_(failed, 'eliminaJobDefinitivamente deve rifiutare un job_id non presente nel Cestino');
+  });
+}
+
+function testSvuotaCestinoRemovesAllRowsFromCestino() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var createdA = addJob({ title: 'Cestino A', size_class: 'S' }).data;
+    var createdB = addJob({ title: 'Cestino B', size_class: 'S' }).data;
+    cestinaJob_(createdA.job_id);
+    cestinaJob_(createdB.job_id);
+
+    var beforeCount = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO)).length;
+    assertTrue_(beforeCount >= 2, 'il Cestino deve contenere almeno i due job appena cestinati prima di svuotarlo');
+
+    var result = svuotaCestino();
+    assertTrue_(result.success, 'svuotaCestino deve riuscire');
+    assertEquals_(beforeCount, result.data.deleted_count, 'deleted_count deve corrispondere al totale delle righe cancellate');
+
+    var cestinoAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO));
+    assertEquals_(0, cestinoAfter.length, 'il Cestino deve risultare completamente vuoto');
+    var visiteCestinoAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO));
+    assertEquals_(0, visiteCestinoAfter.length, 'anche visite_cestino deve risultare vuoto');
+  });
+}
+
 function testAmbassadorOption() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -2669,11 +2800,9 @@ function readVisiteForJob_(ss, jobId) {
   });
 }
 
-function clearDataRows_(sheet, headers) {
-  sheet.clear();
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.setFrozenRows(1);
-}
+// clearDataRows_ spostata in Utils.gs (N4, DESIGN_archiviazione.md §6b):
+// serve anche a svuotaCestino_ (Kanban.gs), codice di produzione che non
+// deve dipendere da Tests.gs.
 
 function appendCompletedJob_(ss, data) {
   var now = nowIso_();

@@ -61,6 +61,11 @@ function routeAction_(params) {
     migrateVisiteFromHistory: migrateVisiteFromHistory,
     deleteJob: deleteJob,
     archiveJob: archiveJob,
+    getArchivio: getArchivio,
+    getCestino: getCestino,
+    ripristinaJob: ripristinaJob,
+    eliminaJobDefinitivamente: eliminaJobDefinitivamente,
+    svuotaCestino: svuotaCestino,
     updateColumnLabel: updateColumnLabel,
     addColumn: addColumn,
     updateColumn: updateColumn,
@@ -1011,6 +1016,99 @@ function ripristinaJob_(jobId) {
 // su archiveJob_, unico punto in cui vive la regola di eleggibilita'.
 function archiveJob(params) {
   return archiveJob_(requireParam_(params, 'job_id'));
+}
+
+// N4 (DESIGN_archiviazione.md, §6/§6b): liste sola lettura per le viste
+// Archivio/Cestino - anagrafica + riepilogo cronologia, lette direttamente
+// da jobs_archivio/visite_archivio o jobs_cestino/visite_cestino (§6:
+// "nessuna ricostruzione dal log necessaria"). Stessa forma per entrambe
+// (§6b: "stessa forma della vista Archivio") - un solo helper, non due
+// implementazioni parallele.
+function getArchivio() {
+  return ok_({ items: readArchivedList_(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO) });
+}
+
+function getCestino() {
+  return ok_({ items: readArchivedList_(SIGMAFLOW.SHEETS.JOBS_CESTINO, SIGMAFLOW.SHEETS.VISITE_CESTINO) });
+}
+
+function readArchivedList_(jobsSheetName, visiteSheetName) {
+  var ss = getSpreadsheet_();
+  var jobs = readTable_(ss.getSheetByName(jobsSheetName));
+
+  var visitCounts = {};
+  readTable_(ss.getSheetByName(visiteSheetName)).forEach(function(visit) {
+    visitCounts[visit.job_id] = (visitCounts[visit.job_id] || 0) + 1;
+  });
+
+  return jobs.map(function(job) {
+    return {
+      job_id: job.job_id,
+      title: job.title,
+      client: job.client,
+      assignee: job.assignee,
+      tag: job.tag,
+      description: job.description,
+      status: job.status,
+      arrival_ts: job.arrival_ts,
+      incarico_chiuso_ts: job.incarico_chiuso_ts,
+      // Presente solo sulla tabella pertinente (jobs_archivio o
+      // jobs_cestino) - readTable_ non valorizza campi assenti
+      // dall'intestazione del foglio letto, l'altro resta undefined da
+      // solo, nessun filtro esplicito necessario.
+      archiviato_ts: job.archiviato_ts,
+      cestinato_ts: job.cestinato_ts,
+      total_visits: visitCounts[job.job_id] || 0
+    };
+  });
+}
+
+// Azione API esposta dal bottone "Ripristina" in Cestino (§6b) — wrapper
+// sottilissimo su ripristinaJob_, come archiveJob sopra su archiveJob_.
+function ripristinaJob(params) {
+  return ripristinaJob_(requireParam_(params, 'job_id'));
+}
+
+// §6b/§4.3: "Elimina definitivamente" — cancellazione vera di una singola
+// riga dal Cestino (job + tutte le sue visite), non uno spostamento.
+// Insieme a svuotaCestino sotto, l'unico punto di reale perdita di dati
+// in tutto il programma di archiviazione (§4.3). Mai sull'Archivio: il
+// design non prevede eliminazione diretta da li', solo Duplica (N5).
+function eliminaJobDefinitivamente(params) {
+  var jobId = requireParam_(params, 'job_id');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = getSpreadsheet_();
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO);
+    var row = findRowById_(sheet, 'job_id', jobId);
+    if (row < 0) {
+      throw new Error('Job non trovato nel Cestino: ' + jobId);
+    }
+    sheet.deleteRow(row);
+    deleteVisiteRowsForJob_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO), jobId);
+    return ok_({ job_id: jobId, deleted: true });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// §6b: "Svuota cestino" — azione di gruppo, elimina tutto il contenuto
+// del Cestino in un colpo solo. Stessa irreversibilita' di
+// eliminaJobDefinitivamente, su piu' righe insieme.
+function svuotaCestino() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = getSpreadsheet_();
+    var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO);
+    var deletedCount = readTable_(jobsSheet).length;
+    clearDataRows_(jobsSheet, JOB_CESTINO_HEADERS);
+    clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO), VISITE_CESTINO_HEADERS);
+    return ok_({ deleted_count: deletedCount });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // N3 (DESIGN_archiviazione.md, §4.1/§9): scansiona 'jobs' per i casi

@@ -17,7 +17,9 @@
     touchTimer: null,
     touchStart: null,
     suppressCardClick: false,
-    metricsLoaded: false
+    metricsLoaded: false,
+    archivioLoaded: false,
+    cestinoLoaded: false
   };
 
   var defaultColumns = [
@@ -46,6 +48,7 @@
     bindNavigation();
     bindToolbar();
     bindModal();
+    bindCestinoToolbar();
     loadBoard();
     bindVisibilityPolling_();
   });
@@ -122,10 +125,17 @@
           item.classList.remove('active');
         });
         button.classList.add('active');
-        document.getElementById('view-board').hidden = button.dataset.view !== 'board';
-        document.getElementById('view-dashboard').hidden = button.dataset.view !== 'dashboard';
-        if (button.dataset.view === 'dashboard') {
+        var view = button.dataset.view;
+        document.getElementById('view-board').hidden = view !== 'board';
+        document.getElementById('view-dashboard').hidden = view !== 'dashboard';
+        document.getElementById('view-archivio').hidden = view !== 'archivio';
+        document.getElementById('view-cestino').hidden = view !== 'cestino';
+        if (view === 'dashboard') {
           loadMetrics();
+        } else if (view === 'archivio') {
+          loadArchivio();
+        } else if (view === 'cestino') {
+          loadCestino();
         }
       });
     });
@@ -1629,6 +1639,120 @@
   // Caricata la prima volta che si apre la tab, poi tenuta in cache per
   // il resto della sessione — force=true (bottone dati demo TEST) la
   // invalida esplicitamente perche' i dati sono davvero cambiati.
+  // N4 (DESIGN_archiviazione.md, §6): vista Archivio, sola lettura -
+  // anagrafica + riepilogo cronologia, nessuna azione. Stesso pattern
+  // pigro/con cache di loadMetrics (§ sopra): non ricaricare ad ogni
+  // apertura del tab, solo la prima volta o su richiesta esplicita
+  // (force), dato che "consultata molto raramente" (design, §6).
+  function loadArchivio(force) {
+    if (state.archivioLoaded && !force) {
+      return;
+    }
+    callApi('getArchivio').then(function(data) {
+      state.archivioLoaded = true;
+      renderArchivioList_(data.items || []);
+    }).catch(showError);
+  }
+
+  function renderArchivioList_(items) {
+    var body = document.getElementById('archivio-table-body');
+    var empty = document.getElementById('archivio-empty');
+    body.innerHTML = '';
+    empty.hidden = items.length > 0;
+    items.forEach(function(item) {
+      var row = document.createElement('tr');
+      row.innerHTML =
+        '<td>' + escapeHtml(item.title || item.job_id) + '</td>' +
+        '<td>' + escapeHtml(item.client || '') + '</td>' +
+        '<td>' + escapeHtml(item.assignee || '') + '</td>' +
+        '<td>' + formatItalianDate(item.arrival_ts) + '</td>' +
+        '<td>' + formatItalianDate(item.incarico_chiuso_ts) + '</td>' +
+        '<td>' + formatItalianDate(item.archiviato_ts) + '</td>' +
+        '<td>' + (item.total_visits || 0) + '</td>';
+      body.appendChild(row);
+    });
+  }
+
+  // N4 (§6b): vista Cestino, stessa forma dell'Archivio (design: "stessa
+  // forma della vista Archivio") + tre azioni. "Ripristina" ha conferma
+  // leggera (azione reversibile); "Elimina definitivamente"/"Svuota
+  // cestino" hanno conferma pesante, essendo l'unico punto di reale
+  // perdita di dati in questo intero programma (§4.3).
+  function loadCestino(force) {
+    if (state.cestinoLoaded && !force) {
+      return;
+    }
+    callApi('getCestino').then(function(data) {
+      state.cestinoLoaded = true;
+      renderCestinoList_(data.items || []);
+    }).catch(showError);
+  }
+
+  function renderCestinoList_(items) {
+    var body = document.getElementById('cestino-table-body');
+    var empty = document.getElementById('cestino-empty');
+    body.innerHTML = '';
+    empty.hidden = items.length > 0;
+    items.forEach(function(item) {
+      var row = document.createElement('tr');
+      var label = escapeHtml(item.title || item.job_id);
+      row.innerHTML =
+        '<td>' + label + '</td>' +
+        '<td>' + escapeHtml(item.client || '') + '</td>' +
+        '<td>' + escapeHtml(item.assignee || '') + '</td>' +
+        '<td>' + formatItalianDate(item.arrival_ts) + '</td>' +
+        '<td>' + formatItalianDate(item.cestinato_ts) + '</td>' +
+        '<td>' + (item.total_visits || 0) + '</td>' +
+        '<td class="row-actions">' +
+          '<button type="button" class="secondary-button" data-action="ripristina">Ripristina</button>' +
+          '<button type="button" class="danger-button" data-action="elimina">Elimina definitivamente</button>' +
+        '</td>';
+      row.querySelector('[data-action="ripristina"]').addEventListener('click', function() {
+        ripristinaJobFromCestino(item.job_id, item.title || item.job_id);
+      });
+      row.querySelector('[data-action="elimina"]').addEventListener('click', function() {
+        eliminaJobDefinitivamenteFromCestino(item.job_id, item.title || item.job_id);
+      });
+      body.appendChild(row);
+    });
+  }
+
+  function ripristinaJobFromCestino(jobId, label) {
+    if (!confirm('Ripristinare "' + label + '"? Il caso tornera\' attivo sulla board.')) {
+      return;
+    }
+    callApi('ripristinaJob', { job_id: jobId }).then(function() {
+      showMessage('Caso ripristinato.');
+      loadCestino(true);
+    }).catch(showError);
+  }
+
+  function eliminaJobDefinitivamenteFromCestino(jobId, label) {
+    if (!confirm('Eliminare definitivamente "' + label + '"? L\'azione non e\' reversibile: il caso e tutte le sue visite andranno persi per sempre.')) {
+      return;
+    }
+    callApi('eliminaJobDefinitivamente', { job_id: jobId }).then(function() {
+      showMessage('Caso eliminato definitivamente.');
+      loadCestino(true);
+    }).catch(showError);
+  }
+
+  function bindCestinoToolbar() {
+    var button = document.getElementById('svuota-cestino-button');
+    if (!button) {
+      return;
+    }
+    button.addEventListener('click', function() {
+      if (!confirm('Svuotare completamente il Cestino? L\'azione non e\' reversibile: tutti i casi al suo interno e le loro visite andranno persi per sempre.')) {
+        return;
+      }
+      callApi('svuotaCestino').then(function(data) {
+        showMessage('Cestino svuotato (' + (data.deleted_count || 0) + ' casi eliminati).');
+        loadCestino(true);
+      }).catch(showError);
+    });
+  }
+
   function loadMetrics(force) {
     if (state.metricsLoaded && !force) {
       return;

@@ -26,22 +26,32 @@ sed -i 's/"rootDir": "src"/"rootDir": "."/' "$SCRATCH_DIR/.clasp.json"
 
 ( cd "$SCRATCH_DIR" && clasp pull )
 
+# Elenco file scoperto dinamicamente da apps-script/src/ (non piu'
+# cablato uno per uno): un elenco fisso e' esattamente il tipo di bug
+# trovato in questa sessione (N4 ha aggiunto archivio.html/cestino.html,
+# lo script vecchio li avrebbe ignorati in silenzio, "verificando" solo
+# 13 file su 15 pushati senza dirlo).
 DIFF_FOUND=0
-for f in ActivityLog Constants Kanban Model Schema Tests Utils; do
-  if ! diff -q "$SCRATCH_DIR/$f.js" "$SRC_DIR/$f.gs" > /dev/null 2>&1; then
-    echo "DIFFERENZA: $f"
+TOTAL=0
+for f in "$SRC_DIR"/*.gs; do
+  base="$(basename "$f" .gs)"
+  TOTAL=$((TOTAL + 1))
+  if ! diff -q "$SCRATCH_DIR/$base.js" "$f" > /dev/null 2>&1; then
+    echo "DIFFERENZA: $base.gs"
     DIFF_FOUND=1
   fi
 done
-for f in appsscript.json board.html client.html dashboard.html index.html style.html; do
-  if ! diff -q "$SCRATCH_DIR/$f" "$SRC_DIR/$f" > /dev/null 2>&1; then
-    echo "DIFFERENZA: $f"
+for f in "$SRC_DIR"/*.html "$SRC_DIR"/*.json; do
+  base="$(basename "$f")"
+  TOTAL=$((TOTAL + 1))
+  if ! diff -q "$SCRATCH_DIR/$base" "$f" > /dev/null 2>&1; then
+    echo "DIFFERENZA: $base"
     DIFF_FOUND=1
   fi
 done
 
 if [ "$DIFF_FOUND" -eq 0 ]; then
-  echo "OK: 13/13 file identici tra TEST e apps-script/src"
+  echo "OK: $TOTAL/$TOTAL file identici tra TEST e apps-script/src"
   exit 0
 fi
 
