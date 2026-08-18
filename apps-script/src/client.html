@@ -1668,9 +1668,29 @@
         '<td>' + formatItalianDate(item.arrival_ts) + '</td>' +
         '<td>' + formatItalianDate(item.incarico_chiuso_ts) + '</td>' +
         '<td>' + formatItalianDate(item.archiviato_ts) + '</td>' +
-        '<td>' + (item.total_visits || 0) + '</td>';
+        '<td>' + (item.total_visits || 0) + '</td>' +
+        '<td class="row-actions">' +
+          '<button type="button" class="secondary-button" data-action="duplica">Duplica</button>' +
+        '</td>';
+      row.querySelector('[data-action="duplica"]').addEventListener('click', function() {
+        duplicaJobFromArchivio(item.job_id, item.title || item.job_id);
+      });
       body.appendChild(row);
     });
+  }
+
+  // N5 (§7): "Duplica" crea un caso NUOVO attivo a partire da un caso
+  // archiviato - nessun dato storico riportato (arrival_ts/incarico_chiuso_ts/
+  // status/visite/log ripartono da zero, vedi duplicaJob_ lato server).
+  // Conferma leggera: non e' un'azione distruttiva, ne' sul caso
+  // archiviato (resta li' invariato) ne' altrove.
+  function duplicaJobFromArchivio(jobId, label) {
+    if (!confirm('Duplicare "' + label + '"? Verra\' creato un nuovo caso attivo sulla board, senza cronologia ne\' visite pregresse.')) {
+      return;
+    }
+    callApi('duplicaJob', { job_id: jobId }).then(function() {
+      showMessage('Nuovo caso creato sulla board.');
+    }).catch(showError);
   }
 
   // N4 (§6b): vista Cestino, stessa forma dell'Archivio (design: "stessa

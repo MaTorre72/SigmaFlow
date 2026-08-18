@@ -1,6 +1,181 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
+## N6 (archiviazione) — DONE, programma completo (2026-08-18)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita automaticamente dopo N5 (nessun gate). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §8, §9
+(N6). **Ultima sotto-fase del programma di archiviazione** — con N6
+chiusa, tutte le sotto-fasi N1-N6 di §9 sono DONE.
+
+**Ricognizione preliminare (necessaria, non assumibile)**: il
+frontend (`client.html`, `renderMetrics`) legge **solo**
+`metrics.systemState.*` — i campi legacy in cima a `calculateMetrics_`
+(`MM1`/`MG1`/`lambda`/`distributions`/...) non sono mai renderizzati
+(verificato via grep), quindi **volutamente non estesi** all'archivio:
+nessun beneficio visibile, solo rischio aggiunto. Tutto il lavoro di
+N6 è su `buildSystemState_` (Model.gs), l'unica funzione che produce
+ciò che la dashboard mostra davvero.
+
+**Backend** (Kanban.gs): `loadJobsWithVisitSummary_` fattorizzata in
+`loadJobsWithVisitSummaryFrom_(jobsSheetName, visiteSheetName)` — nuovo
+`loadArchivedJobsWithVisitSummary_()` la riusa puntata su
+`jobs_archivio`/`visite_archivio`, stesso ricalcolo di `done_ts`/
+`visit_number` che i casi attivi hanno già (nessuna implementazione
+parallela).
+
+**Backend** (Model.gs): `getMetrics()` legge anche `archivedJobs`/
+`visiteArchivio` e li passa a `calculateMetrics_`/`buildSystemState_`
+(parametri opzionali, default `[]` — le chiamate dirette già esistenti
+nei test restano valide invariate). Dentro `buildSystemState_`:
+`visite` diventa `visite.concat(visiteArchivio)` per Flusso/Rientri/
+Tempi/Capacità (calcolati da `visite`, mai da `jobs` — tutti e quattro
+ora vedono anche l'archivio quando la finestra osservata lo tocca).
+`pointsStatistics_` riceve **sia** `jobs` (attivi) **sia**
+`archivedJobs`, con una separazione esplicita: `openJobs` (→ punti
+aperti, card aperte, "per taglia", "per assegnatario") resta derivato
+**solo** da `jobs` attivi, mai dall'unione — cablaggio deliberato
+dell'unico vincolo esplicito del design (§8: "lavoro presente" non è
+mai archivio né cestino). `allJobs = jobs.concat(archivedJobs)` alimenta
+invece "punti completati"/"punti aggiunti"/`monthBuckets_` ("Andamento
+del carico" + "Carico mensile")/`pointsByColumn_` ("Punti per
+colonna") — tutte storiche su finestra temporale o già non filtrate a
+solo `openJobs` prima di N6. Il Cestino non entra in nessun punto di
+questa funzione (nessun `loadCestino...` equivalente creato).
+
+**Bug di harness trovato e corretto, non nel codice di produzione**:
+`resetTestDatabase_` (Tests.gs) puliva solo `jobs`/`visite`/`config`
+tra un test e l'altro — mai `jobs_archivio`/`jobs_cestino` (nota già
+presente in questo file da N2, allora non bloccante perché nulla
+leggeva l'archivio per intero). Con `getMetrics()` che ora unisce
+l'intero contenuto di `jobs_archivio`/`visite_archivio`, i residui
+lasciati da **tutti** i test precedenti nello stesso spreadsheet
+condiviso della suite si sono messi a inquinare silenziosamente
+`testMetrics` (qualità dati passata da "bassa" a "media" per
+iniziative osservate mai pulite) — non un test che parla
+esplicitamente di archivio, un effetto collaterale trasversale.
+Corretto svuotando anche `jobs_archivio`/`jobs_cestino`/
+`visite_archivio`/`visite_cestino` a ogni `resetTestDatabase_`.
+**Secondo bug di harness**, trovato scrivendo i test nuovi:
+`gas-harness.js` (mock di `Utilities.formatDate`) non gestiva i
+pattern `'yyyy-MM'`/`'MM/yyyy'` usati da `monthBuckets_` per le chiavi
+mensili — cadeva nel formato di default (timestamp completo con
+ora/minuti), producendo chiavi diverse per date nello stesso mese.
+Nessun test precedente confrontava le chiavi di `timeline` con un
+valore atteso (solo `.length === 6`), quindi il gap è rimasto
+invisibile fino al primo test che lo ha fatto. Corretto aggiungendo
+entrambi i pattern al mock.
+
+**Test aggiunti** (`Tests.gs`, harness Node), 7 nuovi:
+`testBuildSystemStateIncludesArchivedJobsInHistoricPoints` (punti
+aggiunti/completati includono l'archivio),
+`testBuildSystemStateOpenPointsNeverIncludeArchivedJobs` (caso limite:
+anche con uno status archiviato che mapperebbe su una colonna non-done,
+punti aperti/card aperte/lavoro pronto restano solo sugli attivi),
+`testBuildSystemStateTimelineIncludesArchivedJobs` ("Andamento del
+carico"), `testBuildSystemStatePointsByColumnIncludesArchivedJobs`
+("Punti per colonna"), `testBuildSystemStateFlowMetricsIncludeArchivedVisite`
+(Flusso legge anche `visite_archivio`), `testGetMetricsIncludesArchivedCaseInHistoricPoints`
+(end-to-end via `archiveJob_` + `getMetrics()` reale, non solo
+`buildSystemState_` diretta), `testGetMetricsNeverReadsCestino`
+(un job cestinato non sposta di un punto nessuna metrica, prima/dopo
+confrontati). **121/121 test passati nell'harness Node** (114
+preesistenti + 7 nuovi, nessuna regressione).
+
+**Verifica UI reale**: stessa tecnica di N4/N5 — server HTTP locale
+temporaneo (rimosso a fine verifica) con `routeAction_` reale via
+l'harness Node. Seed: un caso attivo in WIP (M, 8pt) + un caso chiuso
+e archiviato (L, 13pt, invoiced). Tab Dashboard, nessun errore in
+console. Numeri osservati, tutti corretti: **Punti aperti 8pt** (solo
+l'attivo — l'archiviato, pur da 13pt, non compare), **Punti aggiunti
+21pt** e **Punti completati 13pt** (entrambi includono l'archiviato),
+**Punti per colonna**: "WIP 8pt/1 card" (attivo) + "DA INVIARE / DA
+FATTURARE 13pt/1 card" (l'archiviato, sotto lo status conservato al
+momento dell'archiviazione), **Carico mensile** (riga 08/2026): 2 card
+entrate, 1 completata, 21/13/8 punti entrati/completati/aperti —
+combina correttamente attivo+archiviato nello stesso mese,
+**Distribuzione per taglia**/**Punti per assegnatario**: solo "M 8pt/1
+card"/"Non assegnato 8pt/1 card" — **l'archiviato correttamente
+escluso**, confermando che questi due restano ancorati a "lavoro
+presente" come gli altri due esplicitamente esclusi dal design.
+Comportamento verificato end-to-end, non solo letto dal codice.
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(15/15 file identici).
+
+**Criteri di accettazione §10 chiusi da N6**: "Cestino mai letto da
+nessuna metrica" e "'Lavoro presente'/punti aperti invariati (mai
+archivio né cestino); 'Andamento del carico' e quadro di dettaglio
+verificati che includano l'archivio (unione diretta, senza filtri)
+quando pertinente" — entrambi verificati TRUE. **Con N6, tutti i
+criteri di accettazione di §10 sono ora [x]** (aggiornati direttamente
+nel documento di design, non solo qui).
+
+**Programma di archiviazione (N1-N6) — completo.** Nessuna sotto-fase
+residua in `docs/DESIGN_archiviazione.md` §9. Tutto il lavoro è su
+`feat/n1-archiviazione-schema`, mai unito a `main` in questa sessione
+(nessuna richiesta di merge ricevuta) — resta a Marco decidere quando
+aprire la pull request verso `main`.
+
+## N5 (archiviazione) — DONE, nessun gate (2026-08-18)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita automaticamente dopo N4 (nessun gate). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §7, §9
+(N5).
+
+**Backend** (Kanban.gs): `duplicaJob_(jobId)` legge il caso da
+`jobs_archivio` (`findRowById_`/`readJobFromRow_`, stesso pattern usato
+da `archiveJob_` per il controllo di eleggibilità) e **riusa `addJob`**
+per crearne uno nuovo — non una funzione di copia riga parallela: cosi'
+`arrival_ts`/`status_since_ts`/visita 1/log di creazione nascono da zero
+esattamente come per un caso creato a mano, senza doverli azzerare uno
+per uno. Copia solo i campi che il design elenca come punto di partenza
+(§7: titolo/cliente/tag/assegnatario/ambasciatore/taglia) — priorità,
+descrizione, colore, ecc. ripartono dai default di `addJob`. Lancia
+errore esplicito se il `job_id` non è presente in Archivio. `duplicaJob(params)`
+è il thin wrapper esposto via `routeAction_` (bottone "Duplica").
+
+**Frontend** (`archivio.html`/`client.html`): colonna "Azioni" aggiunta
+alla vista Archivio (era sola lettura in N4, §6 non lo escludeva per
+N5), un bottone "Duplica" per riga, stesso pattern di
+`row-actions`/conferma di Cestino (N4) ma conferma **leggera** — non è
+un'azione distruttiva, né sul caso archiviato (resta invariato) né
+altrove. Nessuna azione sul Cestino (§7: "non applicabile al Cestino,
+che ha Ripristina invece").
+
+**Test aggiunti** (`Tests.gs`, harness Node), 4 nuovi:
+`testDuplicaJobCreatesNewActiveJobCopyingAnagrafica` (titolo/cliente/tag/
+assegnatario/taglia copiati, nuovo `job_id`, attivo su `jobs`),
+`testDuplicaJobDoesNotCopyClosureStatusOrVisitHistory` (`incarico_chiuso_ts`
+vuoto, status riparte dalla colonna iniziale — non da quello archiviato,
+un solo evento nel log, una sola visita — nessuno storico riportato),
+`testDuplicaJobThrowsWhenJobNotInArchivio`,
+`testDuplicaJobApiActionWrapsDuplicaJob`. **114/114 test passati
+nell'harness Node** (110 preesistenti + 4 nuovi, nessuna regressione).
+
+**Verifica UI reale**: stessa tecnica di N4 — server HTTP locale
+temporaneo (rimosso a fine verifica) che serve il markup vero
+(`index`/`archivio`/`client`/`style` .html) con `google.script.run.api(...)`
+inoltrato a un endpoint locale che esegue `routeAction_` reale via
+l'harness Node, `window.confirm` auto-accettato e loggato in console per
+restare verificabile. Seed: un caso archiviato (`Bonifica sito Rossi`,
+Rossi Srl, tag "urgente", assegnatario Mario, taglia L). Click su
+"Duplica" in Archivio → conferma catturata in console → riga Archivio
+invariata dopo il click (il caso archiviato non viene toccato) → nuova
+card comparsa in colonna BACKLOG sulla Board con la stessa anagrafica
+copiata (cliente, tag, assegnatario, 13 pt = taglia L) e nessun dato
+storico (non in DONE, nessuna chiusura). Comportamento verificato end-to-end,
+non solo letto dal codice.
+
+**Criteri di accettazione §10 chiusi da N5**: "'Duplica' (solo da
+Archivio) crea un caso nuovo, nessun dato storico riportato" —
+verificato TRUE.
+
+**Fuori scope di N5, per §9**: N6 (metriche estese all'archivio) resta
+aperta. Nessun gate dopo N5 — si procede a N6.
+
 ## N4 (archiviazione) — DONE, nessun gate (2026-08-18)
 
 Proseguita automaticamente dopo la conferma del gate N3 (nessuna nuova
@@ -429,21 +604,16 @@ non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
 ("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
 tutti gli effetti.
 
-## Prossima esecuzione — ferma al gate di N3
+## Prossima esecuzione — nessun programma attivo
 
-N2 chiusa in questa stessa sessione, senza gate: per il runbook si è
-proceduto automaticamente a N3, il cui codice/test sono ora pronti e
-verificati su TEST (vedi sezione N3 sopra) — **ma il gate umano dopo N3
-resta aperto**: il trigger non è stato installato, su istruzione
-esplicita di fermarsi lì per la conferma di Marco. Nessuna sotto-fase
-successiva (N4-N6) iniziata.
-
-**Per Marco**: quando vuoi attivare il trigger, esegui
-`installaTriggerArchiviazioneAutomatica` (Kanban.gs) dall'editor Apps
-Script **sul progetto TEST** — poi conferma qui (o nella prossima
-sessione) per sbloccare N4 e seguenti. Se invece serve rivedere il
-codice prima, il punto di ingresso è
-[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md) §4.1/§9.
+Il programma di archiviazione (N1-N6, `docs/DESIGN_archiviazione.md`)
+è **completo**: tutte le sotto-fasi DONE, tutti i criteri di
+accettazione §10 verificati TRUE (vedi sezione N6 sopra). Nessun gate
+pendente, nessuna sotto-fase residua. Il lavoro vive su
+`feat/n1-archiviazione-schema`, non ancora unito a `main` — decisione
+di Marco quando/se aprire la pull request. Una prossima sessione
+riparte da una richiesta esplicita di Marco (manutenzione ordinaria) o
+da un nuovo documento `DESIGN_*.md`, come da `CLAUDE.md`.
 
 ## Stato generale
 

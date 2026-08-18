@@ -64,6 +64,7 @@ function routeAction_(params) {
     getArchivio: getArchivio,
     getCestino: getCestino,
     ripristinaJob: ripristinaJob,
+    duplicaJob: duplicaJob,
     eliminaJobDefinitivamente: eliminaJobDefinitivamente,
     svuotaCestino: svuotaCestino,
     updateColumnLabel: updateColumnLabel,
@@ -474,9 +475,22 @@ function appendVisitRow_(sheet, visit) {
 //   esplicitamente su jobs per L4 — hanno ancora un done_ts per calcolare
 //   punti completati e timeline.
 function loadJobsWithVisitSummary_() {
+  return loadJobsWithVisitSummaryFrom_(SIGMAFLOW.SHEETS.JOBS, SIGMAFLOW.SHEETS.VISITE);
+}
+
+// N6 (DESIGN_archiviazione.md, §8/§9): stesso ricalcolo di sopra ma sulle
+// tabelle dell'Archivio - serve a getMetrics() per unire i casi archiviati
+// alle metriche storiche su finestra temporale, con lo stesso done_ts/
+// visit_number ricalcolato al volo che i casi attivi hanno gia'. Mai
+// un equivalente per il Cestino: nessuna metrica lo legge (§8).
+function loadArchivedJobsWithVisitSummary_() {
+  return loadJobsWithVisitSummaryFrom_(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO);
+}
+
+function loadJobsWithVisitSummaryFrom_(jobsSheetName, visiteSheetName) {
   var ss = getSpreadsheet_();
-  var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-  var visite = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+  var jobs = readTable_(ss.getSheetByName(jobsSheetName));
+  var visite = readTable_(ss.getSheetByName(visiteSheetName));
 
   var latestByJob = {};
   visite.forEach(function(visit) {
@@ -1061,6 +1075,38 @@ function readArchivedList_(jobsSheetName, visiteSheetName) {
       total_visits: visitCounts[job.job_id] || 0
     };
   });
+}
+
+// N5 (§7): "Duplica", solo dall'Archivio - crea un caso NUOVO attivo,
+// non un ripristino. Riusa addJob (stessa creazione di qualunque caso:
+// nuovo job_id, visita 1, log di creazione), non una copia riga
+// parallela - cosi' arrival_ts/incarico_chiuso_ts/status/visite/log
+// nascono da zero esattamente come per un caso creato a mano, senza
+// bisogno di azzerarli esplicitamente uno per uno. Copia solo i campi
+// che il design elenca come punto di partenza (titolo/cliente/tag/
+// assegnatario/ambasciatore/taglia) - tutto il resto (priorita',
+// descrizione, colore, ecc.) riparte dai default di addJob.
+function duplicaJob_(jobId) {
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Caso non trovato in Archivio: ' + jobId);
+  }
+  var archivedJob = readJobFromRow_(sheet, row, getHeaderMap_(sheet));
+  return addJob({
+    title: archivedJob.title,
+    client: archivedJob.client,
+    ambassador: archivedJob.ambassador,
+    tag: archivedJob.tag,
+    assignee: archivedJob.assignee,
+    size_class: archivedJob.size_class
+  });
+}
+
+// Azione API esposta dal bottone "Duplica" in Archivio - wrapper
+// sottilissimo su duplicaJob_, come archiveJob sopra su archiveJob_.
+function duplicaJob(params) {
+  return duplicaJob_(requireParam_(params, 'job_id'));
 }
 
 // Azione API esposta dal bottone "Ripristina" in Cestino (§6b) — wrapper

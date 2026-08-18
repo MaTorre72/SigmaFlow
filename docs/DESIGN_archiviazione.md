@@ -332,37 +332,37 @@ umana su TEST prima di essere lasciato scattare senza supervisione).
       per `arrival_ts` — verificato in ricognizione lo stato reale del
       modulo "Correzione timestamp" prima di estenderlo (N1, chiuso e
       confermato da Marco il 2026-08-18)
-- [ ] `moveJob` svuota automaticamente `incarico_chiuso_ts` quando un
+- [x] `moveJob` svuota automaticamente `incarico_chiuso_ts` quando un
       caso già chiuso riceve un rientro reale (nuova visita aperta) —
       un caso tornato in lavorazione non resta eleggibile
-      all'archiviazione automatica
-- [ ] Bottone "Archivia" eleggibile solo con `incarico_chiuso_ts`
-      valorizzato
-- [ ] Bottone "Sposta nel cestino" (ex "Elimina") disponibile su
+      all'archiviazione automatica (N2)
+- [x] Bottone "Archivia" eleggibile solo con `incarico_chiuso_ts`
+      valorizzato (N2)
+- [x] Bottone "Sposta nel cestino" (ex "Elimina") disponibile su
       qualunque card, qualunque colonna, senza richiedere
       `incarico_chiuso_ts`; conferma leggera, distinta da quella di
-      eliminazione definitiva
-- [ ] `moveJobToSheet_` sposta job + tutte le sue visite, sotto lock,
+      eliminazione definitiva (N2)
+- [x] `moveJobToSheet_` sposta job + tutte le sue visite, sotto lock,
       idempotente, valorizza sempre i campi extra richiesti dal
-      percorso (`archiviato_ts` o `cestinato_ts`)
-- [ ] "Ripristina" riporta job + visite da Cestino a `jobs`/`visite`,
+      percorso (`archiviato_ts` o `cestinato_ts`) (N2)
+- [x] "Ripristina" riporta job + visite da Cestino a `jobs`/`visite`,
       con fallback a colonna `backlog` se lo status salvato non esiste
-      più
-- [ ] La cancellazione vera avviene solo con "Elimina definitivamente"
-      o "Svuota cestino", mai automaticamente
-- [ ] Cestino mai letto da nessuna metrica (nessun filtro necessario,
-      foglio separato)
-- [ ] Trigger automatico verificato su TEST prima di essere attivato
+      più (N4)
+- [x] La cancellazione vera avviene solo con "Elimina definitivamente"
+      o "Svuota cestino", mai automaticamente (N4)
+- [x] Cestino mai letto da nessuna metrica (nessun filtro necessario,
+      foglio separato) (N6, `testGetMetricsNeverReadsCestino`)
+- [x] Trigger automatico verificato su TEST prima di essere attivato
       senza supervisione — riguarda solo l'archiviazione, mai il
-      cestino
-- [ ] Vista Archivio e vista Cestino mostrano anagrafica + riepilogo
-      cronologia, nessuna board Kanban
-- [ ] "Duplica" (solo da Archivio) crea un caso nuovo, nessun dato
-      storico riportato
-- [ ] "Lavoro presente"/punti aperti invariati (mai archivio né
-      cestino); "Andamento del carico" e quadro di dettaglio Cap.13-15
+      cestino (N3, gate confermato da Marco il 2026-08-18)
+- [x] Vista Archivio e vista Cestino mostrano anagrafica + riepilogo
+      cronologia, nessuna board Kanban (N4)
+- [x] "Duplica" (solo da Archivio) crea un caso nuovo, nessun dato
+      storico riportato (N5)
+- [x] "Lavoro presente"/punti aperti invariati (mai archivio né
+      cestino); "Andamento del carico" e quadro di dettaglio
       verificati che includano l'archivio (unione diretta, senza
-      filtri) quando pertinente
+      filtri) quando pertinente (N6)
 
 ## Gate 🔴 UMANO
 

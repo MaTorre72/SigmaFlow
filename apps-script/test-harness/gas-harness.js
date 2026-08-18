@@ -21,6 +21,8 @@ function formatDate(date, tz, pattern) {
   if (pattern === 'yyyyMMdd') { return '' + y + pad(mo) + pad(d); }
   if (pattern === 'yyyyMMdd-HHmmss') { return '' + y + pad(mo) + pad(d) + '-' + pad(h) + pad(mi) + pad(s); }
   if (pattern === 'yyyy-MM-dd') { return y + '-' + pad(mo) + '-' + pad(d); }
+  if (pattern === 'yyyy-MM') { return y + '-' + pad(mo); }
+  if (pattern === 'MM/yyyy') { return pad(mo) + '/' + y; }
   // default: "yyyy-MM-dd'T'HH:mm:ssXXX"
   return y + '-' + pad(mo) + '-' + pad(d) + 'T' + pad(h) + ':' + pad(mi) + ':' + pad(s) + '+02:00';
 }

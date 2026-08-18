@@ -287,6 +287,10 @@ function runAllTests() {
     testEliminaJobDefinitivamenteRemovesJobAndVisiteFromCestino,
     testEliminaJobDefinitivamenteThrowsWhenJobNotInCestino,
     testSvuotaCestinoRemovesAllRowsFromCestino,
+    testDuplicaJobCreatesNewActiveJobCopyingAnagrafica,
+    testDuplicaJobDoesNotCopyClosureStatusOrVisitHistory,
+    testDuplicaJobThrowsWhenJobNotInArchivio,
+    testDuplicaJobApiActionWrapsDuplicaJob,
     testAmbassadorOption,
     testEditableOptions,
     testDynamicColumnsAndOptions,
@@ -294,6 +298,13 @@ function runAllTests() {
     testGetMetricsUsesVisiteNotJobFields,
     testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite,
     testSystemStateInsufficientData,
+    testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
+    testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
+    testBuildSystemStateTimelineIncludesArchivedJobs,
+    testBuildSystemStatePointsByColumnIncludesArchivedJobs,
+    testBuildSystemStateFlowMetricsIncludeArchivedVisite,
+    testGetMetricsIncludesArchivedCaseInHistoricPoints,
+    testGetMetricsNeverReadsCestino,
     testDataQualityThresholds,
     testSystemStateSeparatesFlowFromTimeSamples,
     testSystemStateWorkload,
@@ -1656,6 +1667,95 @@ function testSvuotaCestinoRemovesAllRowsFromCestino() {
   });
 }
 
+// N5 (DESIGN_archiviazione.md, §7): "Duplica" crea un caso NUOVO attivo -
+// copia solo titolo/cliente/tag/assegnatario/ambasciatore/taglia, tutto il
+// resto riparte da zero come per un caso creato a mano (riusa addJob).
+function testDuplicaJobCreatesNewActiveJobCopyingAnagrafica() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var original = addJob({
+      title: 'Caso originale',
+      client: 'Cliente Z',
+      ambassador: '',
+      tag: 'urgente',
+      assignee: 'Mario',
+      size_class: 'L'
+    }).data;
+    moveJob({ job_id: original.job_id, status: 'done' });
+    updateJob({ job_id: original.job_id, invoiced: true });
+    archiveJob_(original.job_id);
+
+    var result = duplicaJob_(original.job_id);
+    assertTrue_(result.success, 'duplicaJob_ deve riuscire su un job presente in Archivio');
+    var duplicated = result.data.job;
+    assertTrue_(duplicated.job_id !== original.job_id, 'il caso duplicato deve avere un job_id nuovo');
+    assertEquals_('Caso originale', duplicated.title, 'titolo copiato');
+    assertEquals_('Cliente Z', duplicated.client, 'cliente copiato');
+    assertEquals_('urgente', duplicated.tag, 'tag copiato');
+    assertEquals_('Mario', duplicated.assignee, 'assegnatario copiato');
+    assertEquals_('L', duplicated.size_class, 'taglia copiata');
+
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === duplicated.job_id; });
+    assertEquals_(1, jobsAfter.length, 'il caso duplicato deve essere attivo su jobs');
+  });
+}
+
+function testDuplicaJobDoesNotCopyClosureStatusOrVisitHistory() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var original = addJob({ title: 'Caso con storico', size_class: 'M' }).data;
+    moveJob({ job_id: original.job_id, status: 'wip' });
+    moveJob({ job_id: original.job_id, status: 'done' });
+    updateJob({ job_id: original.job_id, invoiced: true });
+    archiveJob_(original.job_id);
+
+    var duplicated = duplicaJob_(original.job_id).data.job;
+    assertTrue_(!duplicated.incarico_chiuso_ts, 'il duplicato non deve ereditare la chiusura incarico');
+    assertEquals_(firstColumnIdByRole_('backlog'), duplicated.status, 'il duplicato riparte dalla colonna iniziale, non dallo status archiviato');
+
+    var log = JSON.parse(duplicated.activity_log_json || '[]');
+    assertEquals_(1, log.length, 'il duplicato deve avere solo il proprio evento di creazione, nessuna cronologia pregressa');
+
+    var visite = readVisiteForJob_(ss, duplicated.job_id);
+    assertEquals_(1, visite.length, 'il duplicato deve avere solo la sua visita 1, nessuna visita pregressa copiata');
+  });
+}
+
+function testDuplicaJobThrowsWhenJobNotInArchivio() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+
+    var failed = false;
+    try {
+      duplicaJob_('JOB-INESISTENTE');
+    } catch (err) {
+      failed = err.message.indexOf('non trovato in Archivio') !== -1;
+    }
+    assertTrue_(failed, 'duplicaJob_ deve rifiutare un job_id non presente in Archivio');
+  });
+}
+
+function testDuplicaJobApiActionWrapsDuplicaJob() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var original = addJob({ title: 'Via azione API duplicaJob', size_class: 'S' }).data;
+    updateJob({ job_id: original.job_id, invoiced: true });
+    archiveJob_(original.job_id);
+
+    var result = routeAction_({ action: 'duplicaJob', job_id: original.job_id });
+    assertTrue_(result.success, 'l\'azione duplicaJob deve riuscire, stessa regola di duplicaJob_');
+    assertTrue_(result.data.job.job_id !== original.job_id, 'l\'azione API deve restituire un job_id nuovo');
+  });
+}
+
 function testAmbassadorOption() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -1789,6 +1889,118 @@ function testSystemStateInsufficientData() {
   assertEquals_(null, state.capacityMetrics.effective_load, 'carico non stimabile');
   assertEquals_(null, state.timeMetrics.average_service_days, 'tempo medio non stimabile');
   assertEquals_(null, buildSystemState_([], [], SIGMAFLOW.DEFAULT_CONFIG, now).reworkMetrics.initiatives_with_rework, 'rientri non stimabili senza iniziative');
+}
+
+// N6 (DESIGN_archiviazione.md, §8/§9): le metriche storiche su una
+// finestra temporale devono includere anche l'Archivio (unione diretta,
+// nessun filtro) — "punti aggiunti"/"punti completati" ne fanno parte
+// (arrival_ts/done_ts nel periodo osservato), a differenza di "punti
+// aperti" (sotto, mai l'archivio).
+function testBuildSystemStateIncludesArchivedJobsInHistoricPoints() {
+  var now = new Date();
+  var activeJobs = [{ job_id: 'ACTIVE-1', status: 'backlog', arrival_ts: nowIso_(), size_points: 5, size_class: 'M' }];
+  var archivedJobs = [{ job_id: 'ARCHIVED-1', status: 'done', arrival_ts: nowIso_(), done_ts: nowIso_(), size_points: 8, size_class: 'M' }];
+  var state = buildSystemState_(activeJobs, [], SIGMAFLOW.DEFAULT_CONFIG, now, archivedJobs, []);
+  assertEquals_(13, state.pointsMetrics.added_points, 'punti aggiunti devono includere anche i casi archiviati');
+  assertEquals_(8, state.pointsMetrics.completed_points, 'punti completati devono includere anche i casi archiviati');
+}
+
+// §8: "Lavoro presente"/"punti aperti" restano SOLO sui job attivi, mai
+// sull'archivio — anche nel caso limite (non atteso in pratica, ma non
+// impedito dallo schema) in cui lo status conservato di un job archiviato
+// mappi ancora su una colonna non-'done'.
+function testBuildSystemStateOpenPointsNeverIncludeArchivedJobs() {
+  var now = new Date();
+  var activeJobs = [{ job_id: 'ACTIVE-1', status: 'backlog', arrival_ts: nowIso_(), size_points: 5, size_class: 'M' }];
+  var archivedJobs = [{ job_id: 'ARCHIVED-1', status: 'backlog', arrival_ts: nowIso_(), size_points: 100, size_class: 'XL' }];
+  var state = buildSystemState_(activeJobs, [], SIGMAFLOW.DEFAULT_CONFIG, now, archivedJobs, []);
+  assertEquals_(5, state.pointsMetrics.open_points, 'punti aperti devono restare solo sui job attivi, mai sull\'archivio');
+  assertEquals_(1, state.pointsMetrics.open_cards, 'conteggio card aperte deve restare solo sui job attivi');
+  assertEquals_(1, state.workloadMetrics.ready, 'lavoro presente (pronto) deve restare solo sui job attivi');
+}
+
+// "Andamento del carico" (monthBuckets_, via pointsMetrics.timeline) - il
+// pannello esplicitamente nominato in §9 come da estendere all'archivio.
+function testBuildSystemStateTimelineIncludesArchivedJobs() {
+  var now = new Date();
+  var archivedJobs = [{ job_id: 'ARCHIVED-1', status: 'done', arrival_ts: nowIso_(), done_ts: nowIso_(), size_points: 8, size_class: 'M' }];
+  var state = buildSystemState_([], [], SIGMAFLOW.DEFAULT_CONFIG, now, archivedJobs, []);
+  var currentMonthKey = Utilities.formatDate(now, SIGMAFLOW.TZ, 'yyyy-MM');
+  var bucket = state.pointsMetrics.timeline.filter(function(b) { return b.key === currentMonthKey; })[0];
+  assertTrue_(Boolean(bucket), 'il mese corrente deve comparire nella timeline');
+  assertEquals_(8, bucket.entered_points, 'Andamento del carico deve contare i punti entrati dei casi archiviati');
+  assertEquals_(8, bucket.completed_points, 'Andamento del carico deve contare i punti completati dei casi archiviati');
+}
+
+// "Punti per colonna" (quadro di dettaglio) - jobs_archivio conserva lo
+// status che il caso aveva al momento dell'archiviazione (§8), quindi
+// compare nella colonna 'done' senza logica speciale.
+function testBuildSystemStatePointsByColumnIncludesArchivedJobs() {
+  var now = new Date();
+  var archivedJobs = [{ job_id: 'ARCHIVED-1', status: 'done', arrival_ts: nowIso_(), done_ts: nowIso_(), size_points: 8, size_class: 'M' }];
+  var state = buildSystemState_([], [], SIGMAFLOW.DEFAULT_CONFIG, now, archivedJobs, []);
+  var doneColumn = state.pointsMetrics.by_column.filter(function(c) { return c.key === 'done'; })[0];
+  assertTrue_(Boolean(doneColumn), 'la colonna "done" deve comparire in "Punti per colonna" grazie al caso archiviato');
+  assertEquals_(8, doneColumn.points, 'i punti del caso archiviato devono comparire in "Punti per colonna"');
+}
+
+// Flusso/Rientri/Tempi/Capacita' (§8, Parte 1) sono calcolati da 'visite',
+// non da 'jobs' - verificano che visiteArchivio venga unita correttamente.
+function testBuildSystemStateFlowMetricsIncludeArchivedVisite() {
+  var now = new Date();
+  var visiteArchivio = [{
+    job_id: 'ARCHIVED-1',
+    numero_visita: 1,
+    apertura_ts: nowIso_(),
+    start_ts: nowIso_(),
+    consegna_ts: nowIso_()
+  }];
+  var state = buildSystemState_([], [], SIGMAFLOW.DEFAULT_CONFIG, now, [], visiteArchivio);
+  assertEquals_(1, state.flowMetrics.new_initiatives_observed, 'una visita in visite_archivio deve contare come iniziativa osservata nel Flusso');
+}
+
+// Verifica end-to-end (non solo unitaria su buildSystemState_): un caso
+// realmente archiviato via archiveJob_ deve comparire nelle metriche
+// storiche restituite da getMetrics(), senza comparire tra le card aperte.
+function testGetMetricsIncludesArchivedCaseInHistoricPoints() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Caso da archiviare per metriche', size_class: 'L' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'done' });
+    updateJob({ job_id: created.job_id, invoiced: true });
+    var points = SIGMAFLOW.SIZE_POINTS.L;
+    archiveJob_(created.job_id);
+
+    var metrics = getMetrics();
+    assertTrue_(metrics.success, 'getMetrics deve riuscire con casi in Archivio');
+    var pm = metrics.data.systemState.pointsMetrics;
+    assertTrue_(pm.added_points >= points, 'i punti aggiunti devono contare anche il caso ormai archiviato');
+    assertTrue_(pm.completed_points >= points, 'i punti completati devono contare anche il caso ormai archiviato');
+    assertEquals_(0, pm.open_cards, 'il caso archiviato non deve comparire tra le card aperte');
+  });
+}
+
+// §8/§9: il Cestino non e' MAI letto da nessuna metrica - un job cestinato
+// non deve spostare nemmeno di un punto le metriche storiche, esattamente
+// come se non fosse mai esistito (a differenza dell'Archivio, sopra).
+function testGetMetricsNeverReadsCestino() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var before = getMetrics().data.systemState.pointsMetrics;
+
+    var created = addJob({ title: 'Da cestinare per il test metriche', size_class: 'L' }).data;
+    cestinaJob_(created.job_id);
+
+    var after = getMetrics().data.systemState.pointsMetrics;
+    assertEquals_(before.open_points, after.open_points, 'un job cestinato non deve mai comparire nei punti aperti');
+    assertEquals_(before.added_points, after.added_points, 'un job cestinato non deve mai comparire nei punti aggiunti storici');
+    assertEquals_(before.completed_points, after.completed_points, 'un job cestinato non deve mai comparire nei punti completati storici');
+  });
 }
 
 // Fase L4: prova diretta che getMetrics legge il tempo di servizio da
@@ -2792,6 +3004,25 @@ function resetTestDatabase_(ss) {
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE), VISITE_HEADERS);
   clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG), CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+
+  // N6 (DESIGN_archiviazione.md, §8/§9): getMetrics() ora legge anche
+  // jobs_archivio/visite_archivio (union diretta, nessun filtro) - senza
+  // svuotarli qui, i residui lasciati da test precedenti nello stesso
+  // spreadsheet condiviso della suite (setupSigmaFlow()/archiveJob_ non
+  // erano mai stati puliti tra un test e l'altro, essendo fuori scope
+  // prima di N6) inquinerebbero silenziosamente le metriche di QUALUNQUE
+  // test successivo, non solo quelli che parlano esplicitamente di
+  // archivio. jobs_cestino/visite_cestino ripuliti per lo stesso principio
+  // di igiene, anche se nessuna metrica li legge mai.
+  [
+    [SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, JOB_ARCHIVIO_HEADERS],
+    [SIGMAFLOW.SHEETS.JOBS_CESTINO, JOB_CESTINO_HEADERS],
+    [SIGMAFLOW.SHEETS.VISITE_ARCHIVIO, VISITE_HEADERS],
+    [SIGMAFLOW.SHEETS.VISITE_CESTINO, VISITE_HEADERS]
+  ].forEach(function(entry) {
+    var sheet = ss.getSheetByName(entry[0]);
+    if (sheet) { clearDataRows_(sheet, entry[1]); }
+  });
 }
 
 function readVisiteForJob_(ss, jobId) {
