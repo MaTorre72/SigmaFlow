@@ -1,6 +1,71 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
+## N3 (archiviazione) — codice e test pronti, GATE 🔴 UMANO in attesa di conferma (2026-08-18)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita automaticamente da N2 (nessun gate su N2). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §4.1, §9
+(N3). **Su istruzione esplicita della sessione**: scritto e testato
+tutto il codice del trigger, ma **non eseguito il passo che lo attiva
+per davvero** — fermo qui per la conferma di Marco, esattamente come
+la tabella delle sotto-fasi richiede.
+
+**Codice** (Kanban.gs):
+- `archiveEligibleJobs_()` — scansiona `jobs`, seleziona i casi con
+  `incarico_chiuso_ts` valorizzato e `oggi - incarico_chiuso_ts >=`
+  soglia (config `archiviazione_giorni_default`, default 30 se il
+  valore in config e' vuoto/invalido), li archivia uno per uno
+  **riusando `archiveJob_`** (N2) — stessa regola di eleggibilita' del
+  bottone manuale, un solo punto in cui vive, non duplicata. Un errore
+  su un singolo job (es. concorrenza) non interrompe la scansione degli
+  altri: raccolto in `errors`, non rilanciato. **Non tocca mai il
+  Cestino** — solo archiviazione, come da §4.2/§9 ("il cestino resta
+  sempre manuale, nessuna scadenza automatica").
+- `eseguiArchiviazioneAutomaticaGiornaliera()` — handler pensato per il
+  trigger a tempo, loggato con `Logger.log` (un trigger non ha un
+  chiamante interattivo che legga il valore di ritorno). Non
+  raggiungibile da nessuna azione UI/API.
+- `installaTriggerArchiviazioneAutomatica()` — **contiene**
+  `ScriptApp.newTrigger(...).create()` ma **non e' chiamata da nessun
+  altro codice di questa sessione**: e' la funzione che Marco dovra'
+  eseguire lui stesso dall'editor Apps Script (menu Esegui) per
+  attivare davvero il trigger, dopo aver verificato su TEST il
+  comportamento di `eseguiArchiviazioneAutomaticaGiornaliera`/
+  `archiveEligibleJobs_`. Idempotente: rimuove un trigger preesistente
+  con lo stesso handler prima di crearne uno nuovo (nessun duplicato se
+  eseguita per errore piu' volte).
+
+**Test aggiunti** (`Tests.gs`, harness Node), 6 nuovi:
+`testArchiveEligibleJobsArchivesCasesPastThreshold` (soglia superata),
+`testArchiveEligibleJobsSkipsCasesBelowThreshold` (soglia non
+raggiunta), `testArchiveEligibleJobsSkipsCasesNeverClosed` (mai chiuso),
+`testArchiveEligibleJobsUsesConfiguredThreshold` (soglia diversa dal
+default, letta da config), `testArchiveEligibleJobsNeverTouchesCestino`
+(un job cestinato non e' piu' in `jobs`, quindi la scansione non lo
+tocca — verificato esplicitamente), `testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult`
+(l'handler del trigger produce lo stesso risultato dello scan diretto).
+**104/104 test passati nell'harness Node** (98 preesistenti + 6 nuovi,
+nessuna regressione). `installaTriggerArchiviazioneAutomatica` **non e'
+testata** (chiama `ScriptApp`, non mockato nell'harness, e non e'
+comunque il codice da verificare prima del gate — il gate riguarda
+proprio la sua esecuzione, non la sua correttezza sintattica).
+
+**Push su TEST verificato**: `clasp push --force` (13/13 file), poi
+`clasp pull` isolato in `/tmp/sf-scratch/clasp-verify/` + diff contro
+`apps-script/src/` — 13/13 file identici, 0 differenze. Cartella
+temporanea rimossa a fine verifica.
+
+**GATE 🔴 UMANO (§9, dopo N3) — IN ATTESA**: il codice e' pronto e
+verificato su TEST (test automatici + push confermato), ma il trigger
+**non e' installato**. Prossimo passo per Marco, quando vuole
+procedere: eseguire `installaTriggerArchiviazioneAutomatica` (Kanban.gs)
+dall'editor Apps Script **sul progetto TEST**, poi verificare che scatti
+come previsto prima di considerare l'idea di replicarlo anche altrove.
+Questa sessione autonoma si ferma qui: N4/N5/N6 (vista Archivio/Cestino,
+Duplica, metriche estese all'archivio) restano bloccate dietro questo
+gate, come da runbook — nessuna sotto-fase successiva iniziata.
+
 ## N2 (archiviazione) — DONE, nessun gate (2026-08-18)
 
 Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
@@ -223,21 +288,21 @@ non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
 ("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
 tutti gli effetti.
 
-## Prossima esecuzione — parte da N3
+## Prossima esecuzione — ferma al gate di N3
 
-N2 chiusa in questa stessa sessione (vedi sopra), senza gate: per il
-runbook si procede automaticamente a N3 (in corso più sotto in questa
-stessa sessione, fino al gate esplicito dopo la scrittura del codice —
-non l'attivazione del trigger).
+N2 chiusa in questa stessa sessione, senza gate: per il runbook si è
+proceduto automaticamente a N3, il cui codice/test sono ora pronti e
+verificati su TEST (vedi sezione N3 sopra) — **ma il gate umano dopo N3
+resta aperto**: il trigger non è stato installato, su istruzione
+esplicita di fermarsi lì per la conferma di Marco. Nessuna sotto-fase
+successiva (N4-N6) iniziata.
 
-**Punto di ingresso per la prossima sessione, se N3 non fosse chiusa in
-questa stessa sessione**: [docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md)
-§9, riga N3 — "Trigger automatico a tempo (solo archiviazione da
-chiusura — il cestino resta sempre manuale, nessuna scadenza
-automatica)". **Gate 🔴 Umano dopo N3**: scrivere e testare tutto il
-codice del trigger, ma non eseguire `ScriptApp.newTrigger(...).create()`
-— fermarsi per la conferma esplicita di Marco prima di attivarlo
-davvero, come da runbook.
+**Per Marco**: quando vuoi attivare il trigger, esegui
+`installaTriggerArchiviazioneAutomatica` (Kanban.gs) dall'editor Apps
+Script **sul progetto TEST** — poi conferma qui (o nella prossima
+sessione) per sbloccare N4 e seguenti. Se invece serve rivedere il
+codice prima, il punto di ingresso è
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md) §4.1/§9.
 
 ## Stato generale
 

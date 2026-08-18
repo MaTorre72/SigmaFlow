@@ -1013,6 +1013,92 @@ function archiveJob(params) {
   return archiveJob_(requireParam_(params, 'job_id'));
 }
 
+// N3 (DESIGN_archiviazione.md, §4.1/§9): scansiona 'jobs' per i casi
+// eleggibili all'archiviazione automatica — incarico_chiuso_ts
+// valorizzato e oggi - incarico_chiuso_ts >= archiviazione_giorni_default
+// (config, default 30, sez. 3.3) — e li archivia uno per uno. Riusa
+// archiveJob_ (stessa regola di eleggibilita' del bottone manuale, un
+// solo punto in cui vive) invece di duplicare lo spostamento riga. Solo
+// archiviazione: il Cestino resta sempre manuale, nessuna scadenza
+// automatica lo riguarda (§4.2/§9).
+//
+// Un errore su un singolo job (es. una condizione di gara con un'altra
+// operazione concorrente sullo stesso job_id) non deve interrompere la
+// scansione degli altri: raccolto in errors, non rilanciato.
+function archiveEligibleJobs_() {
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var config = readConfig_();
+  var thresholdDays = Number(config.archiviazione_giorni_default);
+  if (!thresholdDays || thresholdDays <= 0) {
+    thresholdDays = Number(SIGMAFLOW.DEFAULT_CONFIG.archiviazione_giorni_default);
+  }
+  var now = nowIso_();
+
+  var jobs = readTable_(sheet);
+  var eligible = jobs.filter(function(job) {
+    return Boolean(job.incarico_chiuso_ts) && diffDays(job.incarico_chiuso_ts, now) >= thresholdDays;
+  });
+
+  var archivedJobIds = [];
+  var errors = [];
+  eligible.forEach(function(job) {
+    try {
+      archiveJob_(job.job_id);
+      archivedJobIds.push(job.job_id);
+    } catch (err) {
+      errors.push({ job_id: job.job_id, error: err.message });
+    }
+  });
+
+  return {
+    jobs_scanned: jobs.length,
+    jobs_eligible: eligible.length,
+    jobs_archived: archivedJobIds.length,
+    archived_job_ids: archivedJobIds,
+    errors: errors
+  };
+}
+
+// Handler pensato per essere collegato a un trigger giornaliero a tempo
+// (ScriptApp.newTrigger, sotto) — non e' raggiungibile da nessuna azione
+// UI/API, solo dal trigger stesso una volta installato. Loggato invece di
+// restituito silenziosamente: un trigger a tempo non ha un chiamante
+// interattivo che possa leggere il valore di ritorno.
+function eseguiArchiviazioneAutomaticaGiornaliera() {
+  var result = archiveEligibleJobs_();
+  Logger.log(
+    'Archiviazione automatica: ' + result.jobs_archived + '/' + result.jobs_eligible +
+    ' casi eleggibili archiviati (' + result.jobs_scanned + ' scansionati).' +
+    (result.errors.length ? ' Errori: ' + JSON.stringify(result.errors) : '')
+  );
+  return result;
+}
+
+// Installa il trigger giornaliero che chiama eseguiArchiviazioneAutomaticaGiornaliera.
+// GATE UMANO (§9, dopo N3): questa funzione contiene il passo che rende
+// l'archiviazione un processo che scatta da solo, senza supervisione —
+// per questo nessun altro codice di questa sessione la invoca. Va
+// eseguita manualmente da Marco dall'editor Apps Script (menu Esegui ->
+// installaTriggerArchiviazioneAutomatica) solo dopo aver verificato su
+// TEST che eseguiArchiviazioneAutomaticaGiornaliera/archiveEligibleJobs_
+// si comportano come previsto.
+// Idempotente: rimuove un eventuale trigger preesistente con lo stesso
+// handler prima di crearne uno nuovo, cosi' un'esecuzione ripetuta per
+// errore non produce trigger duplicati che scatterebbero piu' volte al
+// giorno.
+function installaTriggerArchiviazioneAutomatica() {
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'eseguiArchiviazioneAutomaticaGiornaliera') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  return ScriptApp.newTrigger('eseguiArchiviazioneAutomaticaGiornaliera')
+    .timeBased()
+    .everyDays(1)
+    .atHour(3)
+    .create();
+}
+
 // §4.2: deleteJob cambia comportamento — non elimina piu' la riga, la
 // sposta nel Cestino. Nome/azione API invariati (routeAction_ non
 // cambia) per non toccare il contratto client/server: solo l'etichetta

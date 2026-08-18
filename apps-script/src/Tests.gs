@@ -275,6 +275,12 @@ function runAllTests() {
     testMoveJobToSheetIsIdempotentWhenCalledTwice,
     testMoveJobClearsIncaricoChiusoTsOnRealReentryFromDone,
     testMoveJobDoesNotClearIncaricoChiusoTsWhenNoNewVisitOpens,
+    testArchiveEligibleJobsArchivesCasesPastThreshold,
+    testArchiveEligibleJobsSkipsCasesBelowThreshold,
+    testArchiveEligibleJobsSkipsCasesNeverClosed,
+    testArchiveEligibleJobsUsesConfiguredThreshold,
+    testArchiveEligibleJobsNeverTouchesCestino,
+    testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult,
     testAmbassadorOption,
     testEditableOptions,
     testDynamicColumnsAndOptions,
@@ -1394,6 +1400,128 @@ function testMoveJobDoesNotClearIncaricoChiusoTsWhenNoNewVisitOpens() {
     var moved = moveJob({ job_id: created.job_id, status: 'wait_authority' });
     assertTrue_(moved.success, 'spostamento tra due colonne di attesa dovrebbe riuscire');
     assertTrue_(Boolean(moved.data.job.incarico_chiuso_ts), 'incarico_chiuso_ts non deve essere toccato se non si apre una nuova visita');
+  });
+}
+
+// --- N3 (DESIGN_archiviazione.md, §4.1/§9): trigger automatico di
+// archiviazione. Solo il codice scansionato/archiviante e' testato qui -
+// installaTriggerArchiviazioneAutomatica (che chiama ScriptApp.newTrigger)
+// non e' invocata da nessun test, per lo stesso motivo per cui non e'
+// invocata da nessun altro codice di produzione: e' il passo dietro il
+// gate umano di §9, riservato all'esecuzione manuale di Marco dopo
+// conferma. ---
+
+function testArchiveEligibleJobsArchivesCasesPastThreshold() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Chiuso da 35 giorni', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.incarico_chiuso_ts = testIsoDaysAgo_(new Date(), 35);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = archiveEligibleJobs_();
+    assertEquals_(1, result.jobs_archived, 'un caso chiuso da 35 giorni (soglia default 30) deve essere archiviato');
+    assertTrue_(result.archived_job_ids.indexOf(created.job_id) !== -1, 'il job_id specifico deve comparire tra gli archiviati');
+
+    var jobsAfter = readTable_(sheet).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(0, jobsAfter.length, 'il job deve aver lasciato jobs');
+
+    var archivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, archivio.length, 'il job deve trovarsi in jobs_archivio');
+  });
+}
+
+function testArchiveEligibleJobsSkipsCasesBelowThreshold() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Chiuso da soli 10 giorni', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.incarico_chiuso_ts = testIsoDaysAgo_(new Date(), 10);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = archiveEligibleJobs_();
+    assertTrue_(result.archived_job_ids.indexOf(created.job_id) === -1, 'un caso chiuso da soli 10 giorni (soglia default 30) non deve essere archiviato');
+
+    var jobsAfter = readTable_(sheet).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, jobsAfter.length, 'il job deve restare su jobs');
+  });
+}
+
+function testArchiveEligibleJobsSkipsCasesNeverClosed() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Mai chiuso', size_class: 'S' }).data;
+
+    var result = archiveEligibleJobs_();
+    assertTrue_(result.archived_job_ids.indexOf(created.job_id) === -1, 'un caso senza incarico_chiuso_ts non deve mai essere considerato eleggibile');
+  });
+}
+
+function testArchiveEligibleJobsUsesConfiguredThreshold() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    writeConfigValue_('archiviazione_giorni_default', '5');
+
+    var created = addJob({ title: 'Chiuso da 10 giorni, soglia a 5', size_class: 'S' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.incarico_chiuso_ts = testIsoDaysAgo_(new Date(), 10);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = archiveEligibleJobs_();
+    assertTrue_(result.archived_job_ids.indexOf(created.job_id) !== -1, 'con soglia configurata a 5 giorni, un caso chiuso da 10 deve essere archiviato');
+  });
+}
+
+function testArchiveEligibleJobsNeverTouchesCestino() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Cestinato, non archiviabile automaticamente', size_class: 'S' }).data;
+    cestinaJob_(created.job_id);
+
+    var result = archiveEligibleJobs_();
+    assertTrue_(result.archived_job_ids.indexOf(created.job_id) === -1, 'un job nel cestino non e\' piu\' in jobs: la scansione non lo tocca');
+
+    var cestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, cestino.length, 'il job deve restare nel cestino, l\'archiviazione automatica non lo riguarda mai');
+  });
+}
+
+function testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Via handler del trigger', size_class: 'S' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.incarico_chiuso_ts = testIsoDaysAgo_(new Date(), 40);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var result = eseguiArchiviazioneAutomaticaGiornaliera();
+    assertTrue_(result.archived_job_ids.indexOf(created.job_id) !== -1, 'il handler del trigger deve archiviare lo stesso job che archiveEligibleJobs_ archivierebbe');
   });
 }
 
