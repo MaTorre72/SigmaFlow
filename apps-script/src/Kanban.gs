@@ -617,6 +617,17 @@ function addActivityEvent(params) {
   var log = parseActivityLog_(job.activity_log_json);
   var candidate = buildActivityEventCandidate_(params, log);
 
+  // N1 (DESIGN_archiviazione.md, §8b): 'old' di un evento 'correction'
+  // nuovo non arriva mai dal client (non e' nel form) — si registra qui
+  // il valore reale del campo PRIMA della correzione, letto dal job
+  // appena caricato. Su modifica di un evento gia' esistente resta
+  // invece quello originale (ereditato da 'existing' in
+  // updateActivityEvent): un correttivo storico non riscrive il proprio
+  // "prima", solo il proprio "dopo".
+  if (candidate.type === 'correction' && candidate.old === undefined) {
+    candidate.old = job[candidate.field] !== undefined ? job[candidate.field] : '';
+  }
+
   var validation = validateSequence_(log, candidate);
   if (validation.hardErrors.length) {
     return ok_({ ok: false, hardErrors: validation.hardErrors });

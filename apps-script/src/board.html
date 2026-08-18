@@ -140,6 +140,7 @@
           <select id="activity-form-type">
             <option value="move">Spostamento</option>
             <option value="note">Nota</option>
+            <option value="correction">Correzione</option>
           </select>
         </label>
         <div id="activity-form-move-fields" class="activity-form-fields">
@@ -153,6 +154,20 @@
         <div id="activity-form-note-fields" class="activity-form-fields" hidden>
           <label>Testo
             <textarea id="activity-form-note-text" rows="3"></textarea>
+          </label>
+        </div>
+        <div id="activity-form-correction-fields" class="activity-form-fields" hidden>
+          <label>Campo da correggere
+            <select id="activity-form-correction-field">
+              <option value="arrival_ts">Data creazione (arrival_ts)</option>
+              <option value="incarico_chiuso_ts">Chiusura incarico (incarico_chiuso_ts)</option>
+            </select>
+          </label>
+          <label>Nuovo valore
+            <input id="activity-form-correction-new" type="datetime-local">
+          </label>
+          <label>Motivo
+            <input id="activity-form-correction-reason" type="text" placeholder="Motivo della correzione...">
           </label>
         </div>
         <div class="form-actions">

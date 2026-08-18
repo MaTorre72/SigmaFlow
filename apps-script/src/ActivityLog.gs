@@ -117,6 +117,20 @@ function validateSequence_(events, candidate) {
     hardErrors.push('REASON_OBBLIGATORIA');
   }
 
+  // N1 (DESIGN_archiviazione.md, §8b): un evento 'correction' deve
+  // indicare un campo correggibile (whitelist SIGMAFLOW.CORRECTABLE_FIELDS,
+  // non un editor generico su qualunque colonna di jobs) e un nuovo
+  // valore che sia davvero una data valida — entrambi i campi che
+  // checkStructuralAlignment_/applyStructuralAlignment_ scriveranno poi
+  // su job[candidate.field].
+  if (candidate.type === 'correction') {
+    if (SIGMAFLOW.CORRECTABLE_FIELDS.indexOf(candidate.field) === -1) {
+      hardErrors.push('CAMPO_NON_CORREGGIBILE');
+    } else if (!candidate.new || !isValidIso8601_(candidate.new)) {
+      hardErrors.push('DATA_NON_VALIDA');
+    }
+  }
+
   // Se ci sono hard error non ha senso calcolare i warning di sequenza:
   // il candidato non verra' comunque scritto.
   if (hardErrors.length) {
@@ -208,6 +222,17 @@ function checkStructuralAlignment_(job, candidate) {
     }
   }
 
+  // N1 (DESIGN_archiviazione.md, §8b): un evento 'correction' scrive
+  // direttamente il campo corretto sul job, riusando lo stesso percorso
+  // di applicazione (applyStructuralAlignment_) gia' usato dai warning
+  // generati dai move — nessuna via separata per aggiornare jobs.
+  // Whitelist esplicita (SIGMAFLOW.CORRECTABLE_FIELDS), gia' verificata
+  // come hard error in validateSequence_ — qui il campo e' per costruzione
+  // gia' valido se si arriva fin qui.
+  if (candidate.type === 'correction' && SIGMAFLOW.CORRECTABLE_FIELDS.indexOf(candidate.field) !== -1) {
+    warnings.push({ field: candidate.field, currentValue: job[candidate.field] || '', suggestedValue: candidate.new });
+  }
+
   if (candidate.type === 'move' && candidate.from === null) {
     // L'evento con from null e' per costruzione l'evento di creazione
     // della card (addJob): la sua data e' sempre la fonte di arrival_ts,
@@ -216,7 +241,14 @@ function checkStructuralAlignment_(job, candidate) {
     if (!job.arrival_ts || compareTs_(job.arrival_ts, candidate.ts) !== 0) {
       warnings.push({ field: 'arrival_ts', currentValue: job.arrival_ts || '', suggestedValue: candidate.ts });
     }
-  } else if (job.arrival_ts && compareTs_(candidate.ts, job.arrival_ts) < 0) {
+  } else if (candidate.type !== 'correction' && job.arrival_ts && compareTs_(candidate.ts, job.arrival_ts) < 0) {
+    // 'correction' esclusa qui apposta (N1): ha gia' il proprio warning
+    // esplicito sopra, con suggestedValue = candidate.new (il valore
+    // scelto dall'utente) — non candidate.ts (la data dell'EVENTO di
+    // correzione, che e' tipicamente oggi anche quando corregge una data
+    // lontana nel passato). Senza questa esclusione le due regole
+    // scriverebbero due warning sullo stesso campo, e l'ultimo applicato
+    // vincerebbe silenziosamente su quello voluto dall'utente.
     warnings.push({ field: 'arrival_ts', currentValue: job.arrival_ts, suggestedValue: candidate.ts });
   }
 

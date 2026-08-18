@@ -219,6 +219,8 @@ function runAllTests() {
   var results = [];
   var tests = [
     testSetupSchema,
+    testSetupSchemaCreaFogliArchivioECestino,
+    testSetupSchemaSeedaArchiviazioneGiorniDefault,
     testAddJob,
     testMoveJobLifecycle,
     testAutomaticReworkFromStandBy,
@@ -260,6 +262,10 @@ function runAllTests() {
     testAddActivityEventSequenceWarningsConForce,
     testAddActivityEventAutoAllineaCampoStrutturato,
     testAddActivityEventNotaValida,
+    testAddActivityEventCorrectionArrivalTsValida,
+    testAddActivityEventCorrectionIncaricoChiusoTsValida,
+    testAddActivityEventCorrectionCampoNonCorreggibile,
+    testAddActivityEventCorrectionDataNonValida,
     testUpdateActivityEventManual,
     testUpdateActivityEventCorreggeEventoAutoDiCreazione,
     testUpdateActivityEventCorreggeEventoAutoDiSpostamento,
@@ -324,6 +330,39 @@ function testSetupSchema() {
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE), VISITE_HEADERS);
     assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG), CONFIG_HEADERS);
     assertTrue_(!ss.getSheetByName(SIGMAFLOW.SHEETS.CASES), 'foglio cases dismesso, non deve piu\' esistere');
+  });
+}
+
+// N1 (DESIGN_archiviazione.md, sez. 3): i quattro fogli additivi
+// (archivio/cestino) devono esistere dopo setupSigmaFlow con
+// l'intestazione attesa — JOB_HEADERS piu' il campo timestamp specifico
+// per i due fogli jobs_*, VISITE_HEADERS invariata per i due visite_*.
+function testSetupSchemaCreaFogliArchivioECestino() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    // resetTestDatabase_ prepara solo jobs/visite/config (uso comune a
+    // tutti gli altri test): i quattro fogli archivio/cestino li crea
+    // solo setupSigmaFlow, qui chiamata esplicitamente per verificare
+    // il comportamento reale di setup su un database altrimenti vuoto.
+    setupSigmaFlow();
+    assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO), JOB_ARCHIVIO_HEADERS);
+    assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO), VISITE_ARCHIVIO_HEADERS);
+    assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO), JOB_CESTINO_HEADERS);
+    assertHeaders_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO), VISITE_CESTINO_HEADERS);
+  });
+}
+
+// N1 (DESIGN_archiviazione.md, sez. 3.3): archiviazione_giorni_default
+// deve comparire in config con il default 30 dopo un setup su un
+// database vuoto.
+function testSetupSchemaSeedaArchiviazioneGiorniDefault() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    var config = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+    var row = config.filter(function(r) { return r.key === 'archiviazione_giorni_default'; })[0];
+    assertTrue_(Boolean(row), 'archiviazione_giorni_default dovrebbe esistere in config dopo il setup');
+    assertEquals_('30', String(row.value), 'default archiviazione_giorni_default');
   });
 }
 
@@ -1485,6 +1524,111 @@ function testAddActivityEventNotaValida() {
 
     assertTrue_(result.data.ok === true, 'evento note dovrebbe riuscire');
     assertEquals_('promemoria di test', result.data.event.note, 'nota salvata correttamente');
+  });
+}
+
+// N1 (DESIGN_archiviazione.md, §8b): un evento 'correction' su un campo
+// nella whitelist (SIGMAFLOW.CORRECTABLE_FIELDS) con una data valida deve
+// riuscire e scrivere il nuovo valore direttamente su jobs, tramite lo
+// stesso percorso di allineamento gia' usato dai warning dei 'move'
+// (applyStructuralAlignment_).
+function testAddActivityEventCorrectionArrivalTsValida() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Correzione arrival_ts valida', size_class: 'M' });
+    var nuovoValore = testTsMinutesAgo_(200);
+
+    var result = addActivityEvent({
+      job_id: jobId,
+      type: 'correction',
+      ts: testTsMinutesAgo_(10),
+      field: 'arrival_ts',
+      new: nuovoValore,
+      reason: 'data reale diversa da quella registrata'
+    });
+
+    assertTrue_(result.data.ok === true, 'correzione arrival_ts valida dovrebbe riuscire');
+    assertEquals_('arrival_ts', result.data.event.field, 'field salvato nell\'evento');
+    assertEquals_(nuovoValore, result.data.event.new, 'new salvato nell\'evento');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
+    assertEquals_(nuovoValore, job.arrival_ts, 'arrival_ts allineato al nuovo valore corretto');
+  });
+}
+
+// Stesso percorso, sul secondo campo aggiunto alla whitelist in questa
+// sotto-fase: incarico_chiuso_ts (§8b), non ancora valorizzato sul job
+// di test — verifica che 'old' venga registrato come stringa vuota, non
+// undefined (job[candidate.field] non ancora presente sulla riga).
+function testAddActivityEventCorrectionIncaricoChiusoTsValida() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Correzione incarico_chiuso_ts valida', size_class: 'M' });
+    var nuovoValore = testTsMinutesAgo_(5);
+
+    var result = addActivityEvent({
+      job_id: jobId,
+      type: 'correction',
+      ts: testTsMinutesAgo_(1),
+      field: 'incarico_chiuso_ts',
+      new: nuovoValore,
+      reason: 'la spunta Chiuso e\' stata premuta in ritardo'
+    });
+
+    assertTrue_(result.data.ok === true, 'correzione incarico_chiuso_ts valida dovrebbe riuscire');
+    assertEquals_('', result.data.event.old, 'old registrato vuoto: il campo non era mai stato valorizzato');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
+    assertEquals_(nuovoValore, job.incarico_chiuso_ts, 'incarico_chiuso_ts allineato al nuovo valore corretto');
+  });
+}
+
+// Un campo fuori dalla whitelist (qui: 'title', una colonna reale di
+// jobs ma non un campo per cui esiste un percorso di correzione pensato)
+// deve essere rifiutato con CAMPO_NON_CORREGGIBILE, senza scrivere nulla.
+function testAddActivityEventCorrectionCampoNonCorreggibile() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Campo non correggibile', size_class: 'M' });
+
+    var result = addActivityEvent({
+      job_id: jobId,
+      type: 'correction',
+      ts: testTsMinutesAgo_(10),
+      field: 'title',
+      new: testTsMinutesAgo_(5),
+      reason: 'tentativo su campo non whitelisted'
+    });
+
+    assertTrue_(result.data.ok === false, 'campo non correggibile: ok false');
+    assertTrue_(result.data.hardErrors.indexOf('CAMPO_NON_CORREGGIBILE') !== -1, 'hardErrors contiene CAMPO_NON_CORREGGIBILE');
+
+    var log = getActivityLog({ job_id: jobId }).data.log;
+    assertEquals_(1, log.length, 'nessuna scrittura extra: solo l\'evento di creazione');
+  });
+}
+
+// Un valore 'new' che non e' una data ISO8601 valida deve essere
+// rifiutato con DATA_NON_VALIDA, anche su un campo whitelisted.
+function testAddActivityEventCorrectionDataNonValida() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Data non valida', size_class: 'M' });
+
+    var result = addActivityEvent({
+      job_id: jobId,
+      type: 'correction',
+      ts: testTsMinutesAgo_(10),
+      field: 'arrival_ts',
+      new: 'non-e-una-data',
+      reason: 'valore malformato'
+    });
+
+    assertTrue_(result.data.ok === false, 'data non valida: ok false');
+    assertTrue_(result.data.hardErrors.indexOf('DATA_NON_VALIDA') !== -1, 'hardErrors contiene DATA_NON_VALIDA');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
+    assertTrue_(Boolean(job.arrival_ts), 'arrival_ts non deve essere svuotato da una correzione rifiutata');
   });
 }
 

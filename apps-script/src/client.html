@@ -960,12 +960,15 @@
     incarico_ts: 'Data incarico (incarico_ts)',
     prep_ts: 'Data inizio preparazione (prep_ts)',
     start_ts: 'Data inizio lavorazione (start_ts)',
-    done_ts: 'Data completamento (done_ts)'
+    done_ts: 'Data completamento (done_ts)',
+    incarico_chiuso_ts: 'Chiusura incarico (incarico_chiuso_ts)'
   };
   var HARD_ERROR_MESSAGES_ = {
     TS_IN_FUTURO: 'La data non puo\' essere nel futuro.',
     COLONNA_NON_TROVATA: 'La colonna selezionata non e\' valida.',
-    REASON_OBBLIGATORIA: 'Il motivo della correzione e\' obbligatorio.'
+    REASON_OBBLIGATORIA: 'Il motivo della correzione e\' obbligatorio.',
+    CAMPO_NON_CORREGGIBILE: 'Il campo selezionato non e\' correggibile da qui.',
+    DATA_NON_VALIDA: 'Il nuovo valore non e\' una data valida.'
   };
   var SEQUENCE_WARNING_MESSAGES_ = {
     SEQUENZA_MODIFICATA: function(w) {
@@ -1155,6 +1158,7 @@
     var type = document.getElementById('activity-form-type').value;
     document.getElementById('activity-form-move-fields').hidden = type !== 'move';
     document.getElementById('activity-form-note-fields').hidden = type !== 'note';
+    document.getElementById('activity-form-correction-fields').hidden = type !== 'correction';
   }
 
   function validateActivityFormTs_() {
@@ -1186,12 +1190,18 @@
       document.getElementById('activity-form-to').value = eventToEdit.type === 'move' ? (eventToEdit.to || '') : '';
       document.getElementById('activity-form-move-note').value = eventToEdit.type === 'move' ? (eventToEdit.note || '') : '';
       document.getElementById('activity-form-note-text').value = eventToEdit.type === 'note' ? (eventToEdit.note || '') : '';
+      document.getElementById('activity-form-correction-field').value = eventToEdit.type === 'correction' ? (eventToEdit.field || 'arrival_ts') : 'arrival_ts';
+      document.getElementById('activity-form-correction-new').value = eventToEdit.type === 'correction' ? isoToDatetimeLocal_(eventToEdit.new || '') : '';
+      document.getElementById('activity-form-correction-reason').value = eventToEdit.type === 'correction' ? (eventToEdit.reason || '') : '';
     } else {
       tsInput.value = isoToDatetimeLocal_(new Date().toISOString());
       typeSelect.value = 'move';
       document.getElementById('activity-form-to').value = '';
       document.getElementById('activity-form-move-note').value = '';
       document.getElementById('activity-form-note-text').value = '';
+      document.getElementById('activity-form-correction-field').value = 'arrival_ts';
+      document.getElementById('activity-form-correction-new').value = '';
+      document.getElementById('activity-form-correction-reason').value = '';
     }
     updateActivityFormFieldsVisibility_();
     document.getElementById('modal-activity-form').hidden = false;
@@ -1218,6 +1228,10 @@
       if (note) { payload.note = note; }
     } else if (payload.type === 'note') {
       payload.note = document.getElementById('activity-form-note-text').value.trim();
+    } else if (payload.type === 'correction') {
+      payload.field = document.getElementById('activity-form-correction-field').value;
+      payload.new = document.getElementById('activity-form-correction-new').value;
+      payload.reason = document.getElementById('activity-form-correction-reason').value.trim();
     }
     if (state.activityFormEditId) {
       payload.event_id = state.activityFormEditId;
@@ -1238,6 +1252,14 @@
     }
     if (type === 'note' && !document.getElementById('activity-form-note-text').value.trim()) {
       errorEl.hidden = false; errorEl.textContent = 'Inserisci il testo della nota.'; return;
+    }
+    if (type === 'correction') {
+      if (!document.getElementById('activity-form-correction-new').value) {
+        errorEl.hidden = false; errorEl.textContent = 'Inserisci il nuovo valore.'; return;
+      }
+      if (!document.getElementById('activity-form-correction-reason').value.trim()) {
+        errorEl.hidden = false; errorEl.textContent = 'Inserisci il motivo della correzione.'; return;
+      }
     }
 
     var payload = buildActivityFormPayload_();

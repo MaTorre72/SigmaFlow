@@ -1,5 +1,69 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-16
+Aggiornato: 2026-08-18
+
+## In corso — N1 (archiviazione), codice e test completi, verifica push TEST bloccata
+
+Sessione autonoma (scheduled task, RUNBOOK_esecuzione_autonoma.md) su
+`feat/n1-archiviazione-schema`, a partire da lavoro di sotto-fase N1
+già presente non committato nel working tree. Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §9 (N1),
+§10 (criteri), §8b.
+
+**Codice N1 (già presente + completato in questa sessione)**:
+- Schema additivo (Schema.gs/Constants.gs): fogli `jobs_archivio`
+  (`JOB_HEADERS` + `archiviato_ts`), `visite_archivio`
+  (`VISITE_HEADERS` invariata), `jobs_cestino` (`JOB_HEADERS` +
+  `cestinato_ts`), `visite_cestino` (`VISITE_HEADERS` invariata),
+  creati da `setupSigmaFlow()`. Config: `archiviazione_giorni_default`
+  (default 30). `SCHEMA_VERSION` 12→13.
+- §8b — `incarico_chiuso_ts` correggibile via Cronologia: ricognizione
+  confermata che il tipo evento `correction` esisteva già
+  strutturalmente (richiede `reason`) ma il menu tipo-evento in UI era
+  stato ridotto a "Spostamento"/"Nota" — opzione "Correzione"
+  ripristinata in `board.html`. Whitelist esplicita
+  `SIGMAFLOW.CORRECTABLE_FIELDS = ['arrival_ts', 'incarico_chiuso_ts']`
+  (Constants.gs); `validateSequence_`/`checkStructuralAlignment_`
+  (ActivityLog.gs) validano campo+data (`CAMPO_NON_CORREGGIBILE`/
+  `DATA_NON_VALIDA`) e applicano la correzione a `jobs` tramite lo
+  stesso percorso `applyStructuralAlignment_` già usato dai warning dei
+  `move` — nessuna via di scrittura parallela. Form di Cronologia
+  (`client.html`) esteso con i campi Campo/Nuovo valore/Motivo.
+
+**Test aggiunti** (`Tests.gs`, harness Node): `testSetupSchemaCreaFogliArchivioECestino`,
+`testSetupSchemaSeedaArchiviazioneGiorniDefault`,
+`testAddActivityEventCorrectionArrivalTsValida`,
+`testAddActivityEventCorrectionIncaricoChiusoTsValida`,
+`testAddActivityEventCorrectionCampoNonCorreggibile`,
+`testAddActivityEventCorrectionDataNonValida`. **87/87 test passati**
+(81 preesistenti + 6 nuovi, nessuna regressione).
+
+**Bloccato — punto 3 della Definition of Done (RUNBOOK, "push su TEST
+verificato con `clasp pull` isolato + diff — 0 differenze") non
+verificabile in questa sessione**: `clasp push` fallisce con
+`invalid_grant`/`invalid_rapt` (Google richiede un nuovo login
+interattivo, il token salvato non basta più). Non essendo
+un'operazione che questa sessione può completare (richiede consenso
+OAuth interattivo di Marco, non credenziali che questa sessione possa
+o debba gestire), il push reale su TEST e la sua verifica via `clasp
+pull` restano da fare. **Nessun codice è stato eseguito contro lo
+spreadsheet TEST o PROD reale in questa sessione** — solo harness Node
+locale.
+
+**Non ancora committato su git**: le modifiche restano nel working
+tree di `feat/n1-archiviazione-schema`, non ancora `git commit` — in
+attesa di verificare prima che valga la pena fissarle (vedi sotto,
+prossimo passo).
+
+**Fuori scope di N1, per §9 del design**: §8c (svuotamento automatico
+di `incarico_chiuso_ts` su rientro reale) è N2, non N1 — non toccato
+qui nonostante compaia nello stesso documento.
+
+**Prossimo passo**: Marco deve eseguire `clasp login` (reauth
+interattivo) prima che una sessione futura possa completare il push
+su TEST e la verifica con `clasp pull` isolato. Fatto quello, N1 potrà
+essere marcata DONE per intero (gate 🔴 Umano di §9 comunque previsto
+subito dopo, indipendentemente da questo blocco tecnico) e si potrà
+passare a N2.
 
 ## Stato generale
 
