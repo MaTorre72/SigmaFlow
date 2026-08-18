@@ -1,6 +1,16 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
+## N3 (archiviazione) — CHIUSA, gate confermato da Marco (2026-08-18)
+
+Dopo il fix dello scope OAuth (sotto), Marco ha rieseguito
+`installaTriggerArchiviazioneAutomatica` su TEST: **"ho riprovato, ha
+funzionato — trigger installato"**. Trigger giornaliero
+(`eseguiArchiviazioneAutomaticaGiornaliera`, ore 3:00) attivo sul
+progetto TEST. **Gate 🔴 Umano di §9, dopo N3 — CONFERMATO.** N3 è
+chiusa a tutti gli effetti; N4 (vista Archivio/Cestino) è la prossima
+sotto-fase, senza gate.
+
 ## N3 (archiviazione) — bug trovato al gate: scope OAuth mancante, corretto (2026-08-18)
 
 Marco ha eseguito `installaTriggerArchiviazioneAutomatica` (Kanban.gs)
