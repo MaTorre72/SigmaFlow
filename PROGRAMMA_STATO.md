@@ -1,7 +1,43 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
-## N3 (archiviazione) — codice e test pronti, GATE 🔴 UMANO in attesa di conferma (2026-08-18)
+## N3 (archiviazione) — bug trovato al gate: scope OAuth mancante, corretto (2026-08-18)
+
+Marco ha eseguito `installaTriggerArchiviazioneAutomatica` (Kanban.gs)
+dall'editor Apps Script su TEST, come previsto dal gate sotto — fallita
+con:
+
+```
+Exception: Specified permissions are not sufficient to call ScriptApp.getProjectTriggers.
+Required permissions: https://www.googleapis.com/auth/script.scriptapp
+```
+
+**Causa, implementazione non design**: il manifest
+(`apps-script/src/appsscript.json`) dichiarava solo
+`spreadsheets`/`script.container.ui` in `oauthScopes` — nessun codice
+precedente a N3 aveva mai chiamato `ScriptApp.getProjectTriggers()`/
+`ScriptApp.newTrigger()`, quindi lo scope non era mai stato necessario
+finora. Non rilevabile dall'harness Node (mocka `ScriptApp` senza
+simulare gli scope OAuth reali) né dai 104/104 test — un gap tra
+verifica automatica e ambiente GAS reale, stesso tipo di caso già
+capitato in N1 (bug trovato solo su GAS reale, vedi sezione N1 sotto).
+
+**Corretto**: aggiunto `https://www.googleapis.com/auth/script.scriptapp`
+a `oauthScopes`. 104/104 test invariati (il fix non tocca logica, solo
+manifest). Push su TEST verificato di nuovo (`clasp push --force` poi
+`clasp pull` isolato in `/tmp/sf-scratch/` + diff, 13/13 file
+identici).
+
+**Nota per Marco**: cambiare gli scope OAuth del manifest tipicamente
+richiede una nuova autorizzazione — al prossimo tentativo di eseguire
+`installaTriggerArchiviazioneAutomatica` (o qualunque funzione) da
+editor Apps Script, aspettati la richiesta di consenso su Google a
+rivedere/accettare i permessi aggiornati prima che la funzione giri.
+
+**GATE 🔴 UMANO ancora in attesa**: il trigger resta da installare.
+Riprovare `installaTriggerArchiviazioneAutomatica` (Kanban.gs) su TEST.
+
+## N3 (archiviazione) — codice e test pronti, primo tentativo del gate (2026-08-18, poi fallito su scope OAuth, vedi sopra)
 
 Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
 proseguita automaticamente da N2 (nessun gate su N2). Riferimento:
