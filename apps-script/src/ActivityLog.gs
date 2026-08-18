@@ -638,6 +638,17 @@ function eseguiMigrazioneCompleta_(ss, params) {
 
   try {
     var schemaAlignment = setupSigmaFlow();
+    // N1: setupSigmaFlow() apre un proprio riferimento allo spreadsheet
+    // (getSpreadsheet_ -> SpreadsheetApp.openById), indipendente da
+    // 'ss' qui sopra. Finche' setupSigmaFlow toccava poco lo schema il
+    // vecchio 'ss' restava comunque valido; ora che cancella 'cases' e
+    // crea cinque fogli nuovi nella stessa chiamata, il riferimento
+    // vecchio puo' restare agganciato a uno stato di struttura non piu'
+    // valido — causa vera (non solo un hiccup del servizio, come
+    // ipotizzato inizialmente) di "Sheet non trovato" in
+    // migrateActivityLogData_ subito dopo, trovata da Marco durante il
+    // collaudo N1. Un openById successivo riallinea il riferimento.
+    ss = SpreadsheetApp.openById(ss.getId());
     var backfillActivityLog = migrateActivityLogData_(ss);
     var columnsJson = fixPrepColumnRole_(ss);
     var visiteMigration = migrateVisiteFromHistory_(ss);
