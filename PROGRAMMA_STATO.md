@@ -1,6 +1,108 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-18
 
+## N2 (archiviazione) — DONE, nessun gate (2026-08-18)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita da dove N1 si era fermata. Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §4, §6b,
+§8c, §9 (N2), §10.
+
+**Codice**:
+- `moveJobToSheet_(jobId, sourceJobsSheetName, sourceVisiteSheetName, destJobsSheetName, destVisiteSheetName, destJobHeaders, extraFields, transformJobFn)`
+  (Kanban.gs) — unica funzione di spostamento riga, sotto
+  `LockService`, che sposta job + tutte le sue righe `visite` da un
+  foglio sorgente a uno di destinazione, valorizza i campi extra
+  richiesti (`archiviato_ts`/`cestinato_ts`) e applica un'eventuale
+  trasformazione del job prima di scriverlo (usata solo dal fallback di
+  colonna in `ripristinaJob_`). Idempotente: se il job non e' piu' nella
+  sorgente ma e' gia' nella destinazione, restituisce
+  `{ already_moved: true }` invece di un errore — copre sia il doppio
+  click sia una chiamata concorrente nella stessa finestra di lock.
+  `deleteVisiteRowsForJob_` elimina le righe `visite` del job dal basso
+  verso l'alto (evita lo slittamento degli indici durante il ciclo).
+- `archiveJob_(jobId)` — wrapper verso `jobs_archivio`/`visite_archivio`,
+  **rifiuta** (throw) un job senza `incarico_chiuso_ts` valorizzato: e'
+  l'unico punto in cui vive la regola di eleggibilita' (§4.1), riusata
+  sia dal bottone manuale sia — in N3 — dal trigger automatico.
+  `archiveJob(params)` e' il thin wrapper esposto via `routeAction_`.
+- `cestinaJob_(jobId)` — wrapper verso `jobs_cestino`/`visite_cestino`,
+  nessuna eleggibilita' richiesta (§4.2).
+- `ripristinaJob_(jobId)` — simmetrico inverso (da Cestino a
+  `jobs`/`visite`, §6b): se lo `status` conservato non corrisponde piu'
+  a nessuna colonna esistente, ricade sulla prima colonna di ruolo
+  `backlog` (`transformJobFn`).
+- `deleteJob(params)` (Kanban.gs) **cambia comportamento**: non elimina
+  piu' la riga, chiama `cestinaJob_` — stessa azione API (`deleteJob` in
+  `routeAction_`), nessuna rottura del contratto client/server.
+- §8c: `moveJob` svuota `incarico_chiuso_ts` quando la mossa apre una
+  nuova visita (`closesVisit`) su un caso gia' marcato "Chiuso" — un
+  rientro reale annulla una chiusura ormai superata. Tocca solo quel
+  campo, non `invoiced` (rimasto di competenza esclusiva di `updateJob`,
+  §1) — scelta letta cosi' dal design, non estesa di iniziativa.
+- Frontend (`board.html`/`client.html`): bottone "Archivia" nel modale
+  (`modal-archive-button`) abilitato solo quando il job aperto ha
+  `incarico_chiuso_ts` valorizzato (`updateArchiveButtonState_`,
+  richiamata da `openCardModal`/`openNewJobModal`); click ->
+  `archiveJobFromModal` (conferma, `callApi('archiveJob', ...)`,
+  rimozione ottimistica della card, rollback su errore — stesso pattern
+  di `deleteJob`/`moveJob` lato client). Bottone "x" sulla card e la sua
+  conferma aggiornati per riflettere lo spostamento nel Cestino (non
+  piu' "Eliminare?", ma "La card verra' spostata nel Cestino. Potrai
+  ripristinarla o eliminarla definitivamente in seguito.") — nessun
+  cambio di comportamento server oltre a quello di `deleteJob` sopra.
+
+**Test aggiunti** (`Tests.gs`, harness Node), 11 nuovi:
+`testArchiveJobMovesJobAndVisiteToArchivio`,
+`testArchiveJobRejectsCaseNotClosed`,
+`testArchiveJobIsIdempotentOnSecondCall`,
+`testArchiveJobApiActionRejectsCaseNotClosed`,
+`testCestinaJobMovesJobAndVisiteRegardlessOfClosure`,
+`testDeleteJobMovesToCestinoInsteadOfDeleting`,
+`testRipristinaJobRestoresJobAndVisiteToOriginalStatus`,
+`testRipristinaJobFallsBackToBacklogColumnWhenStatusNoLongerExists`,
+`testMoveJobToSheetIsIdempotentWhenCalledTwice`,
+`testMoveJobClearsIncaricoChiusoTsOnRealReentryFromDone`,
+`testMoveJobDoesNotClearIncaricoChiusoTsWhenNoNewVisitOpens`.
+**98/98 test passati nell'harness Node** (87 preesistenti + 11 nuovi,
+nessuna regressione). Nota tecnica per chi tocca ancora questi test:
+`resetTestDatabase_` svuota solo `jobs`/`visite`/`config` tra un test e
+l'altro, non `jobs_archivio`/`jobs_cestino` (fuori dal suo scopo,
+precedente a N2) — lo spreadsheet di test e' condiviso da tutta la
+suite, quindi le asserzioni su quei due fogli filtrano sempre per
+`job_id` invece di assumere la lunghezza assoluta della tabella (due
+asserzioni non filtrate sono state trovate e corrette in questa stessa
+sessione, prima del giro verde).
+
+**Push su TEST verificato**: `clasp push --force` (13/13 file), poi
+`clasp pull` isolato in `/tmp/sf-scratch/clasp-verify-n2/` + diff contro
+`apps-script/src/` — 13/13 file identici, 0 differenze. Cartella
+temporanea rimossa a fine verifica (nessuna credenziale o dato
+persistito fuori da `/tmp/sf-scratch/`).
+
+**Punti di §8d toccati in N2, non esaustivamente**:
+- *Concorrenza*: non affrontata con un messaggio dedicato — ma
+  `moveJobToSheet_` throw "Job non trovato: X" se il job non e' ne' in
+  sorgente ne' in destinazione, che e' il caso reale di un job
+  archiviato/cestinato nel frattempo da un altro utente mentre il primo
+  aveva ancora il modale aperto con dati non aggiornati. Messaggio
+  funzionale ma generico, non la frase dedicata ipotizzata dal design —
+  da rivedere in una sessione UI se Marco lo giudica insufficiente in
+  uso reale.
+- Vista Archivio/Cestino, ricerca/filtro, quadro Cap.13-15: non in scope
+  di N2, rimangono N4/N6 come da tabella §9.
+
+**Criteri di accettazione §10 chiusi da N2** (verificati TRUE uno per
+uno, non "il codice sembra corretto"): righe 2-6 della lista (svuotamento
+automatico di `incarico_chiuso_ts`, eleggibilita' del bottone Archivia,
+bottone Cestino su qualunque card con conferma leggera, `moveJobToSheet_`
+sotto lock/idempotente, Ripristina con fallback backlog). Le righe
+restanti (cancellazione vera solo con Elimina definitivamente/Svuota
+cestino, Cestino mai letto da metriche, trigger, viste, Duplica,
+"lavoro presente" + Andamento del carico estesi all'archivio) restano
+aperte per N3-N6, come da tabella §9 — nessuna sorpresa, previsto dal
+piano.
+
 ## N1 (archiviazione) — CHIUSA, gate confermato da Marco (2026-08-18)
 
 Sessione autonoma (scheduled task, RUNBOOK_esecuzione_autonoma.md) su
@@ -121,43 +223,21 @@ non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
 ("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
 tutti gli effetti.
 
-## Prossima esecuzione — parte da N2
+## Prossima esecuzione — parte da N3
 
-Nessun lavoro di N2 iniziato in questa sessione — su richiesta di
-Marco ("prepara tutto per la prossima esecuzione di N2 e seguenti"),
-questa sessione si è fermata a documentare e chiudere N1, non a
-iniziare N2.
+N2 chiusa in questa stessa sessione (vedi sopra), senza gate: per il
+runbook si procede automaticamente a N3 (in corso più sotto in questa
+stessa sessione, fino al gate esplicito dopo la scrittura del codice —
+non l'attivazione del trigger).
 
-**Punto di ingresso per la prossima sessione** (autonoma o manuale):
-[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md) §9, riga
-N2 — "`moveJobToSheet_` core; `archiveJob_`/`cestinaJob_`/
-`ripristinaJob_` come wrapper; bottone 'Archivia' collegato
-(eleggibilità su `incarico_chiuso_ts`); `deleteJob` riconvertita a
-'Sposta nel cestino'; svuotamento automatico di `incarico_chiuso_ts`
-su rientro reale (§8c); test". **Nessun gate su N2** — per il runbook,
-una volta completata e verificata (stessi quattro punti della
-Definition of Done di N1) si procede automaticamente a N3 senza
-fermarsi, fino al gate esplicito dopo N3 (attivazione del trigger).
-
-**Prerequisiti già pronti per N2** (non richiede altra ricognizione):
-- Schema di destinazione (`jobs_archivio`/`visite_archivio`/
-  `jobs_cestino`/`visite_cestino`) già in produzione su TEST, headers
-  verificati.
-- Il bottone `archive-button` in UI è già presente come segnaposto
-  (§4.1 del design) — va solo abilitato/collegato, non creato da zero
-  (verificare comunque lo stato reale in ricognizione, non assumere).
-- **Attenzione nota per chi scrive `moveJobToSheet_`**: leggere la nota
-  tecnica appena aggiunta in
-  [docs/architecture.md](docs/architecture.md), sezione
-  `jobs_archivio`/`visite_archivio`/`jobs_cestino`/`visite_cestino` —
-  riferimenti allo spreadsheet tenuti attraverso una chiamata che
-  ristruttura i fogli (come farà `moveJobToSheet_`, spostando righe fra
-  tre fogli) vanno riaperti esplicitamente dopo, stesso bug trovato e
-  corretto in questa sessione su `eseguiMigrazioneCompleta_`.
-- Verifica tempo test: non richiedere a Marco di rilanciare l'intera
-  suite su GAS reale come routine (vedi memoria
-  `feedback_gas_test_suite_time.md`) — harness Node per la verifica ad
-  ogni modifica, `runAllTestsAndLog` mirato solo per conferme puntuali.
+**Punto di ingresso per la prossima sessione, se N3 non fosse chiusa in
+questa stessa sessione**: [docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md)
+§9, riga N3 — "Trigger automatico a tempo (solo archiviazione da
+chiusura — il cestino resta sempre manuale, nessuna scadenza
+automatica)". **Gate 🔴 Umano dopo N3**: scrivere e testare tutto il
+codice del trigger, ma non eseguire `ScriptApp.newTrigger(...).create()`
+— fermarsi per la conferma esplicita di Marco prima di attivarlo
+davvero, come da runbook.
 
 ## Stato generale
 

@@ -264,6 +264,17 @@ function runAllTests() {
     testPriorityUpdate,
     testCardColor,
     testUpdateJobInvoicedTogglesIncaricoChiusoTs,
+    testArchiveJobMovesJobAndVisiteToArchivio,
+    testArchiveJobRejectsCaseNotClosed,
+    testArchiveJobIsIdempotentOnSecondCall,
+    testArchiveJobApiActionRejectsCaseNotClosed,
+    testCestinaJobMovesJobAndVisiteRegardlessOfClosure,
+    testDeleteJobMovesToCestinoInsteadOfDeleting,
+    testRipristinaJobRestoresJobAndVisiteToOriginalStatus,
+    testRipristinaJobFallsBackToBacklogColumnWhenStatusNoLongerExists,
+    testMoveJobToSheetIsIdempotentWhenCalledTwice,
+    testMoveJobClearsIncaricoChiusoTsOnRealReentryFromDone,
+    testMoveJobDoesNotClearIncaricoChiusoTsWhenNoNewVisitOpens,
     testAmbassadorOption,
     testEditableOptions,
     testDynamicColumnsAndOptions,
@@ -1135,6 +1146,254 @@ function testUpdateJobInvoicedTogglesIncaricoChiusoTs() {
 
     var reopened = updateJob({ job_id: created.job_id, invoiced: false });
     assertTrue_(!reopened.data.job.incarico_chiuso_ts, 'incarico_chiuso_ts svuotato togliendo la spunta');
+  });
+}
+
+// --- N2 (DESIGN_archiviazione.md, §4/§6b/§8c): moveJobToSheet_ e i suoi
+// wrapper (archiveJob_/cestinaJob_/ripristinaJob_), eleggibilita'
+// all'archiviazione, deleteJob riconvertita a Cestino, svuotamento
+// automatico di incarico_chiuso_ts su rientro reale ---
+
+function testArchiveJobMovesJobAndVisiteToArchivio() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Caso da archiviare', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'done' });
+    updateJob({ job_id: created.job_id, invoiced: true });
+
+    var visiteBefore = readVisiteForJob_(ss, created.job_id);
+    assertTrue_(visiteBefore.length >= 1, 'il job deve avere almeno una visita prima di archiviare');
+
+    var archived = archiveJob_(created.job_id);
+    assertTrue_(archived.success, 'archiveJob_ dovrebbe riuscire su un caso chiuso');
+
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+    assertEquals_(0, jobsAfter.length, 'il job non deve piu\' essere in jobs dopo l\'archiviazione');
+
+    // resetTestDatabase_ non svuota jobs_archivio/jobs_cestino tra un test
+    // e l'altro (per design, pre-N2: sono fuori dal suo scopo) - lo
+    // spreadsheet di test e' condiviso da tutta la suite, quindi qui si
+    // filtra sempre per job_id invece di assumere la lunghezza assoluta
+    // della tabella.
+    var archivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, archivio.length, 'il job deve trovarsi in jobs_archivio');
+    assertTrue_(Boolean(archivio[0].archiviato_ts), 'archiviato_ts valorizzato');
+
+    var visiteArchivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO)).filter(function(v) { return v.job_id === created.job_id; });
+    assertEquals_(visiteBefore.length, visiteArchivio.length, 'tutte le visite del caso devono seguire il job in visite_archivio');
+
+    var visiteRimaste = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(0, visiteRimaste.length, 'nessuna visita deve restare su \'visite\' dopo l\'archiviazione');
+  });
+}
+
+function testArchiveJobRejectsCaseNotClosed() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Caso ancora aperto', size_class: 'S' }).data;
+
+    var failed = false;
+    try {
+      archiveJob_(created.job_id);
+    } catch (err) {
+      failed = err.message.indexOf('non e ancora chiuso') !== -1;
+    }
+    assertTrue_(failed, 'archiveJob_ deve rifiutare un caso senza incarico_chiuso_ts');
+
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+    assertEquals_(1, jobsAfter.length, 'il job non deve essere stato spostato');
+  });
+}
+
+function testArchiveJobIsIdempotentOnSecondCall() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Doppia archiviazione', size_class: 'S' }).data;
+    updateJob({ job_id: created.job_id, invoiced: true });
+
+    var first = archiveJob_(created.job_id);
+    assertTrue_(first.success, 'prima archiviazione dovrebbe riuscire');
+
+    var second = archiveJob_(created.job_id);
+    assertTrue_(second.success, 'seconda chiamata non deve fallire (idempotenza)');
+    assertTrue_(Boolean(second.data.already_moved), 'seconda chiamata deve segnalare already_moved');
+
+    var archivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, archivio.length, 'nessuna riga duplicata in jobs_archivio dopo la seconda chiamata');
+  });
+}
+
+function testArchiveJobApiActionRejectsCaseNotClosed() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Via azione API, non chiuso', size_class: 'S' }).data;
+
+    var failed = false;
+    try {
+      archiveJob({ job_id: created.job_id });
+    } catch (err) {
+      failed = err.message.indexOf('non e ancora chiuso') !== -1;
+    }
+    assertTrue_(failed, 'l\'azione archiveJob deve rifiutare un caso non chiuso, stessa regola di archiveJob_');
+  });
+}
+
+function testCestinaJobMovesJobAndVisiteRegardlessOfClosure() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Caso mai chiuso', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var cestinato = cestinaJob_(created.job_id);
+    assertTrue_(cestinato.success, 'cestinaJob_ non deve richiedere incarico_chiuso_ts');
+
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+    assertEquals_(0, jobsAfter.length, 'il job deve lasciare jobs');
+
+    // Filtrato per job_id: jobs_cestino non viene svuotato tra un test e
+    // l'altro (vedi nota sopra in testArchiveJobMovesJobAndVisiteToArchivio).
+    var cestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, cestino.length, 'il job deve trovarsi in jobs_cestino');
+    assertTrue_(Boolean(cestino[0].cestinato_ts), 'cestinato_ts valorizzato');
+
+    var visiteCestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO)).filter(function(v) { return v.job_id === created.job_id; });
+    assertTrue_(visiteCestino.length >= 1, 'le visite del caso devono seguirlo nel cestino');
+  });
+}
+
+function testDeleteJobMovesToCestinoInsteadOfDeleting() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Cancellazione riconvertita', size_class: 'S' }).data;
+
+    var response = deleteJob({ job_id: created.job_id });
+    assertTrue_(response.success, 'deleteJob deve continuare a rispondere con successo');
+
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+    assertEquals_(0, jobsAfter.length, 'il job non deve piu\' essere in jobs');
+
+    // Filtrato per job_id: jobs_cestino non viene svuotato tra un test e
+    // l'altro (vedi nota in testArchiveJobMovesJobAndVisiteToArchivio).
+    var cestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, cestino.length, 'deleteJob deve spostare la riga in jobs_cestino, non eliminarla');
+  });
+}
+
+function testRipristinaJobRestoresJobAndVisiteToOriginalStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Da ripristinare', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    cestinaJob_(created.job_id);
+    var ripristinato = ripristinaJob_(created.job_id);
+    assertTrue_(ripristinato.success, 'ripristinaJob_ dovrebbe riuscire');
+    assertEquals_('wip', ripristinato.data.job.status, 'lo status originale deve essere preservato quando la colonna esiste ancora');
+
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+    assertEquals_(1, jobsAfter.length, 'il job deve essere tornato su jobs');
+
+    // Filtrato per job_id: jobs_cestino non viene svuotato tra un test e
+    // l'altro (vedi nota in testArchiveJobMovesJobAndVisiteToArchivio).
+    var cestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(0, cestino.length, 'il job non deve piu\' essere nel cestino dopo il ripristino');
+
+    var visiteAfter = readVisiteForJob_(ss, created.job_id);
+    assertTrue_(visiteAfter.length >= 1, 'le visite devono essere tornate su \'visite\'');
+  });
+}
+
+function testRipristinaJobFallsBackToBacklogColumnWhenStatusNoLongerExists() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Cestinato con colonna poi rimossa', size_class: 'S' }).data;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    // Simula un job la cui colonna di provenienza non esiste piu' in
+    // columns_json al momento del ripristino (scenario descritto in §6b).
+    job.status = 'colonna_rimossa';
+    writeJobToRow_(sheet, row, headers, job);
+
+    cestinaJob_(created.job_id);
+    var ripristinato = ripristinaJob_(created.job_id);
+    assertTrue_(ripristinato.success, 'ripristinaJob_ dovrebbe riuscire anche con lo status non piu\' valido');
+    assertEquals_('backlog', ripristinato.data.job.status, 'fallback alla prima colonna di ruolo backlog');
+
+    var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+    assertEquals_('backlog', jobsAfter[0].status, 'status persistito come backlog dopo il fallback');
+  });
+}
+
+function testMoveJobToSheetIsIdempotentWhenCalledTwice() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Doppia cestinazione', size_class: 'S' }).data;
+
+    var first = cestinaJob_(created.job_id);
+    assertTrue_(first.success, 'prima chiamata dovrebbe riuscire');
+    var second = cestinaJob_(created.job_id);
+    assertTrue_(second.success && Boolean(second.data.already_moved), 'seconda chiamata deve essere un no-op idempotente');
+
+    var cestino = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, cestino.length, 'nessuna riga duplicata in jobs_cestino dopo la seconda chiamata');
+  });
+}
+
+function testMoveJobClearsIncaricoChiusoTsOnRealReentryFromDone() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro dopo chiusura', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'done' });
+    var closed = updateJob({ job_id: created.job_id, invoiced: true });
+    assertTrue_(Boolean(closed.data.job.incarico_chiuso_ts), 'incarico_chiuso_ts valorizzato prima del rientro');
+
+    var reentry = moveJob({ job_id: created.job_id, status: 'todo' });
+    assertTrue_(reentry.success, 'il rientro da done a todo dovrebbe riuscire');
+    assertTrue_(!reentry.data.job.incarico_chiuso_ts, 'incarico_chiuso_ts deve essere svuotato su un rientro reale (nuova visita)');
+
+    var jobRow = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS))[0];
+    assertTrue_(!jobRow.incarico_chiuso_ts, 'incarico_chiuso_ts deve essere svuotato anche sulla riga persistita');
+  });
+}
+
+function testMoveJobDoesNotClearIncaricoChiusoTsWhenNoNewVisitOpens() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Nessun rientro reale', size_class: 'S' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+    var closed = updateJob({ job_id: created.job_id, invoiced: true });
+    assertTrue_(Boolean(closed.data.job.incarico_chiuso_ts), 'incarico_chiuso_ts valorizzato');
+
+    // wait_client -> wait_authority: due colonne di attesa diverse, nessuna
+    // nuova visita si apre (closesVisit resta falso, sez. 2 del design
+    // modello caso/visita) - incarico_chiuso_ts non deve essere toccato.
+    var moved = moveJob({ job_id: created.job_id, status: 'wait_authority' });
+    assertTrue_(moved.success, 'spostamento tra due colonne di attesa dovrebbe riuscire');
+    assertTrue_(Boolean(moved.data.job.incarico_chiuso_ts), 'incarico_chiuso_ts non deve essere toccato se non si apre una nuova visita');
   });
 }
 

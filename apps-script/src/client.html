@@ -215,6 +215,7 @@
     });
 
     document.getElementById('modal-create-button').addEventListener('click', saveCardFromModal);
+    document.getElementById('modal-archive-button').addEventListener('click', archiveJobFromModal);
     document.querySelectorAll('.modal-tabs .nav-button').forEach(function(button) {
       button.addEventListener('click', function() { setModalTab_(button.dataset.modalTab); });
     });
@@ -417,7 +418,7 @@
       job.description ? '<span class="description-icon" title="Descrizione presente">note</span>' : '',
       '</div>',
       '<div class="card-actions">',
-      '<button type="button" class="delete-card-button" title="Elimina card" aria-label="Elimina card">x</button>',
+      '<button type="button" class="delete-card-button" title="Sposta nel cestino" aria-label="Sposta nel cestino">x</button>',
       '</div>'
     ].join('');
     card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
@@ -677,6 +678,7 @@
     document.getElementById('card-modal-context').textContent = 'Modifica card';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Salva e chiudi';
+    updateArchiveButtonState_(job);
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
@@ -684,6 +686,37 @@
     document.querySelector('.modal-tabs').hidden = false;
     setModalTab_('info');
     document.getElementById('card-modal').showModal();
+  }
+
+  // §4.1: eleggibile solo con incarico_chiuso_ts valorizzato sul caso
+  // aperto nel modale — stessa regola applicata lato server in
+  // archiveJob_ (Kanban.gs), qui solo per riflettere lo stato nel
+  // bottone (il server resta l'unica fonte di verita').
+  function updateArchiveButtonState_(job) {
+    document.getElementById('modal-archive-button').disabled = !(job && job.incarico_chiuso_ts);
+  }
+
+  function archiveJobFromModal() {
+    var job = state.activeJob;
+    if (!job || !job.incarico_chiuso_ts) { return; }
+    if (!confirm('Archiviare "' + (job.title || job.job_id) + '"? Il caso lascera\' la board e finira\' nella vista Archivio.')) {
+      return;
+    }
+    var previousBoard = cloneBoard();
+    var fromStatus = removeJobLocally(job.job_id);
+    removeCardEl_(job.job_id);
+    updateColumnCounters_(fromStatus);
+    document.getElementById('card-modal').close();
+    state.activeJob = null;
+    state.activeColumnId = null;
+    callApi('archiveJob', { job_id: job.job_id }).then(function() {
+      updateLastUpdated();
+    }).catch(function(error) {
+      state.board = previousBoard;
+      renderBoard();
+      showError(error);
+      loadBoard(true);
+    });
   }
 
   function openNewJobModal(columnId) {
@@ -711,6 +744,7 @@
     document.getElementById('modal-recent-activity-list').innerHTML = '';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
+    updateArchiveButtonState_(null);
     resetCustomValueFields();
     updateLivePriorityBadge();
     // La Cronologia richiede un job_id gia' esistente: nascosta in creazione.
@@ -1365,7 +1399,9 @@
   }
 
   function deleteJob(job) {
-    if (!confirm('Eliminare "' + (job.title || job.job_id) + '"?')) {
+    // §4.2: conferma leggera (non quella pesante di una cancellazione
+    // vera) - lo spostamento nel Cestino e' reversibile (Ripristina, N4).
+    if (!confirm('La card "' + (job.title || job.job_id) + '" verra\' spostata nel Cestino. Potrai ripristinarla o eliminarla definitivamente in seguito.')) {
       return;
     }
     var previousBoard = cloneBoard();
