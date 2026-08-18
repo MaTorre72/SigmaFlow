@@ -140,7 +140,7 @@
           <select id="activity-form-type">
             <option value="move">Spostamento</option>
             <option value="note">Nota</option>
-            <option value="correction">Correzione</option>
+            <option value="correction">Correzione data (creazione o chiusura)</option>
           </select>
         </label>
         <div id="activity-form-move-fields" class="activity-form-fields">
@@ -157,10 +157,11 @@
           </label>
         </div>
         <div id="activity-form-correction-fields" class="activity-form-fields" hidden>
+          <p class="field-hint">Corregge solo la data di creazione o di chiusura dell'incarico salvate sul caso — non sposta la card, non tocca lo storico degli spostamenti. Usa "Spostamento" per correggere le altre date (inizio lavorazione, invio, ecc.).</p>
           <label>Campo da correggere
             <select id="activity-form-correction-field">
-              <option value="arrival_ts">Data creazione (arrival_ts)</option>
-              <option value="incarico_chiuso_ts">Chiusura incarico (incarico_chiuso_ts)</option>
+              <option value="arrival_ts">Data creazione</option>
+              <option value="incarico_chiuso_ts">Data chiusura incarico</option>
             </select>
           </label>
           <label>Nuovo valore
