@@ -43,17 +43,52 @@ ordinario: una richiesta, una sessione, fermarsi per revisione.
 dei criteri di accettazione. Non ripetuto qui per evitare due fonti di
 verità sulla stessa cosa — consultarlo, non tenerlo a memoria.
 
-Anche in modalità autonoma restano fermi, sempre:
-- I permessi tecnici configurati in `.claude/settings.local.json`
-  (regole `allow`/`deny`) — non sono aggirabili da un prompt, per
-  progettazione di Claude Code stesso. **Le regole `deny` lì dentro
-  sono l'unica cosa in questo progetto che blocca *tecnicamente* push
-  diretti su `main` e lettura di file di credenziali — le regole
-  scritte qui sotto ("Regole di progetto") sono policy che Claude Code
-  segue di sua iniziativa, non vincoli imposti dal sistema.**
-- Qualunque gate umano esplicitamente indicato in un documento di
-  design resta un punto di stop reale, anche dentro una sessione
-  altrimenti autonoma — vedi runbook.
+### Nessuna conferma in chat per le operazioni ordinarie
+
+Quando una sessione è autorizzata a eseguire un programma via runbook,
+**non fermarsi in chat a chiedere il permesso per le normali operazioni
+di sviluppo** — sono pre-autorizzate da questo file, non caso per caso:
+scrivere/modificare codice sotto `apps-script/`, eseguire la suite di
+test (harness Node), `git add`/`git commit` sul branch di lavoro
+dedicato (mai `main`), `clasp push`/`clasp pull` verso **TEST**,
+aggiornare `PROGRAMMA_STATO.md`. Chiedere prima di una di queste
+operazioni, quando si è già dentro un'esecuzione autorizzata, è
+esattamente il tipo di frizione che questa sezione esiste per evitare.
+
+Lo stesso vale **tra una sotto-fase e la successiva**: se la sotto-fase
+appena chiusa non aveva un gate, procedere subito, senza chiedere "vuoi
+che proceda?" — come già dice il runbook. Questo resta vero anche
+quando la sessione prosegue in chat in modo interattivo (es. Marco
+conferma un gate rispondendo a un messaggio): la conferma di un gate
+**è** il via libera a proseguire fino al gate successivo o alla fine
+del programma, non un traguardo dopo cui tornare a chiedere ad ogni
+passo.
+
+**Gli unici motivi legittimi per fermarsi restano quelli che il runbook
+già elenca**: un gate umano esplicito nel documento di design, un
+criterio di accettazione non verificabile TRUE, un'ambiguità che il
+documento di design non copre. Non aggiungerne altri di propria
+iniziativa "per prudenza" — se sembra necessaria una pausa aggiuntiva,
+è un segnale che il programma o questo file andrebbero aggiornati per
+coprire quel caso esplicitamente, non un'occasione per fermarsi lo
+stesso.
+
+Anche in modalità autonoma restano fermi, **sempre**, senza eccezioni:
+- Push o merge diretto su `main`/`master` — mai, in nessun caso.
+  Rinforzato tecnicamente da un `deny` in `.claude/settings.local.json`.
+- Qualunque scrittura su PROD (dati o deployment) — sempre riservata a
+  un'azione eseguita da Marco stesso, mai da Claude, gate o non gate.
+- Qualunque gate umano 🔴 esplicitamente indicato in un documento di
+  design — vedi runbook.
+- Azioni distruttive non recuperabili al di fuori del normale flusso
+  sopra (force push, `reset --hard`, cancellazioni permanenti,
+  eliminazione di branch) — restano governate dal buon senso ordinario
+  di Claude Code, non da questa autorizzazione estesa.
+
+I permessi tecnici in `.claude/settings.local.json` (regole
+`allow`/`deny`) non sono comunque aggirabili da un prompt, per
+progettazione di Claude Code stesso — sono il livello di sicurezza
+sotto a tutto questo, indipendente da cosa dice questo file.
 
 ### Convenzione per file temporanei/scratch
 
@@ -94,7 +129,13 @@ ripeteranno mai più).
 - Prima di ogni consegna: eseguire la suite di test (harness Node o
   `runAllTestsAndLog`), verificare il push su TEST con `clasp pull`
   isolato + diff (sotto `/tmp/sf-scratch/`, vedi sopra), poi aggiornare
-  `PROGRAMMA_STATO.md`.
+  `PROGRAMMA_STATO.md`. Due comandi pronti in
+  `apps-script/test-harness/` (pre-autorizzati in
+  `.claude/settings.local.json`, nessun bisogno di comporre script
+  inline ogni volta): `node apps-script/test-harness/run-tests.js`
+  (suite completa, exit code 1 se qualcosa fallisce) e
+  `bash apps-script/test-harness/push-and-verify.sh` (push + verifica
+  isolata in un solo passo).
 
 ---
 
