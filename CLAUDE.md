@@ -14,7 +14,9 @@ Il programma a fasi originale (Activity Log, Fasi A-K; modello
 caso/visita, Fasi L1-L5; migrazione PROD) è **completato**. SigmaFlow è
 in produzione. Non c'è più un "programma" da eseguire una fase alla
 volta: il lavoro prosegue come manutenzione/evoluzione ordinaria, su
-richiesta esplicita di Marco in ciascuna sessione.
+richiesta esplicita di Marco in ciascuna sessione — salvo indicazione
+esplicita di autonomia estesa nel prompt di sessione (vedi "Autonomia
+ed esecuzione" più sotto).
 
 - Stato corrente e prossimi passi noti: `PROGRAMMA_STATO.md`
 - Cronologia completa delle fasi già chiuse: `docs/storico/PROGRAMMA_STATO_storico.md`
@@ -23,6 +25,47 @@ All'inizio di ogni sessione, leggere `PROGRAMMA_STATO.md` per il
 contesto, poi seguire la richiesta di Marco. Aggiornare
 `PROGRAMMA_STATO.md` quando si chiude un pezzo di lavoro significativo
 (non ad ogni singola modifica).
+
+---
+
+## Autonomia ed esecuzione
+
+Alcune sessioni sono esplicitamente autorizzate a procedere in
+autonomia su più passi consecutivi di un programma già progettato e
+documentato — questo verrà detto esplicitamente nel prompt di
+sessione. In assenza di questa indicazione, vale il comportamento
+ordinario: una richiesta, una sessione, fermarsi per revisione.
+
+**Quando autorizzata, l'esecuzione segue sempre
+`docs/RUNBOOK_esecuzione_autonoma.md`** — definisce cosa significa
+"fatto" per una sotto-fase, come leggere un programma da un documento
+`DESIGN_*.md`, e come comportarsi in caso di successo o di fallimento
+dei criteri di accettazione. Non ripetuto qui per evitare due fonti di
+verità sulla stessa cosa — consultarlo, non tenerlo a memoria.
+
+Anche in modalità autonoma restano fermi, sempre:
+- I permessi tecnici configurati in `.claude/settings.local.json`
+  (regole `allow`/`deny`) — non sono aggirabili da un prompt, per
+  progettazione di Claude Code stesso. **Le regole `deny` lì dentro
+  sono l'unica cosa in questo progetto che blocca *tecnicamente* push
+  diretti su `main` e lettura di file di credenziali — le regole
+  scritte qui sotto ("Regole di progetto") sono policy che Claude Code
+  segue di sua iniziativa, non vincoli imposti dal sistema.**
+- Qualunque gate umano esplicitamente indicato in un documento di
+  design resta un punto di stop reale, anche dentro una sessione
+  altrimenti autonoma — vedi runbook.
+
+### Convenzione per file temporanei/scratch
+
+Tutti i file di lavoro temporaneo (script di verifica, dataset di
+prova, copie per il confronto `clasp pull`, ecc.) vanno creati sotto
+**`/tmp/sf-scratch/`**, sempre — non in una nuova cartella con nome
+diverso ad ogni sessione. Questo permette a `.claude/settings.local.json`
+di autorizzare in anticipo le operazioni su quel percorso una volta
+sola, invece di accumulare una riga per ogni cartella temporanea mai
+creata (come accaduto nelle sessioni precedenti a questa convenzione —
+decine di voci ormai inutili, legate a percorsi che non si
+ripeteranno mai più).
 
 ---
 
@@ -38,15 +81,20 @@ contesto, poi seguire la richiesta di Marco. Aggiornare
 ## Regole di progetto
 
 - Mai modificare `main` direttamente — lavorare su un branch dedicato e
-  unire tramite pull request.
+  unire tramite pull request. (Rinforzato tecnicamente da un `deny` su
+  `git push` verso `main`/`master` in `.claude/settings.local.json`.)
 - Ambiente TEST sempre separato da PROD.
 - Nessuna scrittura su PROD (dati o deployment) senza gate umano
   esplicito — Marco esegue lui le azioni che toccano i dati reali o il
-  deployment pubblicato.
+  deployment pubblicato. **Non tecnicamente imponibile da
+  `settings.local.json`** (non è un percorso di file o un comando di
+  sistema, è un ID di spreadsheet dentro il codice) — affidato
+  interamente al rispetto di questa regola.
 - Se un file non esiste dove atteso: documentarlo, non inventarlo.
 - Prima di ogni consegna: eseguire la suite di test (harness Node o
   `runAllTestsAndLog`), verificare il push su TEST con `clasp pull`
-  isolato + diff, poi aggiornare `PROGRAMMA_STATO.md`.
+  isolato + diff (sotto `/tmp/sf-scratch/`, vedi sopra), poi aggiornare
+  `PROGRAMMA_STATO.md`.
 
 ---
 
@@ -57,12 +105,19 @@ ordine di priorità:
 
 1. Codice esistente (non rompere ciò che funziona)
 2. Documentazione tecnica in `docs/` (`architecture.md`,
-   `DESIGN_modello_caso_visita.md`, `dashboard-metrics.md`,
-   `testing-and-security.md`)
+   `DESIGN_modello_caso_visita.md`, `DESIGN_archiviazione.md`,
+   `dashboard-metrics.md`, `testing-and-security.md`)
 3. Chiedere a Marco
 
 Se l'ambiguità non è risolvibile con questi tre passi → documentare il
 problema in `PROGRAMMA_STATO.md` e fermarsi.
+
+Se durante l'esecuzione di una sessione autonoma emerge una divergenza
+reale tra un documento di design e lo stato attuale del codice: se il
+documento stesso descrive già come gestire quel caso, seguirlo senza
+fermarsi a chiedere. Fermarsi solo se il documento non copre il caso
+trovato, o se la divergenza mette in dubbio una decisione di fondo del
+documento (non un dettaglio di implementazione).
 
 ---
 
@@ -70,6 +125,8 @@ problema in `PROGRAMMA_STATO.md` e fermarsi.
 
 - Architettura (schema fogli, backend, frontend): `docs/architecture.md`
 - Design del modello caso/visita: `docs/DESIGN_modello_caso_visita.md`
+- Design dell'archiviazione: `docs/DESIGN_archiviazione.md`
+- Runbook di esecuzione autonoma: `docs/RUNBOOK_esecuzione_autonoma.md`
 - Metriche dashboard: `docs/dashboard-metrics.md`
 - Testing e sicurezza: `docs/testing-and-security.md`
 - Setup Google Workspace: `docs/google-workspace-setup.md`
