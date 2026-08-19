@@ -171,8 +171,8 @@ da solo), stesso principio già applicato in N3 (§9 di
 - [x] Il primo backup reale è eseguito da Marco, mai da Claude —
       confermato il 2026-08-19 ("tutto perfetto") dopo la correzione
       dello scope OAuth (N-B2)
-- [ ] L'installazione del trigger è eseguita da Marco, mai da Claude
-      (N-B3)
+- [x] L'installazione del trigger è eseguita da Marco, mai da Claude —
+      confermato il 2026-08-19 (N-B3)
 - [x] Nessuna funzione di ripristino automatico esiste nel codice (§6)
 
 ## Gate 🔴 UMANO

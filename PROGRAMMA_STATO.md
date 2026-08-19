@@ -56,7 +56,7 @@ stessa sessione (vedi sezione sotto). Nessuna scrittura correttiva
 ulteriore necessaria su PROD: Marco conferma "non c'è niente di
 bloccato o perso".
 
-## N-B1/N-B2 (backup PROD) — DONE, in attesa solo di N-B3 (2026-08-19)
+## N-B1/N-B2/N-B3 (backup PROD) — DONE, programma completo (2026-08-19)
 
 Riferimento: [docs/DESIGN_backup.md](docs/DESIGN_backup.md), §3/§4/§8
 (N-B1). Su richiesta esplicita di Marco, subito dopo aver progettato il
@@ -138,9 +138,6 @@ nell'harness Node** (122 preesistenti + 9 nuovi, nessuna regressione).
 
 **Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`.
 
-**Criteri di accettazione §9 chiusi da N-B1**: tutti tranne gli ultimi
-due (aggiornati nel documento di design).
-
 **N-B2 — CONFERMATA da Marco il 2026-08-19** ("tutto perfetto"), dopo
 due correzioni trovate proprio in questo primo tentativo reale (non
 rilevabili dall'harness Node): il bugfix della cartella di backup
@@ -148,13 +145,16 @@ rilevabili dall'harness Node): il bugfix della cartella di backup
 primo backup reale di PROD esiste, nella cartella "SigmaFlow — Backup
 PROD" accanto al foglio PROD vero.
 
-**Gate 🔴 UMANO ancora in attesa — solo N-B3**: l'unico passo rimasto è
-l'installazione del trigger. Quando Marco vuole procedere: eseguire
-`installaBackupGiornalieroProd()` (Backup.gs) dall'editor Apps Script
-**sul progetto reale** per attivarlo (ore 2, stessa granularità del
-trigger di archiviazione). Resta riservato a Marco, mai a Claude
-(regola assoluta su PROD) — con N-B3 confermata, il programma di
-backup (docs/DESIGN_backup.md) sarà completo.
+**N-B3 — CONFERMATA da Marco il 2026-08-19** ("tutto ok"):
+`installaBackupGiornalieroProd()` eseguita dall'editor Apps Script sul
+progetto reale, trigger giornaliero (`eseguiBackupGiornalieroProd`,
+ore 2) attivo. **Tutti i criteri di accettazione §9 di
+`docs/DESIGN_backup.md` sono ora [x].**
+
+**Programma di backup PROD (N-B1-N-B3) — completo.** Nessuna
+sotto-fase residua in `docs/DESIGN_backup.md` §8. Come per
+l'archiviazione, tutto il lavoro è su `feat/n1-archiviazione-schema`,
+non ancora unito a `main`.
 
 ## N6 (archiviazione) — DONE, programma completo (2026-08-18)
 
@@ -759,20 +759,20 @@ non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
 ("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
 tutti gli effetti.
 
-## Prossima esecuzione — ferma al gate di N-B3
+## Prossima esecuzione — nessun programma attivo
 
-Il programma di archiviazione (N1-N6, `docs/DESIGN_archiviazione.md`)
-è **completo**: tutte le sotto-fasi DONE, tutti i criteri di
-accettazione §10 verificati TRUE (vedi sezione N6 sopra). Il lavoro
-vive su `feat/n1-archiviazione-schema`, non ancora unito a `main` —
-decisione di Marco quando/se aprire la pull request.
+Sia il programma di archiviazione (N1-N6, `docs/DESIGN_archiviazione.md`)
+sia quello di backup PROD (N-B1-N-B3, `docs/DESIGN_backup.md`) sono
+**completi**: tutte le sotto-fasi DONE, tutti i criteri di accettazione
+verificati TRUE (vedi sezioni sopra), tutti i gate umani confermati da
+Marco. Il lavoro vive su `feat/n1-archiviazione-schema`, non ancora
+unito a `main` — decisione di Marco quando/se aprire la pull request.
+Il trigger di backup (ore 2) e quello di archiviazione (ore 3) sono
+entrambi attivi su TEST, indipendenti l'uno dall'altro.
 
-Il programma di backup PROD ([docs/DESIGN_backup.md](docs/DESIGN_backup.md))
-ha **N-B1 e N-B2 chiuse** (vedi sezione sopra, primo backup reale
-confermato da Marco) — **N-B3 (installazione del trigger) resta
-riservata a un'esecuzione di Marco stesso**, mai di Claude, come da
-regola assoluta su PROD. Con N-B3, il programma di backup sarà
-completo.
+Una prossima sessione riparte da una richiesta esplicita di Marco
+(manutenzione ordinaria) o da un nuovo documento `DESIGN_*.md`, come da
+`CLAUDE.md`.
 
 ## Stato generale
 
