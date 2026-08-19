@@ -1213,6 +1213,31 @@ sulla pulizia campi e' stato chiuso in M0-A, vedi sopra):
   perché "rientro" non è "qualunque move" (regole di validazione come
   il divieto di rientro diretto in `wip` andrebbero rispettate anche
   fuori da un'interazione reale sulla board).
+- **Bug reale trovato da Marco su PROD dopo il deploy del 2026-08-19**
+  (post-merge della PR #8), **fix rimandato a una sessione dedicata su
+  sua richiesta esplicita**: Dashboard, vista Archivio e vista Cestino
+  danno errore *"Cannot read properties of null (reading
+  'getDataRange')"* su PROD reale. **Causa confermata nel codice, non
+  solo ipotizzata**: `jobs_archivio`/`visite_archivio`/`jobs_cestino`/
+  `visite_cestino` non esistono ancora sul foglio PROD vero — nessuna
+  sessione ha mai eseguito `allineaSchemaSuProd()` (o equivalente) lì,
+  correttamente, essendo un'azione riservata a Marco (mai eseguita
+  finora). `readTable_(sheet)` (Utils.gs) chiama `sheet.getDataRange()`
+  senza controllare se `sheet` è `null` — e sia `readArchivedList_`
+  (Kanban.gs, dietro `getArchivio`/`getCestino`) sia
+  `loadJobsWithVisitSummaryFrom_` (Kanban.gs, dietro
+  `loadArchivedJobsWithVisitSummary_`, l'estensione all'archivio di N6
+  per `getMetrics`) passano `ss.getSheetByName(...)` direttamente a
+  `readTable_` senza verificarlo prima. Mai emerso nell'harness Node né
+  su TEST perché lì `setupSigmaFlow()` era sempre già stato eseguito
+  prima di questi percorsi — un gap reale di copertura, non solo
+  sfortuna. **Fix più probabile per la prossima sessione**: far
+  ricadere `readTable_` su `[]` quando `sheet` è `null` (un solo punto,
+  beneficia automaticamente ogni chiamante presente e futuro) — da
+  verificare se sufficiente o se serve anche un controllo esplicito nei
+  due chiamanti sopra. **Non blocca l'uso di PROD per il resto**: solo
+  queste tre viste sono toccate, l'errore non impedisce l'uso normale
+  della board.
 
 ## Riferimenti tecnici correnti
 
