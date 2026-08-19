@@ -676,7 +676,7 @@ function addActivityEvent(params) {
   // allineano sempre in automatico al valore suggerito dall'evento appena
   // registrato, senza chiedere conferma all'utente. I dettagli di questi
   // campi restano interni: l'utente cura solo la cronologia.
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate);
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job);
@@ -684,13 +684,107 @@ function addActivityEvent(params) {
   return ok_({ ok: true, job_id: jobId, event: candidate });
 }
 
-function applyStructuralAlignment_(job, warnings) {
+function applyStructuralAlignment_(job, warnings, candidate) {
   warnings.forEach(function(warning) {
     if (JOB_HEADERS.indexOf(warning.field) !== -1) {
       job[warning.field] = warning.suggestedValue;
     }
   });
-  alignOpenVisitFields_(job, warnings);
+
+  // M2 (DESIGN_dashboard.md, §3, opzione 2): un rientro vero applicato
+  // gia' gestisce da solo status/visita aperta - alignOpenVisitFields_
+  // andrebbe a toccare la visita SBAGLIATA (quella appena chiusa) se
+  // chiamato anche in questo caso.
+  if (!applyManualReentryIfNeeded_(job, candidate)) {
+    alignOpenVisitFields_(job, warnings);
+  }
+}
+
+// M2 (DESIGN_dashboard.md, §3, opzione 2): quando una correzione manuale
+// in Cronologia (addActivityEvent/updateActivityEvent/deleteActivityEvent
+// tramite l'ultimo move rimasto) rappresenta un vero rientro - stessa
+// regola di moveJob (Kanban.gs): provenienza stand_by/done, destinazione
+// backlog/prep - ricalcola job.status e apre/chiude la visita come farebbe
+// il drag-and-drop reale. Applicato "live" sulla visita attualmente
+// aperta, non alla posizione storica dell'evento corretto - stessa
+// convenzione gia' in uso per gli altri campi strutturali, vedi il
+// commento su alignOpenVisitFields_. Il divieto di rientro diretto in WIP
+// e' gia' garantito a monte da validateSequence_ (RIENTRO_DIRETTO_WIP_NON_CONSENTITO):
+// qui si assume che il candidato sia gia' stato validato.
+function applyManualReentryIfNeeded_(job, candidate) {
+  if (!candidate || candidate.type !== 'move' || !candidate.from) {
+    return false;
+  }
+
+  var columns = readColumns_();
+  var sourceColumn = findColumn_(columns, candidate.from);
+  var targetColumn = findColumn_(columns, candidate.to);
+  if (!sourceColumn || !targetColumn) {
+    return false;
+  }
+
+  var sourceClosesTowardActive = sourceColumn.role === 'stand_by' || sourceColumn.role === 'done';
+  var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
+  if (!closesVisit) {
+    return false;
+  }
+
+  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (!visiteSheet) {
+    return false;
+  }
+
+  job.status = candidate.to;
+  job.status_since_ts = candidate.ts;
+  // N2 (DESIGN_archiviazione.md, §8c): stessa regola di moveJob - un
+  // rientro reale su un caso gia' marcato "Chiuso" lo rende di nuovo
+  // attivo.
+  if (job.incarico_chiuso_ts) {
+    job.incarico_chiuso_ts = '';
+  }
+
+  // Idempotenza: se questo stesso rientro (stesso job, stessa data,
+  // stessa provenienza) e' gia' stato registrato in precedenza - es. un
+  // secondo salvataggio dello stesso evento via updateActivityEvent senza
+  // cambiare data/colonne - non duplicare la visita. job.status resta
+  // comunque riallineato sopra, a costo zero anche se gia' corretto.
+  if (reentryAlreadyApplied_(visiteSheet, job.job_id, candidate.ts, sourceColumn.id)) {
+    return true;
+  }
+
+  var opened = ensureOpenVisit_(visiteSheet, job, candidate.ts);
+  var activeVisit = opened.visit;
+
+  activeVisit.rientro_ts = candidate.ts;
+  activeVisit.rientro_da = sourceColumn.id;
+  writeVisitToRow_(visiteSheet, opened.row, activeVisit);
+
+  appendVisitRow_(visiteSheet, {
+    job_id: job.job_id,
+    numero_visita: Number(activeVisit.numero_visita || 1) + 1,
+    apertura_ts: candidate.ts,
+    incarico_ts: targetColumn.role === 'backlog' ? candidate.ts : '',
+    prep_ts: targetColumn.role === 'prep' ? candidate.ts : '',
+    start_ts: '',
+    consegna_ts: '',
+    rientro_ts: '',
+    rientro_da: '',
+    t_cliente_d: 0,
+    t_ente_d: 0,
+    t_interno_d: 0,
+    rework_cause: sourceColumn.id
+  });
+
+  return true;
+}
+
+// Supporta l'idempotenza di applyManualReentryIfNeeded_: true se esiste
+// gia' una visita di questo job chiusa esattamente con questa data e
+// provenienza di rientro.
+function reentryAlreadyApplied_(visiteSheet, jobId, rientroTs, rientroDa) {
+  return readTable_(visiteSheet).some(function(visit) {
+    return visit.job_id === jobId && visit.rientro_ts === rientroTs && visit.rientro_da === rientroDa;
+  });
 }
 
 // Fase L3 (DESIGN_modello_caso_visita.md, sez. 11): le correzioni manuali
@@ -793,7 +887,7 @@ function updateActivityEvent(params) {
   remaining.push(candidate);
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate);
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job);
@@ -833,6 +927,14 @@ function deleteActivityEvent(params) {
   // dall'evento cancellato non piu' rappresentativo: si riallinea in
   // automatico all'evento move piu' recente rimasto, con lo stesso
   // meccanismo (silenzioso) usato per l'aggiunta/modifica di un evento.
+  // M2 (DESIGN_dashboard.md, §3): candidate NON passato qui di proposito
+  // (a differenza di addActivityEvent/updateActivityEvent) - lastMove non
+  // e' un evento appena inserito dall'utente, e' un evento gia' esistente
+  // che la cancellazione ha reso "l'ultimo rimasto": applicargli anche
+  // applyManualReentryIfNeeded_ duplicherebbe la visita ad ogni
+  // cancellazione di un evento successivo non correlato, invece di
+  // limitarsi a riallineare le date. Il rientro vero resta gestito solo
+  // al momento in cui l'evento che lo rappresenta viene inserito/modificato.
   var moves = recalculated.filter(function(event) { return event.type === 'move'; });
   var lastMove = moves.length ? moves[moves.length - 1] : null;
   if (lastMove) {

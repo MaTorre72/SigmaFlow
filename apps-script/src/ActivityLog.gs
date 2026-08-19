@@ -113,6 +113,22 @@ function validateSequence_(events, candidate) {
     hardErrors.push('COLONNA_NON_TROVATA');
   }
 
+  // M2 (DESIGN_dashboard.md, §3, opzione 2): un evento 'move' inserito a
+  // mano in Cronologia che rappresenterebbe un rientro diretto da
+  // un'attesa/completato a WIP deve essere vietato con la stessa regola
+  // gia' applicata al drag-and-drop reale (moveJob, Kanban.gs) - non solo
+  // sulla board, altrimenti la Cronologia potrebbe registrare uno stato
+  // che l'interfaccia normale non permetterebbe mai di raggiungere.
+  if (candidate.type === 'move' && candidate.from && !hardErrors.length) {
+    var sourceColumnForReentryCheck = findColumn_(columns, candidate.from);
+    var targetColumnForReentryCheck = findColumn_(columns, candidate.to);
+    var sourceClosesTowardActiveForCheck = sourceColumnForReentryCheck &&
+      (sourceColumnForReentryCheck.role === 'stand_by' || sourceColumnForReentryCheck.role === 'done');
+    if (sourceClosesTowardActiveForCheck && targetColumnForReentryCheck && targetColumnForReentryCheck.role === 'wip') {
+      hardErrors.push('RIENTRO_DIRETTO_WIP_NON_CONSENTITO');
+    }
+  }
+
   if (candidate.type === 'correction' && !String(candidate.reason || '').trim()) {
     hardErrors.push('REASON_OBBLIGATORIA');
   }

@@ -315,6 +315,9 @@ function runAllTests() {
     testMissingRequiredParam,
     testAddActivityEventMoveValido,
     testAddActivityEventTsFuturo,
+    testAddActivityEventManualReentryUpdatesStatusAndOpensVisit,
+    testAddActivityEventManualReentryDirectToWipBlocked,
+    testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit,
     testAddActivityEventColonnaNonTrovata,
     testAddActivityEventReasonObbligatoria,
     testAddActivityEventSequenceWarningsSenzaForce,
@@ -1069,12 +1072,18 @@ function testDeleteActivityEventRealignsOpenVisit() {
     var jobId = testAddJobWithPastArrival_({ title: 'Cancellazione allinea visita', size_class: 'M' });
     var columns = readColumns_();
     var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
-    var waitCol = columns.filter(function(c) { return c.role === 'stand_by'; })[0];
+    // M2: una colonna neutrale, non stand_by/done — un rientro diretto da
+    // stand_by/done a WIP e' ora vietato anche via Cronologia manuale
+    // (RIENTRO_DIRETTO_WIP_NON_CONSENTITO), lo stesso vincolo gia'
+    // presente sul drag-and-drop reale (moveJob). Non e' l'oggetto di
+    // questo test (riallineamento dopo cancellazione), quindi si passa da
+    // una colonna neutrale invece che da un'attesa.
+    var neutralCol = columns.filter(function(c) { return c.role === 'neutral'; })[0];
     var t1 = testTsMinutesAgo_(90);
     var t2 = testTsMinutesAgo_(60);
     var t3 = testTsMinutesAgo_(30);
     addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: wipCol.id });
-    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: waitCol.id });
+    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: neutralCol.id });
     addActivityEvent({ job_id: jobId, type: 'move', ts: t3, to: wipCol.id, force: true });
 
     deleteActivityEvent({ job_id: jobId, event_id: e2.data.event.id });
@@ -2288,6 +2297,86 @@ function testAddActivityEventTsFuturo() {
   });
 }
 
+// M2 (DESIGN_dashboard.md, §3, opzione 2 — decisione di Marco 2026-08-19):
+// riproduce esattamente lo scenario trovato in collaudo: un caso in
+// un'attesa, un evento 'move' inserito a mano in Cronologia verso
+// backlog (un vero rientro) - deve ricalcolare job.status e aprire la
+// visita mancante, esattamente come farebbe il drag-and-drop reale
+// (moveJob), non solo registrare l'evento nel log.
+function testAddActivityEventManualReentryUpdatesStatusAndOpensVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro registrato a mano', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    // ts non nel passato (testTsMinutesAgo_(0)): deve ordinarsi DOPO il
+    // move a wait_client appena fatto da moveJob (anch'esso a "adesso"),
+    // altrimenti computeFromForCandidate_ lo collocherebbe prima nella
+    // sequenza e produrrebbe un falso COLONNA_DOPPIA (creazione->backlog
+    // seguito da questo candidato->backlog).
+    var rientroTs = testTsMinutesAgo_(0);
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: rientroTs, to: 'backlog' });
+
+    assertTrue_(result.data.ok === true, 'l\'evento di rientro manuale dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('backlog', job.status, 'la correzione manuale deve spostare davvero la card, non solo il diario');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'il rientro manuale deve aprire una nuova visita, come il drag-and-drop reale');
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    var opened = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
+    assertEquals_(rientroTs, closed.rientro_ts, 'la visita 1 risulta chiusa alla data dell\'evento corretto');
+    assertEquals_('wait_client', closed.rientro_da, 'rientro_da = colonna di provenienza');
+    assertEquals_('wait_client', opened.rework_cause, 'rework_cause della visita 2 = rientro_da della precedente');
+    assertTrue_(Boolean(opened.incarico_ts), 'la visita 2 ha incarico_ts (destinazione backlog)');
+  });
+}
+
+// Stessa regola gia' applicata al drag-and-drop reale (moveJob): un
+// rientro diretto da un'attesa/completato a WIP resta vietato anche
+// quando arriva da una correzione manuale in Cronologia, non solo dalla
+// board — altrimenti la Cronologia potrebbe registrare uno stato che
+// l'interfaccia normale non permetterebbe mai di raggiungere.
+function testAddActivityEventManualReentryDirectToWipBlocked() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro diretto a WIP vietato', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip', force: true });
+
+    assertTrue_(result.data.ok === false, 'rientro diretto a WIP: ok false');
+    assertTrue_(result.data.hardErrors.indexOf('RIENTRO_DIRETTO_WIP_NON_CONSENTITO') !== -1, 'hardErrors contiene RIENTRO_DIRETTO_WIP_NON_CONSENTITO');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'nessuna visita aperta per un evento rifiutato');
+  });
+}
+
+// Un secondo salvataggio dello stesso evento di rientro (es. solo per
+// correggere la nota, senza cambiare data/colonne) non deve duplicare la
+// visita gia' aperta la prima volta.
+function testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro corretto due volte', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var rientroTs = testTsMinutesAgo_(0);
+    var added = addActivityEvent({ job_id: created.job_id, type: 'move', ts: rientroTs, to: 'backlog' });
+    assertEquals_(2, readVisiteForJob_(ss, created.job_id).length, 'precondizione: la prima registrazione ha gia\' aperto la visita 2');
+
+    var updated = updateActivityEvent({ job_id: created.job_id, event_id: added.data.event.id, note: 'correzione della sola nota' });
+
+    assertTrue_(updated.data.ok === true, 'la modifica della nota dovrebbe riuscire');
+    assertEquals_(2, readVisiteForJob_(ss, created.job_id).length, 'nessuna visita duplicata risalvando lo stesso rientro');
+  });
+}
+
 function testAddActivityEventColonnaNonTrovata() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -2544,12 +2633,16 @@ function testDeleteActivityEventManual() {
     var jobId = testAddJobWithPastArrival_({ title: 'Delete evento manual', size_class: 'M' });
     var columns = readColumns_();
     var todoCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
-    var waitCol = columns.filter(function(c) { return c.role === 'stand_by'; })[0];
+    // M2: colonna neutrale, non stand_by/done — vedi nota in
+    // testDeleteActivityEventRealignsOpenVisit: un rientro diretto da
+    // un'attesa a WIP e' ora vietato anche via Cronologia manuale, non e'
+    // l'oggetto di questo test.
+    var neutralCol = columns.filter(function(c) { return c.role === 'neutral'; })[0];
     var t1 = testTsMinutesAgo_(90);
     var t2 = testTsMinutesAgo_(60);
     var t3 = testTsMinutesAgo_(30);
     addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: todoCol.id, align_fields: { start_ts: t1 } });
-    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: waitCol.id });
+    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: neutralCol.id });
     var e3 = addActivityEvent({ job_id: jobId, type: 'move', ts: t3, to: todoCol.id, force: true, align_fields: { start_ts: t3 } });
 
     var del = deleteActivityEvent({ job_id: jobId, event_id: e2.data.event.id });
