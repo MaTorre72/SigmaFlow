@@ -1670,7 +1670,7 @@
         '<td>' + formatItalianDate(item.archiviato_ts) + '</td>' +
         '<td>' + (item.total_visits || 0) + '</td>' +
         '<td class="row-actions">' +
-          '<button type="button" class="secondary-button" data-action="duplica">Duplica</button>' +
+          '<button type="button" class="secondary-button" data-action="duplica">Usa come nuovo caso</button>' +
         '</td>';
       row.querySelector('[data-action="duplica"]').addEventListener('click', function() {
         duplicaJobFromArchivio(item.job_id, item.title || item.job_id);
@@ -1679,13 +1679,17 @@
     });
   }
 
-  // N5 (§7): "Duplica" crea un caso NUOVO attivo a partire da un caso
-  // archiviato - nessun dato storico riportato (arrival_ts/incarico_chiuso_ts/
-  // status/visite/log ripartono da zero, vedi duplicaJob_ lato server).
-  // Conferma leggera: non e' un'azione distruttiva, ne' sul caso
-  // archiviato (resta li' invariato) ne' altrove.
+  // N5 (§7): "Usa come nuovo caso" (etichetta rivista su richiesta di
+  // Marco il 2026-08-19: "Duplica" non rendeva l'idea che nasce una card
+  // NUOVA e vuota, non una copia della cronologia) crea un caso NUOVO
+  // attivo a partire da un caso archiviato - nessun dato storico
+  // riportato (arrival_ts/incarico_chiuso_ts/status/visite/log ripartono
+  // da zero, vedi duplicaJob_ lato server - nome interno invariato,
+  // tocca solo l'etichetta rivolta all'utente). Conferma leggera: non
+  // e' un'azione distruttiva, ne' sul caso archiviato (resta li'
+  // invariato) ne' altrove.
   function duplicaJobFromArchivio(jobId, label) {
-    if (!confirm('Duplicare "' + label + '"? Verra\' creato un nuovo caso attivo sulla board, senza cronologia ne\' visite pregresse.')) {
+    if (!confirm('Creare un nuovo caso attivo sulla board a partire da "' + label + '"? Il nuovo caso riparte da zero: nessuna cronologia ne\' visita pregressa viene riportata.')) {
       return;
     }
     callApi('duplicaJob', { job_id: jobId }).then(function() {

@@ -1188,6 +1188,31 @@ sulla pulizia campi e' stato chiuso in M0-A, vedi sopra):
   ricostruzione più accurata caso per caso.
 - **Migliore allineamento e lettura della dashboard alla dispensa FSC**
   — riferimento a un documento/manuale FSC esterno da riprendere.
+- **Buco trovato da Marco il 2026-08-19, non affrontato (esplicitamente
+  fuori scope della sessione archiviazione/backup)**: modificare la
+  Cronologia a mano (tab Cronologia, `addActivityEvent`/
+  `updateActivityEvent`, Kanban.gs) non aggiorna lo stato derivato
+  del caso. Verificato nel codice, non solo osservato: `checkStructuralAlignment_`/
+  `applyStructuralAlignment_`/`alignOpenVisitFields_` allineano **solo**
+  i campi di data (`start_ts`/`done_ts`/`incarico_ts`/`prep_ts`/
+  `arrival_ts`) sulla **visita già aperta** (`ensureOpenVisit_`) — mai
+  `job.status` (la card non cambia colonna sulla board) e mai la
+  creazione di una **nuova** riga `visite` per un vero rientro (quello
+  — nuova visita, `numero_visita` incrementato — vive solo dentro
+  `moveJob()`/`updateVisiteForMove_`, il percorso reale del
+  drag-and-drop, mai richiamato da qui). Conseguenza pratica: un
+  rientro (o un cambio di colonna) registrato a mano in Cronologia
+  resta visibile solo in `activity_log_json` — non sposta la card, non
+  crea la visita corrispondente, e sparisce da tutte le metriche che
+  leggono `visite` (rientri, tempi, capacità — quasi tutta la
+  dashboard). Da decidere in una sessione dedicata: se questo è il
+  comportamento voluto (Cronologia = solo racconto della storia, non
+  fonte di verità per lo stato derivato) o se serve un meccanismo che,
+  quando un evento 'move' in Cronologia rappresenta un rientro reale,
+  ricalcoli anche `status` e crei la visita mancante — non banale,
+  perché "rientro" non è "qualunque move" (regole di validazione come
+  il divieto di rientro diretto in `wip` andrebbero rispettate anche
+  fuori da un'interazione reale sulla board).
 
 ## Riferimenti tecnici correnti
 
