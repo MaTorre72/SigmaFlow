@@ -58,6 +58,17 @@ function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var mg1 = queueMG1_(lambda, rho, stats.mean, stats.secondMoment);
   var rework = reworkMetrics_(completed, lambda, teamSize, mu, stats.secondMoment);
   var stability = stabilityMetrics_(rho, rework.rho_effective, stats.cs2);
+  // M9 (DESIGN_dashboard.md, §4.2): E[S0]/E[S1] (dispensa FSC, Cap. 6) -
+  // tempo medio di servizio separato per prima visita (numero_visita=1)
+  // e visite di rework (numero_visita>1), sullo stesso campione
+  // 'completed' gia' usato per E_S/E_S2/Cs2 sopra. A differenza degli
+  // altri campi di questo risultato, non era mai stato calcolato prima
+  // (la ricognizione M3 lo aveva erroneamente classificato come "gia'
+  // calcolato" insieme a E_K - corretto qui, non solo esposto).
+  var firstPassServiceTimes = completed.filter(function(visit) { return Number(visit.numero_visita || 1) === 1; }).map(visitServiceTimeDays_);
+  var reworkServiceTimes = completed.filter(function(visit) { return Number(visit.numero_visita || 1) > 1; }).map(visitServiceTimeDays_);
+  var statsS0 = sampleStats_(firstPassServiceTimes);
+  var statsS1 = sampleStats_(reworkServiceTimes);
 
   var result = {
     window_days: windowDays,
@@ -69,6 +80,8 @@ function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchiv
     E_S2: round_(stats.secondMoment),
     Var_S: round_(stats.variance),
     Cs2: round_(stats.cs2),
+    E_S0: firstPassServiceTimes.length ? round_(statsS0.mean) : null,
+    E_S1: reworkServiceTimes.length ? round_(statsS1.mean) : null,
     MM1: mm1,
     MG1: mg1,
     rework: rework,

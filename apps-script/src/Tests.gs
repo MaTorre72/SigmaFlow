@@ -310,6 +310,8 @@ function runAllTests() {
     testDelayProfileComputesAlphaAndKernelFromDeliveredThenReentered,
     testDelayProfileAlphaCountsAllDeliveriesNotOnlyReentered,
     testBuildSystemStateExposesDelayProfileInSystemState,
+    testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus,
+    testCalculateMetricsE_S0E_S1NullWhenNoSamples,
     testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
     testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
     testBuildSystemStateTimelineIncludesArchivedJobs,
@@ -2269,6 +2271,33 @@ function testGetMetricsNeverReadsCestino() {
 // 'visite' e non piu' dal campo service_time_d su 'jobs' — il job ha un
 // valore "decoy" chiaramente diverso su jobs, il tempo vero (10 giorni)
 // e' solo su visite (start_ts/consegna_ts).
+// M9 (DESIGN_dashboard.md, §4.2): E[S0]/E[S1] (Cap. 6) - tempo medio di
+// servizio separato per prima visita (numero_visita=1) e visite di
+// rework (numero_visita>1), mai calcolato prima di M9 (corretto un
+// errore della ricognizione M3, che lo classificava per sbaglio come
+// "gia' calcolato" insieme a E[K]).
+function testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 20 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-S0S1', status: 'done', arrival_ts: arrival, visit_number: 2 }];
+  var visite = [
+    { job_id: 'JOB-S0S1', numero_visita: 1, apertura_ts: arrival, start_ts: arrival, consegna_ts: Utilities.formatDate(new Date(now.getTime() - 15 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX") },
+    { job_id: 'JOB-S0S1', numero_visita: 2, apertura_ts: nowIso_(), start_ts: Utilities.formatDate(new Date(now.getTime() - 10 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX"), consegna_ts: nowIso_() }
+  ];
+
+  var metrics = calculateMetrics_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(5, metrics.E_S0, 'E_S0 = tempo di servizio della visita 1 (5 giorni)');
+  assertEquals_(10, metrics.E_S1, 'E_S1 = tempo di servizio della visita di rework (10 giorni)');
+}
+
+function testCalculateMetricsE_S0E_S1NullWhenNoSamples() {
+  var metrics = calculateMetrics_([], [], SIGMAFLOW.DEFAULT_CONFIG, new Date());
+
+  assertEquals_(null, metrics.E_S0, 'E_S0 non stimabile senza campioni');
+  assertEquals_(null, metrics.E_S1, 'E_S1 non stimabile senza campioni');
+}
+
 function testGetMetricsUsesVisiteNotJobFields() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);

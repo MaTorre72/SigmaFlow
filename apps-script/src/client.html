@@ -1890,6 +1890,7 @@
     });
 
     renderDelayProfile(system.delayProfileMetrics || {});
+    renderAdvancedMetrics(metrics);
 
     renderScenarios(system.scenarioReadiness || {});
     renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
@@ -1913,6 +1914,50 @@
     root.className = 'gauge gauge-' + tone;
     root.style.setProperty('--gauge-value', Math.round(ratio * 100) + '%');
     label.textContent = Math.round(Number(value) * 100) + '%';
+  }
+
+  // M9 (DESIGN_dashboard.md, §4.2): 'metrics' e' l'oggetto completo
+  // restituito da getMetrics - a differenza di tutto il resto di
+  // renderMetrics, che legge solo metrics.systemState, qui si leggono i
+  // campi top-level (lambda/mu/rho/MM1/MG1/rework/Cs2/E_S0/E_S1) gia'
+  // calcolati da calculateMetrics_ ma mai renderizzati prima di M9
+  // (verificato in M3).
+  function renderAdvancedMetrics(metrics) {
+    renderDl('advanced-base-metrics', {
+      'Iniziative osservate nel periodo': valueOrDash(metrics.n_jobs_observed),
+      'Tasso di arrivo (lambda)': estimableValue(metrics.lambda, ' iniziative/giorno'),
+      'Tasso di servizio (mu)': estimableValue(metrics.mu, ' iniziative/giorno/operatore'),
+      'Utilizzo (rho)': nullablePercent(metrics.rho, true),
+      'Tempo medio di servizio (E[S])': estimableValue(metrics.E_S, ' giorni'),
+      'Variabilita\' del servizio (Cv^2)': estimableValue(metrics.Cs2),
+      'Tempo medio prima visita (E[S0])': estimableValue(metrics.E_S0, ' giorni'),
+      'Tempo medio visita di rework (E[S1])': estimableValue(metrics.E_S1, ' giorni')
+    });
+
+    var mm1 = metrics.MM1 || {};
+    renderDl('advanced-mm1-metrics', {
+      'Attesa in coda (Wq)': estimableValue(mm1.Wq, ' giorni'),
+      'Tempo totale nel sistema (W)': estimableValue(mm1.W, ' giorni'),
+      'Iniziative in coda (Lq)': estimableValue(mm1.Lq),
+      'Iniziative nel sistema (L)': estimableValue(mm1.L)
+    });
+
+    var mg1 = metrics.MG1 || {};
+    renderDl('advanced-mg1-metrics', {
+      'Attesa in coda (Wq)': estimableValue(mg1.Wq, ' giorni'),
+      'Tempo totale nel sistema (W)': estimableValue(mg1.W, ' giorni'),
+      'Iniziative in coda (Lq)': estimableValue(mg1.Lq),
+      'Iniziative nel sistema (L)': estimableValue(mg1.L)
+    });
+
+    var rework = metrics.rework || {};
+    renderDl('advanced-rework-metrics', {
+      'Quota di visite di rework (p1)': nullablePercent(rework.p1, true),
+      'Rientri medi quando c\'e\' rework (r)': estimableValue(rework.r),
+      'Numero atteso di visite per iniziativa (E[K])': estimableValue(rework.E_K),
+      'Tasso di arrivo effettivo (lambda_effective)': estimableValue(rework.lambda_effective, ' visite/giorno'),
+      'Utilizzo effettivo (rho_effective)': nullablePercent(rework.rho_effective, true)
+    });
   }
 
   function renderDelayProfile(profile) {
