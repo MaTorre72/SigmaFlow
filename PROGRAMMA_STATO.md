@@ -93,11 +93,17 @@ programma (vedi incidente sopra) — non una sessione autonoma separata.
   (invariato per ogni chiamante esistente) — necessario perché
   `backupRetentionDays_` non dipenda dalla stessa risoluzione
   ambientale che ha causato l'incidente.
-- Nuovo scope OAuth in `appsscript.json`:
-  `https://www.googleapis.com/auth/drive.file` — **stessa sorpresa già
-  vista in N3** (scope mancante trovato solo al primo tentativo reale
-  su GAS): qui anticipata in fase di design, Marco dovrà aspettarsi una
-  nuova richiesta di consenso Google alla prima esecuzione.
+- Nuovo scope OAuth in `appsscript.json` — **stessa sorpresa già vista
+  in N3**, ma anche peggio del previsto: lo scope proposto in fase di
+  design (`drive.file`) si è rivelato insufficiente al primo tentativo
+  reale su TEST (N-B2, vedi sotto) — `drive.file` copre solo i file
+  creati/aperti dallo script stesso, non un file preesistente aperto
+  per id come il vero foglio PROD, e `prodParentFolder_()` fa proprio
+  questo. Corretto ampliando lo scope a
+  `https://www.googleapis.com/auth/drive` (accesso completo — non
+  esiste una via di mezzo). Marco dovrà aspettarsi una **nuova**
+  richiesta di consenso Google al prossimo tentativo (la seconda per
+  questo programma).
 
 **Harness Node esteso** (`apps-script/test-harness/gas-harness.js`):
 mock minimale di `DriveApp` (file/cartelle **annidate** — `Folder.

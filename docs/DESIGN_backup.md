@@ -91,10 +91,23 @@ da costruire.
 `Spreadsheet.copy()` e la gestione dei file nella cartella di backup
 richiedono uno scope Drive non ancora presente in `appsscript.json`
 (oggi: `spreadsheets`, `script.container.ui`, `script.scriptapp`).
-Proposto **`https://www.googleapis.com/auth/drive.file`** — il più
-stretto dei due possibili: copre i file che lo script stesso crea/apre
-(la cartella e le copie di backup), non l'intero Drive. **Esattamente
-lo stesso tipo di sorpresa già capitato in N3** (scope
+
+**Tentativo iniziale, insufficiente — trovato al primo tentativo reale
+su TEST (N-B2, 2026-08-19)**: `https://www.googleapis.com/auth/drive.file`,
+il più stretto dei due possibili, sembrava sufficiente in fase di
+design. Non lo è: `drive.file` copre solo i file che lo script *crea o
+apre esplicitamente* (le copie di backup stesse), **non** un file
+preesistente aperto per id come il vero foglio PROD — e
+`prodParentFolder_()` (§3, decisione presa durante N-B2 di risalire
+alla cartella del foglio PROD invece di un id fisso) chiama proprio
+`DriveApp.getFileById(ss.getId())` su quel file preesistente. Fallito
+con `Specified permissions are not sufficient to call
+DriveApp.getFileById`. **Corretto**: scope allargato a
+**`https://www.googleapis.com/auth/drive`** (accesso completo) — non
+esiste una via di mezzo che copra sia "leggi i metadati di un file
+Drive arbitrario non creato da questo script" sia "crea/sposta file",
+serve il pieno accesso. **Esattamente lo stesso tipo di sorpresa già
+capitato in N3** (scope
 `script.scriptapp` mancante, trovato solo al primo tentativo reale su
 GAS, non rilevabile dall'harness Node) — qui anticipato in fase di
 design apposta per non ripeterlo: quando Marco eseguirà per la prima
