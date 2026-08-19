@@ -1,6 +1,52 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-19
 
+## M3 (dashboard) — Ricognizione completata, GATE 🔴 UMANO in attesa (2026-08-19)
+
+Riferimento: [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §4.
+Nessun codice toccato — solo lettura/inventario, come da contenuto
+previsto per M3.
+
+**Risultato** (dettaglio completo in §4.1 del design doc): tutto
+quanto oggi in `systemState` (`Model.gs`/`dashboard.html`) è
+effettivamente renderizzato, nessun campo morto lì — a differenza dei
+campi legacy top-level di `calculateMetrics_` (`MM1`/`MG1`/`lambda`/
+`rework`/`stability`/`distributions`), mai passati a `systemState`,
+quindi mai mostrati (già noto da N6, riconfermato). Confrontato con
+`DESIGN_modello_caso_visita.md` §10 (Cap. 11-15): mancano ancora
+$T_{cliente}$/$T_{ente}$/$T_{interno}$ (mai sommati/esposti),
+$B_{lat}(t)$ (mai calcolato), $\alpha$/kernel Cap. 13 (mai stimato);
+il margine di stabilità (Cap. 15) è invece **già calcolato**
+(`stabilityMetrics_`) ma mai collegato a `systemState` — solo da
+esporre, non da ricalcolare.
+
+**Piano proposto** (§4.2 del design doc), in attesa di conferma:
+- **M4**: collegare `stability` (già calcolato) a `systemState` +
+  pannello dedicato — zero nuovo calcolo.
+- **M5**: $T_{cliente}$/$T_{ente}$/$T_{interno}$ — somma di un campo
+  già raccolto per ogni visita, mai aggregato.
+- **M6**: $B_{lat}(t)$ — stessa categoria di M5, dato già presente,
+  solo mai aggregato in questo modo.
+- **M7**: $\alpha$/kernel (Cap. 13) — **raccomandato fuori scope**,
+  richiede una vera stima statistica, non solo un aggregato; da
+  riprendere con un documento dedicato quando serve davvero.
+- **M8**: ottimizzazioni frontend residue (`renderBoard()` DOM
+  completo, letture integrali dei fogli) — confermate ancora presenti
+  nel codice, nessuna misura reale raccolta in questa sessione (nessun
+  accesso al deployment). Inclusione **non raccomandata di default**,
+  decisione esplicita di Marco.
+- Non deciso dalla ricognizione: se aggiungere un pannello "quadro
+  avanzato" per le metriche di Cap. 3-9 già calcolate ma mai esposte
+  ($\lambda$/$\mu$/$\rho$/$C_v^2$/Pollaczek-Khinchine/
+  $E[S_0]$/$E[S_1]$/$E[K]$).
+
+**GATE 🔴 UMANO (§3 e §6 del design doc) — IN ATTESA**: come da
+runbook, questa sessione si ferma qui. Serve una conferma esplicita di
+Marco su: (1) includere M4-M6 come proposto, (2) lasciare M7 fuori
+scope come raccomandato, (3) includere o no M8, (4) aggiungere o no un
+pannello "quadro avanzato" per Cap. 3-9. Nessuna sotto-fase M4+
+iniziata.
+
 ## M2 (dashboard) — DONE, gate confermato da Marco (2026-08-19)
 
 Proseguita subito dopo la conferma del gate (nessuna nuova richiesta di

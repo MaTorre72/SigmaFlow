@@ -165,6 +165,72 @@ Contenuto:
 stesso principio già usato per N1/N3/N-B2/N-B3, un programma nuovo si
 conferma prima di costruirci sopra.
 
+### 4.1 Risultato della ricognizione (2026-08-19)
+
+**Inventario `systemState` (`Model.gs`/`dashboard.html`)** — tutto
+quanto oggi calcolato in `buildSystemState_` **è** renderizzato in UI,
+nessun campo morto lì (a differenza dei campi legacy top-level di
+`calculateMetrics_` — `MM1`/`MG1`/`lambda`/`rework`/`stability`/
+`distributions` — mai passati a `systemState`, quindi mai
+renderizzati, già osservato in N6 e riconfermato qui): `dataQuality`,
+`flowMetrics`, `reworkMetrics`, `timeMetrics`, `workloadMetrics`,
+`capacityMetrics`, `pointsMetrics`, `scenarioReadiness` hanno tutti un
+pannello dedicato in `dashboard.html`.
+
+**Confronto con `DESIGN_modello_caso_visita.md` §10 (Cap. 11-15,
+metriche di governo)**:
+
+| Metrica §10 | Stato |
+|---|---|
+| $L_{WIP}(t)$ | ✅ `workloadMetrics` |
+| $c(t)$ | ✅ `flowMetrics.completed_per_day` |
+| $p_1$, $r$ (rientri) | ✅ `reworkMetrics` |
+| $T_{cliente}$, $T_{ente}$, $T_{interno}$ | ❌ accumulati su ogni `visite.t_*_d` ma **mai sommati/esposti** — nessuna funzione in `Model.gs` li legge, nessun pannello li mostra. "Dove si blocca il lavoro" resta oggi non rispondibile dalla dashboard |
+| $B_{lat}(t)$ (esposizione futura a rientri) | ❌ non calcolato — nessuna funzione conta le consegne recenti con `incarico_chiuso_ts` nullo |
+| $\alpha$, kernel $k[m]$ (Cap. 13, profilo del ritardo) | ❌ non implementato — nessuna stima del "quanto e quando rientra il lavoro" |
+| Margine di stabilità (Cap. 15) | 🟡 **già calcolato** (`stabilityMetrics_`, `calculateMetrics_` riga `stability`) ma **mai collegato a `systemState`** — un caso a metà tra "manca" e "solo da esporre", diverso dagli altri due sopra (quelli richiedono nuovo calcolo, questo solo un collegamento) |
+
+Quadro di dettaglio "su richiesta" (§10, Cap. 3-9): $\lambda$, $\mu$,
+$\rho$, $C_v^2$/Pollaczek-Khinchine, $\mathbb{E}[S_0]$/
+$\mathbb{E}[S_1]$/$\mathbb{E}[K]$ **sono già calcolati** in
+`calculateMetrics_`/`reworkMetrics_`/`queueMG1_` — semplicemente non
+esposti in nessun pannello (nessun "quadro avanzato" esiste ancora in
+UI). Restano davvero assenti anche dal calcolo (non solo dalla UI):
+scomposizione di $W_q$ in attesa-incarico/preparazione, conteggio dei
+rientri per causa (`rework_cause` è già in `visite`, ma nessuna
+funzione lo aggrega), matrice linearizzata $A$ e autovalori (Cap.
+14-15 — il documento la classifica esplicitamente come calcolo più
+oneroso, "su richiesta").
+
+**Ottimizzazioni frontend residue** (`renderBoard()`,
+`getDataRange().getValues()`): confermate presenti, invariate da
+quanto già descritto in §3 del programma — `renderBoard()`
+(`client.html`) fa sempre `root.innerHTML = ''` seguito da una
+ricostruzione completa del DOM ad ogni chiamata, qualunque sia la
+dimensione della modifica. Nessuna misura di quanto pesino in pratica
+su TEST/PROD raccolta in questa ricognizione (nessun accesso al
+deployment reale in questa sessione) — decisione sotto in base a
+questo limite, non a un dato misurato.
+
+### 4.2 Sotto-fasi proposte M4..Mn
+
+| Sotto-fase | Contenuto | Perché in questa posizione |
+|---|---|---|
+| **M4** | Collegare `stability` (già calcolato) a `systemState` + nuovo pannello "Margine di stabilità" in dashboard | Zero nuovo calcolo, solo collegamento — il pezzo più economico del quadro Cap. 15 mancante |
+| **M5** | Calcolare e mostrare $T_{cliente}$/$T_{ente}$/$T_{interno}$ (somma `t_*_d` su `visite` nella finestra osservata) — nuovo pannello "Dove si blocca il lavoro" | Dato già raccolto per ogni visita (§9 del modello caso/visita), solo mai sommato — nessuna decisione di design aperta, un aggregato in più su dati esistenti |
+| **M6** | Calcolare e mostrare $B_{lat}(t)$ (consegne recenti con `incarico_chiuso_ts` nullo, esposizione futura a rientri) | Stessa categoria di M5 — dato già presente (`incarico_chiuso_ts` su `jobs`, `consegna_ts` su `visite`), solo mai aggregato in questo modo |
+| **M7** | $\alpha$/kernel $k[m]$ (Cap. 13, profilo del ritardo — "quanto e quando rientra il lavoro") | **Fuori scope raccomandato per ora** — a differenza di M4-M6 richiede una vera stima statistica (non una somma), il documento FSC la tratta in un capitolo a parte (Cap. 13, "Stima del profilo di ritardo e simulazione di scenari") con un livello di complessità che merita una sessione di design dedicata, non un innesto rapido in Fase M |
+| **M8** | Ottimizzazioni frontend residue (`renderBoard()` DOM completo, letture `getDataRange()` integrali) | Decisione esplicita da prendere con Marco (vedi sotto) — non incluso di default |
+
+**Raccomandazione**: includere M4-M6 in questa fase (basso rischio,
+nessuna decisione di design aperta, dati già raccolti — solo
+calcolo/esposizione mancante). Lasciare M7 fuori scope, da riprendere
+con un documento dedicato quando serve davvero stimare il profilo di
+ritardo. Su M8 (ottimizzazioni frontend) e sull'inclusione di un
+pannello "quadro avanzato" per le metriche di §10 già calcolate ma non
+esposte (Cap. 3-9: $\lambda$/$\mu$/$\rho$/$C_v^2$/PK/$E[S_0,S_1,K]$) —
+decisione esplicita di Marco, non assunta da questa ricognizione.
+
 ---
 
 ## 5. Punti parcheggiati, fuori da questa fase
@@ -186,4 +252,5 @@ conferma prima di costruirci sopra.
 | M1 (push) | Fusione del fix in `main` | Prassi ordinaria (mai push diretto su `main`), non un gate di design |
 | M2.1 | Decisione tra le due opzioni Cronologia | Decisione di design, non un dettaglio implementativo |
 | M3 | Conferma del piano M4..Mn prima di iniziare M4 | Un programma nuovo si conferma prima di costruirci sopra |
+| M3 (stesso gate) | Scope di M8 (ottimizzazioni frontend) e di un eventuale pannello "quadro avanzato" (Cap. 3-9) | Decisioni esplicite non assunte dalla ricognizione, vedi §4.2 |
 | (a parte, non di questa fase) | Allineamento schema su PROD | Qualunque scrittura su PROD, sempre riservata a Marco |
