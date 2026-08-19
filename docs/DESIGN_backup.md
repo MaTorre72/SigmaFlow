@@ -168,9 +168,12 @@ da solo), stesso principio già applicato in N3 (§9 di
       (handler diverso, nessuna dipendenza di codice fra i due) (N-B1)
 - [x] Nessuna funzione di questo programma scrive mai sul foglio PROD
       stesso (solo letture + creazione di file nuovi altrove) (N-B1)
-- [ ] Il primo backup reale e l'installazione del trigger sono
-      eseguiti da Marco, mai da Claude (N-B2/N-B3)
-- [ ] Nessuna funzione di ripristino automatico esiste nel codice (§6)
+- [x] Il primo backup reale è eseguito da Marco, mai da Claude —
+      confermato il 2026-08-19 ("tutto perfetto") dopo la correzione
+      dello scope OAuth (N-B2)
+- [ ] L'installazione del trigger è eseguita da Marco, mai da Claude
+      (N-B3)
+- [x] Nessuna funzione di ripristino automatico esiste nel codice (§6)
 
 ## Gate 🔴 UMANO
 
