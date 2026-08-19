@@ -147,6 +147,42 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var mg1 = enoughCompleted && effectiveLoad < 1
     ? queueMG1_(totalPassageRate, effectiveLoad, stats.mean, stats.secondMoment)
     : unstableQueue_();
+  // M4 (DESIGN_dashboard.md, §4.2): stabilityMetrics_ era gia' calcolata in
+  // calculateMetrics_ (Cap. 15 della dispensa FSC) ma mai passata a
+  // systemState, quindi mai renderizzata (vedi ricognizione M3) - qui si
+  // ricalcola con gli stessi ingredienti gia' in scope di buildSystemState_
+  // (nessun nuovo dato raccolto): rho "grezzo" (solo lavoro nuovo, senza
+  // rientri) = newRate/effectiveCapacity, rho effettivo (con rientri) =
+  // effectiveLoad gia' calcolato sopra, variabilita' = stats.cs2.
+  var rawRho = enoughCompleted && effectiveCapacity ? newRate / effectiveCapacity : null;
+  var stability = rawRho === null || effectiveLoad === null
+    ? null
+    : stabilityMetrics_(rawRho, effectiveLoad, stats.cs2);
+  // M5 (DESIGN_dashboard.md, §4.2): T_cliente/T_ente/T_interno (dispensa
+  // FSC §10, "dove si blocca il lavoro") - somma di un campo gia'
+  // accumulato per ogni visita (accumulateWaitTime_, Kanban.gs) ogni volta
+  // che una visita esce da una colonna stand_by, mai finora sommato.
+  // Stessa finestra ("observed") gia' usata per flowMetrics/reworkMetrics,
+  // per restare coerente con le altre metriche calcolate su periodo.
+  var waitTime = {
+    client_days: round_(sumVisitField_(observed, 't_cliente_d')),
+    authority_days: round_(sumVisitField_(observed, 't_ente_d')),
+    internal_days: round_(sumVisitField_(observed, 't_interno_d'))
+  };
+  // M6 (DESIGN_dashboard.md, §4.2): B_lat(t) (dispensa FSC §10,
+  // "esposizione futura a rientri") - consegne recenti (consegna_ts nella
+  // finestra osservata) la cui visita non e' mai rientrata (rientro_ts
+  // vuoto: e' ancora "l'ultima visita del caso", DESIGN_modello_caso_visita.md
+  // §8) e il cui caso non e' ancora formalmente chiuso
+  // (incarico_chiuso_ts vuoto). Solo jobs attivi: un caso archiviato ha
+  // per costruzione incarico_chiuso_ts valorizzato (archiveJob_ lo
+  // richiede), quindi non puo' mai comparire qui.
+  var jobsById = indexBy_(jobs, 'job_id');
+  var latentBacklogCount = completed.filter(function(visit) {
+    if (visit.rientro_ts) { return false; }
+    var job = jobsById[visit.job_id];
+    return Boolean(job) && !job.incarico_chiuso_ts;
+  }).length;
   var workload = currentWorkload_(jobs, columnMap);
   var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
 
@@ -193,6 +229,23 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       safety_margin: availableShare === null ? null : round_(availableShare)
     },
     pointsMetrics: points,
+    waitTimeMetrics: {
+      window_days: windowDays,
+      client_days: waitTime.client_days,
+      authority_days: waitTime.authority_days,
+      internal_days: waitTime.internal_days,
+      total_days: round_(waitTime.client_days + waitTime.authority_days + waitTime.internal_days)
+    },
+    latentBacklogMetrics: {
+      window_days: windowDays,
+      count: latentBacklogCount
+    },
+    stabilityMetrics: stability === null ? null : {
+      margin: stability.margin,
+      congestion_factor: stability.congestion_factor,
+      variability_factor: stability.variability_factor,
+      system_state: stability.system_state
+    },
     scenarioReadiness: {
       active: false,
       message: 'La simulazione non e ancora attiva. La struttura e pronta per confrontare scenari futuri.',
@@ -322,6 +375,13 @@ function pointsByColumn_(jobs, columnMap) {
 
 function sumJobPoints_(jobs) {
   return jobs.reduce(function(sum, job) { return sum + jobPoints_(job); }, 0);
+}
+
+// M5 (DESIGN_dashboard.md, §4.2): somma un accumulatore t_*_d su un
+// insieme di visite - il campo resta 0 finche' la visita non e' mai
+// uscita dalla colonna stand_by corrispondente (accumulateWaitTime_).
+function sumVisitField_(visite, field) {
+  return visite.reduce(function(sum, visit) { return sum + Number(visit[field] || 0); }, 0);
 }
 
 function jobPoints_(job) {

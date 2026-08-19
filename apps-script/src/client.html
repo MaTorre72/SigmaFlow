@@ -1865,6 +1865,30 @@
       'Margine disponibile': nullablePercent(capacity.available_share, true)
     });
 
+    var stability = system.stabilityMetrics || null;
+    var stabilityStateLabels = { stable: 'STABILE', stressed: 'SOTTO PRESSIONE', critical: 'CRITICO', unstable: 'INSTABILE' };
+    renderDl('stability-metrics', {
+      'Margine rispetto alla saturazione': stability ? nullablePercent(stability.margin, true) : 'Dato non ancora stimabile',
+      'Fattore di congestione': stability && stability.congestion_factor !== null ? metricValue(stability.congestion_factor) : 'Dato non ancora stimabile',
+      'Fattore di variabilita\'': stability ? metricValue(stability.variability_factor) : 'Dato non ancora stimabile',
+      'Stato': stability ? (stabilityStateLabels[stability.system_state] || stability.system_state) : 'Dato non ancora stimabile'
+    });
+
+    var waitTime = system.waitTimeMetrics || {};
+    renderDl('wait-time-metrics', {
+      'Periodo analizzato': metricValue(waitTime.window_days, ' giorni'),
+      'Attesa cliente': metricValue(waitTime.client_days, ' giorni'),
+      'Attesa enti': metricValue(waitTime.authority_days, ' giorni'),
+      'Fermi per decisione interna': metricValue(waitTime.internal_days, ' giorni'),
+      'Totale': metricValue(waitTime.total_days, ' giorni')
+    });
+
+    var latentBacklog = system.latentBacklogMetrics || {};
+    renderDl('latent-backlog-metrics', {
+      'Periodo analizzato': metricValue(latentBacklog.window_days, ' giorni'),
+      'Consegne non ancora chiuse': valueOrDash(latentBacklog.count)
+    });
+
     renderScenarios(system.scenarioReadiness || {});
     renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
     renderGauge('gauge-capacity', system.capacityMetrics.available_share, 1, false);

@@ -302,6 +302,10 @@ function runAllTests() {
     testGetMetricsUsesVisiteNotJobFields,
     testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite,
     testSystemStateInsufficientData,
+    testBuildSystemStateExposesStabilityMetrics,
+    testBuildSystemStateStabilityMetricsNullWhenInsufficientData,
+    testBuildSystemStateSumsWaitTimeByType,
+    testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
     testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
     testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
     testBuildSystemStateTimelineIncludesArchivedJobs,
@@ -1994,6 +1998,83 @@ function testSystemStateInsufficientData() {
   assertEquals_(null, state.capacityMetrics.effective_load, 'carico non stimabile');
   assertEquals_(null, state.timeMetrics.average_service_days, 'tempo medio non stimabile');
   assertEquals_(null, buildSystemState_([], [], SIGMAFLOW.DEFAULT_CONFIG, now).reworkMetrics.initiatives_with_rework, 'rientri non stimabili senza iniziative');
+}
+
+// M4 (DESIGN_dashboard.md, §4.2): stabilityMetrics (Cap. 15) esposta in
+// systemState solo quando ci sono abbastanza campioni di tempo completati
+// (stessa soglia >=5 di enoughCompleted) - stesso schema di 5 visite
+// completate di testSystemStateWorkload.
+function testBuildSystemStateExposesStabilityMetrics() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [];
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    jobs.push({ job_id: 'JOB-STAB-' + i, status: 'done', arrival_ts: arrival, visit_number: 1 });
+    visite.push({ job_id: 'JOB-STAB-' + i, numero_visita: 1, apertura_ts: arrival, start_ts: arrival, consegna_ts: nowIso_() });
+  }
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Boolean(state.stabilityMetrics), 'stabilityMetrics valorizzata con abbastanza campioni');
+  assertTrue_(state.stabilityMetrics.margin !== null, 'margin calcolato');
+  assertTrue_(['stable', 'stressed', 'critical', 'unstable'].indexOf(state.stabilityMetrics.system_state) !== -1, 'system_state e\' uno dei codici noti');
+}
+
+// M5 (DESIGN_dashboard.md, §4.2): T_cliente/T_ente/T_interno - somma di
+// un campo gia' accumulato per visita (accumulateWaitTime_, Kanban.gs)
+// nella finestra osservata, mai finora esposto.
+function testBuildSystemStateSumsWaitTimeByType() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-WAIT-BREAKDOWN', status: 'backlog', arrival_ts: arrival, visit_number: 1 }];
+  var visite = [{
+    job_id: 'JOB-WAIT-BREAKDOWN',
+    numero_visita: 1,
+    apertura_ts: arrival,
+    t_cliente_d: 3,
+    t_ente_d: 5,
+    t_interno_d: 1
+  }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(3, state.waitTimeMetrics.client_days, 'attesa cliente sommata dalla visita');
+  assertEquals_(5, state.waitTimeMetrics.authority_days, 'attesa enti sommata dalla visita');
+  assertEquals_(1, state.waitTimeMetrics.internal_days, 'attesa interna sommata dalla visita');
+  assertEquals_(9, state.waitTimeMetrics.total_days, 'totale = somma dei tre tipi');
+}
+
+// M6 (DESIGN_dashboard.md, §4.2): B_lat(t) - consegne recenti la cui
+// visita non e' mai rientrata e il cui caso non e' formalmente chiuso
+// contano come esposizione futura; un caso gia' chiuso o gia' rientrato
+// non deve comparire.
+function testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries() {
+  var now = new Date();
+  var jobs = [
+    { job_id: 'JOB-LATENT-OPEN', status: 'done', arrival_ts: nowIso_(), visit_number: 1, incarico_chiuso_ts: '' },
+    { job_id: 'JOB-LATENT-CLOSED', status: 'done', arrival_ts: nowIso_(), visit_number: 1, incarico_chiuso_ts: nowIso_() },
+    { job_id: 'JOB-LATENT-REENTERED', status: 'backlog', arrival_ts: nowIso_(), visit_number: 2, incarico_chiuso_ts: '' }
+  ];
+  var visite = [
+    { job_id: 'JOB-LATENT-OPEN', numero_visita: 1, apertura_ts: nowIso_(), consegna_ts: nowIso_(), rientro_ts: '' },
+    { job_id: 'JOB-LATENT-CLOSED', numero_visita: 1, apertura_ts: nowIso_(), consegna_ts: nowIso_(), rientro_ts: '' },
+    { job_id: 'JOB-LATENT-REENTERED', numero_visita: 1, apertura_ts: nowIso_(), consegna_ts: nowIso_(), rientro_ts: nowIso_() },
+    { job_id: 'JOB-LATENT-REENTERED', numero_visita: 2, apertura_ts: nowIso_() }
+  ];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(1, state.latentBacklogMetrics.count, 'solo la consegna non chiusa e mai rientrata conta come esposizione futura');
+}
+
+function testBuildSystemStateStabilityMetricsNullWhenInsufficientData() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-TEST-1', status: 'backlog', arrival_ts: nowIso_(), visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-TEST-1', numero_visita: 1, apertura_ts: nowIso_() }];
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(null, state.stabilityMetrics, 'stabilityMetrics non stimabile senza abbastanza campioni');
 }
 
 // N6 (DESIGN_archiviazione.md, §8/§9): le metriche storiche su una
