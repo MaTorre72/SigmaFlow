@@ -102,6 +102,42 @@ creata (come accaduto nelle sessioni precedenti a questa convenzione —
 decine di voci ormai inutili, legate a percorsi che non si
 ripeteranno mai più).
 
+**Nota per l'agente — server locale di riproduzione UI**: la stessa
+convenzione vale anche per il nome del file, non solo per la cartella —
+se serve un server locale (markup reale + `routeAction_` via harness
+Node, per verificare una feature nel Browser pane senza accesso al
+deployment TEST reale), scrivere/sovrascrivere sempre
+`/tmp/sf-scratch/repro-server.js` (stesso nome ogni sessione, contenuto
+diverso), non un file con un suffisso di fase (`n5-repro-server.js`,
+`n6-...`).
+
+**Scriverlo con `Bash` (heredoc `cat > ... <<'EOF'`), non con il tool
+Write/Edit**: su questa macchina le due famiglie di tool risolvono
+`/tmp` su due radici Windows *diverse* — `Bash` mappa `/tmp` su
+`C:\Users\<utente>\AppData\Local\Temp\`, mentre Write/Edit/Read mappano
+lo stesso percorso su `C:\tmp\`. Un file scritto con Write e poi
+eseguito con `node /tmp/...` via Bash non viene trovato (verificato
+concretamente il 2026-08-18, `MODULE_NOT_FOUND`). Scriverlo sempre con
+lo stesso tool che poi lo esegue (Bash) elimina l'ambiguità.
+
+**Avvio**: `Bash(node /tmp/sf-scratch/repro-server.js, run_in_background: true)`
+— **mai** con un prefisso `cd ... &&`, che non fa match col pattern
+pre-autorizzato in `.claude/settings.local.json` (deve essere
+un'invocazione diretta). **Apertura nel Browser pane**:
+`preview_start({ url: "http://localhost:4173" })` — **non**
+`preview_start({ name: ... })`: la variante con `name` avvia un nuovo
+processo tramite `.claude/launch.json` ed è **bloccata nelle sessioni
+non presidiate** (scheduled task, alberi remoti) — verificato
+concretamente il 2026-08-18 ("Dev servers can't be started from
+unattended sessions"). La variante con `url` apre solo una scheda
+puntata su un indirizzo già in ascolto e funziona in entrambi i casi.
+`.claude/launch.json` (voce `sigmaflow-repro`, porta 4173) resta utile
+solo nelle sessioni interattive presidiate, come scorciatoia
+equivalente. **Arresto**: `TaskStop` sull'id del task in background
+restituito da `Bash` — mai un comando di sistema tipo `Stop-Process`/
+`taskkill`, che non è pre-autorizzato e non dovrebbe servire, dato che
+lo strumento dedicato già esiste ed è verificato funzionante.
+
 ---
 
 ## Regole di codice
@@ -147,7 +183,7 @@ ordine di priorità:
 1. Codice esistente (non rompere ciò che funziona)
 2. Documentazione tecnica in `docs/` (`architecture.md`,
    `DESIGN_modello_caso_visita.md`, `DESIGN_archiviazione.md`,
-   `dashboard-metrics.md`, `testing-and-security.md`)
+   `DESIGN_backup.md`, `dashboard-metrics.md`, `testing-and-security.md`)
 3. Chiedere a Marco
 
 Se l'ambiguità non è risolvibile con questi tre passi → documentare il
@@ -167,6 +203,7 @@ documento (non un dettaglio di implementazione).
 - Architettura (schema fogli, backend, frontend): `docs/architecture.md`
 - Design del modello caso/visita: `docs/DESIGN_modello_caso_visita.md`
 - Design dell'archiviazione: `docs/DESIGN_archiviazione.md`
+- Design del backup giornaliero di PROD: `docs/DESIGN_backup.md`
 - Runbook di esecuzione autonoma: `docs/RUNBOOK_esecuzione_autonoma.md`
 - Metriche dashboard: `docs/dashboard-metrics.md`
 - Testing e sicurezza: `docs/testing-and-security.md`

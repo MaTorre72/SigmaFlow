@@ -1,5 +1,60 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-18
+Aggiornato: 2026-08-19
+
+## Incidente — property ambientale bloccata su TEST, PROD mostrava dati di TEST (2026-08-19)
+
+Marco ha segnalato che in qualche momento la webapp PROD ha mostrato
+dati di TEST. Indagato subito dopo la chiusura di N6 (vedi sotto),
+prima di qualunque altro lavoro.
+
+**Causa confermata da Marco stesso, non solo ipotizzata**: la Script
+Property condivisa `SIGMAFLOW_SPREADSHEET_ID` (l'unica variabile che
+dice al codice "quale spreadsheet è PROD in questo momento", condivisa
+su **tutto** il progetto Apps Script — TEST e PROD sono lo stesso
+progetto, deploy separati) è rimasta bloccata sul valore di TEST dopo
+che un'esecuzione di test si è interrotta a metà, prima di raggiungere
+il proprio blocco `finally` di ripristino. Stessa classe di rischio già
+documentata per `PROP_SCHEMA_VERSION` (vedi sessione M0-C/bugfix più
+sotto in questo file) — qui la seconda occorrenza reale, non la prima.
+**Nessun dato perso o alterato**: `SpreadsheetApp.copy()` non esiste
+in questa storia, si trattava solo di lettura scambiata. Marco ha
+risolto riscrivendo a mano il valore corretto nella property, dall'
+editor Apps Script (Impostazioni progetto → Proprietà script).
+
+**Bug collegato, trovato investigando (non lo stesso incidente, stessa
+causa di fondo) e corretto in questa sessione**: `archiveEligibleJobs_()`
+(dietro al trigger N3, `eseguiArchiviazioneAutomaticaGiornaliera`, che
+scatta ogni notte alle 3:00 senza nessuno presente) risolveva lo
+spreadsheet in modo "ambientale" (`getSpreadsheet_()`, la stessa
+funzione che legge `SIGMAFLOW_SPREADSHEET_ID`) invece di fissare
+esplicitamente TEST — se quella property fosse rimasta sporca nel
+momento sbagliato, il trigger avrebbe scansionato/archiviato sul foglio
+sbagliato, nel caso peggiore PROD vero. Verificato il log Esecuzioni
+dell'editor: il trigger è scattato regolarmente stanotte (19 ago,
+03:28:53, 0% errori) — e PROD non ha nemmeno il foglio `jobs_archivio`
+(mai eseguito l'allineamento schema lì, correttamente, essendo
+riservato a un gate umano separato), quindi non ha comunque scritto
+niente su PROD questa notte. **Corretto** (Kanban.gs): il trigger ora
+fissa esplicitamente TEST per tutta la propria esecuzione tramite
+`withEnvironment_('test', ...)` — lo stesso meccanismo con lock già
+usato da `api()` per le richieste web — invece di affidarsi allo stato
+lasciato da chiunque altro. Un nuovo test
+(`testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty`)
+riproduce esattamente l'incidente (property sporcata deliberatamente
+prima di far scattare il trigger) e verifica che il trigger archivi
+comunque sul vero TEST, e che la property sporca preesistente resti
+intatta dopo l'esecuzione. **122/122 test passati nell'harness Node**
+(121 preesistenti + 1 nuovo). Push su TEST verificato (15/15 file
+identici) — bloccato una prima volta da un token OAuth clasp scaduto
+(`invalid_grant`/`invalid_rapt`, stesso tipo di blocco già capitato in
+N1), risolto con `clasp login` su richiesta esplicita di Marco.
+
+**Deciso in conseguenza**: progettato un backup giornaliero di PROD,
+sotto-programma separato — vedi
+[docs/DESIGN_backup.md](docs/DESIGN_backup.md), non ancora implementato
+(solo design, in attesa di B1). Nessuna scrittura correttiva ulteriore
+necessaria su PROD: Marco conferma "non c'è niente di bloccato o
+perso".
 
 ## N6 (archiviazione) — DONE, programma completo (2026-08-18)
 
@@ -604,16 +659,20 @@ non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
 ("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
 tutti gli effetti.
 
-## Prossima esecuzione — nessun programma attivo
+## Prossima esecuzione — B1 del backup, su richiesta esplicita
 
 Il programma di archiviazione (N1-N6, `docs/DESIGN_archiviazione.md`)
 è **completo**: tutte le sotto-fasi DONE, tutti i criteri di
-accettazione §10 verificati TRUE (vedi sezione N6 sopra). Nessun gate
-pendente, nessuna sotto-fase residua. Il lavoro vive su
-`feat/n1-archiviazione-schema`, non ancora unito a `main` — decisione
-di Marco quando/se aprire la pull request. Una prossima sessione
-riparte da una richiesta esplicita di Marco (manutenzione ordinaria) o
-da un nuovo documento `DESIGN_*.md`, come da `CLAUDE.md`.
+accettazione §10 verificati TRUE (vedi sezione N6 sopra). Il lavoro
+vive su `feat/n1-archiviazione-schema`, non ancora unito a `main` —
+decisione di Marco quando/se aprire la pull request.
+
+**Nuovo programma progettato, non ancora costruito**:
+[docs/DESIGN_backup.md](docs/DESIGN_backup.md) (backup giornaliero di
+PROD, nato dall'incidente sopra). **B1** (config additivo, funzioni di
+backup/retention, test — nessun gate) è la prossima sotto-fase quando
+Marco chiede di procedere; **B2/B3** restano riservate a un'esecuzione
+di Marco stesso (mai di Claude), come da regola assoluta su PROD.
 
 ## Stato generale
 

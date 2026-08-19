@@ -281,6 +281,7 @@ function runAllTests() {
     testArchiveEligibleJobsUsesConfiguredThreshold,
     testArchiveEligibleJobsNeverTouchesCestino,
     testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult,
+    testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
     testRipristinaJobApiActionRestoresJob,
@@ -1539,6 +1540,41 @@ function testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult() {
 
     var result = eseguiArchiviazioneAutomaticaGiornaliera();
     assertTrue_(result.archived_job_ids.indexOf(created.job_id) !== -1, 'il handler del trigger deve archiviare lo stesso job che archiveEligibleJobs_ archivierebbe');
+  });
+}
+
+// Bugfix 2026-08-19: regressione sull'incidente reale — la Script Property
+// condivisa SIGMAFLOW_SPREADSHEET_ID e' rimasta bloccata su un valore
+// sporco (un'esecuzione precedente interrotta prima del proprio finally di
+// ripristino). Simulato qui sporcando la property con un id chiaramente
+// diverso da TEST/PROD prima di far scattare il trigger: con il bug
+// presente, archiveEligibleJobs_() avrebbe risolto quello stesso id
+// sporco (via getSpreadsheet_() ambientale) invece del foglio TEST vero.
+function testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    var created = addJob({ title: 'Property ambientale sporca', size_class: 'S' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    job.incarico_chiuso_ts = testIsoDaysAgo_(new Date(), 40);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, 'id-sporco-non-test-non-prod');
+
+    var result = eseguiArchiviazioneAutomaticaGiornaliera();
+    assertTrue_(result.archived_job_ids.indexOf(created.job_id) !== -1, 'il trigger deve archiviare sul foglio TEST vero, non su quello indicato dalla property sporca');
+
+    var archivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, archivio.length, 'il caso deve trovarsi nell\'Archivio del vero foglio TEST');
+
+    assertEquals_('id-sporco-non-test-non-prod', props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID), 'la property sporca preesistente deve restare intatta dopo l\'esecuzione (withEnvironment_ la ripristina sempre)');
+
+    props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
   });
 }
 

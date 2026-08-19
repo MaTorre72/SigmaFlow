@@ -1208,8 +1208,27 @@ function archiveEligibleJobs_() {
 // UI/API, solo dal trigger stesso una volta installato. Loggato invece di
 // restituito silenziosamente: un trigger a tempo non ha un chiamante
 // interattivo che possa leggere il valore di ritorno.
+//
+// Bugfix 2026-08-19: un trigger a tempo non riceve mai un parametro 'env'
+// (non c'e' nessuna richiesta HTTP dietro) — a differenza di ogni azione
+// UI/API, che passa sempre da api()/withEnvironment_. Prima di questo fix
+// archiveEligibleJobs_() risolveva il foglio in modo "ambientale" tramite
+// getSpreadsheet_(), cioe' leggeva la Script Property condivisa
+// SIGMAFLOW_SPREADSHEET_ID cosi' come la trovava al momento — se quella
+// property fosse rimasta bloccata su un valore sbagliato (es. un'
+// esecuzione di test interrotta a meta', prima di raggiungere il proprio
+// finally di ripristino: incidente reale verificatosi il 2026-08-19,
+// stessa classe di rischio gia' documentata per PROP_SCHEMA_VERSION),
+// il trigger avrebbe scansionato/archiviato sul foglio sbagliato — nel
+// caso peggiore PROD, che il design vieta esplicitamente (§4.1/§9: "mai
+// scrittura su PROD senza gate umano"). Ora il trigger fissa esplicitamente
+// TEST per tutta la propria esecuzione tramite withEnvironment_ (stesso
+// meccanismo, con lock, gia' usato da api() per le richieste web) — non
+// dipende piu' da nessuno stato lasciato da un'esecuzione precedente.
 function eseguiArchiviazioneAutomaticaGiornaliera() {
-  var result = archiveEligibleJobs_();
+  var result = withEnvironment_('test', function() {
+    return archiveEligibleJobs_();
+  });
   Logger.log(
     'Archiviazione automatica: ' + result.jobs_archived + '/' + result.jobs_eligible +
     ' casi eleggibili archiviati (' + result.jobs_scanned + ' scansionati).' +
