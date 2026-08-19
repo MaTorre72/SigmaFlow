@@ -48,7 +48,7 @@ da costruire.
   `ss.getName() === 'SigmaFlow Database'`, poi `ss.copy('SigmaFlow Database — backup ' + oggi)`
   dentro una cartella Drive dedicata (creata se assente,
   `ensureBackupFolder_()` — nome proposto **"SigmaFlow — Backup PROD"**,
-  da confermare con Marco prima di B2, cartella root di Drive salvo
+  da confermare con Marco prima di N-B2, cartella root di Drive salvo
   indicazione diversa).
 - `pruneOldBackups_()` — nella stessa cartella, elimina i file più
   vecchi di `backup_retention_giorni` (config, **default 14**, stesso
@@ -64,10 +64,14 @@ da costruire.
   transazione tutto-o-niente.
 - **Trigger separato da quello di archiviazione**, non lo stesso
   handler: l'esito dell'uno non deve dipendere da quello dell'altro.
-  Orario proposto **02:50** (archiviazione resta 03:00) — il backup
-  finisce prima che l'archiviazione parta, coerente con "rete di
-  sicurezza sull'operazione a rischio", ma senza legare i due
-  meccanismi a livello di codice.
+  Orario proposto **ore 2** (`atHour(2)`, archiviazione resta ore 3) —
+  stessa granularità già in uso per l'archiviazione: l'API dei trigger
+  a tempo di Apps Script garantisce solo l'ora, non il minuto esatto
+  (il trigger N3 doveva scattare "alle 3:00" ed è effettivamente
+  scattato alle 03:28:53). Un'ora di margine è sufficiente a dare al
+  backup buone probabilità di finire prima delle 3, ma i due
+  meccanismi restano **non legati a livello di codice** — nessuna
+  garanzia d'ordine assoluta, per design.
 
 ## 4. Config additivo
 
@@ -101,7 +105,7 @@ scrittura su PROD. Procedura operativa (da eseguire sempre da Marco):
 individuare la copia giusta nella cartella "SigmaFlow — Backup PROD"
 (nome = data), aprirla, e decidere manualmente come riportarla in uso
 (rinomina/sostituzione dell'id in `DEFAULT_SPREADSHEET_ID` è un cambio
-di codice a parte, fuori da questo programma). Non in scope di B1-B3.
+di codice a parte, fuori da questo programma). Non in scope da N-B1 a N-B3.
 
 ## 7. Fuori scope, per ora
 
@@ -119,11 +123,11 @@ di codice a parte, fuori da questo programma). Non in scope di B1-B3.
 
 | Sotto-fase | Contenuto | Gate |
 |---|---|---|
-| **B1** | Config additivo (`backup_retention_giorni`); `backupProd_()`, `pruneOldBackups_()`, `eseguiBackupGiornalieroProd()`; scope Drive in `appsscript.json`; test (harness Node, spreadsheet "PROD-like" mockato — **mai il vero PROD**, stesso principio di `allineaSchemaSuProd()` mai testata su dati reali dall'harness) | — |
-| **B2** | Primo backup reale — **eseguito da Marco stesso**, mai da Claude (regola assoluta di CLAUDE.md: qualunque azione che tocca PROD, anche solo in lettura per una funzione mai provata prima su dati veri, resta riservata a Marco), da editor Apps Script, verificando che la copia compaia nella cartella Drive col nome atteso | 🔴 Umano |
-| **B3** | Installazione del trigger a tempo (`installaBackupGiornalieroProd()`, stesso pattern idempotente di `installaTriggerArchiviazioneAutomatica`) — **eseguita da Marco**, solo dopo B2 confermato | 🔴 Umano |
+| **N-B1** | Config additivo (`backup_retention_giorni`); `backupProd_()`, `pruneOldBackups_()`, `eseguiBackupGiornalieroProd()`; scope Drive in `appsscript.json`; test (harness Node, spreadsheet "PROD-like" mockato — **mai il vero PROD**, stesso principio di `allineaSchemaSuProd()` mai testata su dati reali dall'harness) | — |
+| **N-B2** | Primo backup reale — **eseguito da Marco stesso**, mai da Claude (regola assoluta di CLAUDE.md: qualunque azione che tocca PROD, anche solo in lettura per una funzione mai provata prima su dati veri, resta riservata a Marco), da editor Apps Script, verificando che la copia compaia nella cartella Drive col nome atteso | 🔴 Umano |
+| **N-B3** | Installazione del trigger a tempo (`installaBackupGiornalieroProd()`, stesso pattern idempotente di `installaTriggerArchiviazioneAutomatica`) — **eseguita da Marco**, solo dopo N-B2 confermato | 🔴 Umano |
 
-B2 e B3 possono essere fatte da Marco nella stessa sessione, una dopo
+N-B2 e N-B3 possono essere fatte da Marco nella stessa sessione, una dopo
 l'altra — restano comunque due gate distinti nella tabella perché sono
 due decisioni separate (verificare che funzioni vs. lasciarlo scattare
 da solo), stesso principio già applicato in N3 (§9 di
@@ -133,27 +137,27 @@ da solo), stesso principio già applicato in N3 (§9 di
 
 ## 9. Criteri di accettazione
 
-- [ ] `backupProd_()` verifica `id`+`nome` di PROD indipendentemente
+- [x] `backupProd_()` verifica `id`+`nome` di PROD indipendentemente
       prima di procedere, si ferma da sola se non corrispondono (stesso
-      pattern di `allineaSchemaSuProd()`)
-- [ ] La copia creata è nella cartella Drive dedicata, con nome che
-      include la data
-- [ ] `pruneOldBackups_()` elimina solo i file più vecchi della
-      soglia configurata, mai quelli entro la soglia
-- [ ] Un fallimento nella pulizia retention non impedisce che un
-      backup valido, già creato, resti disponibile
-- [ ] Il trigger di backup è **separato** da quello di archiviazione
-      (handler diverso, nessuna dipendenza di codice fra i due)
-- [ ] Nessuna funzione di questo programma scrive mai sul foglio PROD
-      stesso (solo letture + creazione di file nuovi altrove)
+      pattern di `allineaSchemaSuProd()`) (N-B1)
+- [x] La copia creata è nella cartella Drive dedicata, con nome che
+      include la data (N-B1)
+- [x] `pruneOldBackups_()` elimina solo i file più vecchi della
+      soglia configurata, mai quelli entro la soglia (N-B1)
+- [x] Un fallimento nella pulizia retention non impedisce che un
+      backup valido, già creato, resti disponibile (N-B1)
+- [x] Il trigger di backup è **separato** da quello di archiviazione
+      (handler diverso, nessuna dipendenza di codice fra i due) (N-B1)
+- [x] Nessuna funzione di questo programma scrive mai sul foglio PROD
+      stesso (solo letture + creazione di file nuovi altrove) (N-B1)
 - [ ] Il primo backup reale e l'installazione del trigger sono
-      eseguiti da Marco, mai da Claude (B2/B3)
+      eseguiti da Marco, mai da Claude (N-B2/N-B3)
 - [ ] Nessuna funzione di ripristino automatico esiste nel codice (§6)
 
 ## Gate 🔴 UMANO
 
-Come da tabella §8 — dopo B2 (prima esecuzione reale su PROD, mai
-automatizzabile) e dopo B3 (installazione del trigger). Stesso
+Come da tabella §8 — dopo N-B2 (prima esecuzione reale su PROD, mai
+automatizzabile) e dopo N-B3 (installazione del trigger). Stesso
 principio di `DESIGN_archiviazione.md`: un'automazione non presidiata
 che tocca dati reali merita verifica umana esplicita prima di essere
 lasciata scattare da sola.

@@ -51,10 +51,86 @@ N1), risolto con `clasp login` su richiesta esplicita di Marco.
 
 **Deciso in conseguenza**: progettato un backup giornaliero di PROD,
 sotto-programma separato — vedi
-[docs/DESIGN_backup.md](docs/DESIGN_backup.md), non ancora implementato
-(solo design, in attesa di B1). Nessuna scrittura correttiva ulteriore
-necessaria su PROD: Marco conferma "non c'è niente di bloccato o
-perso".
+[docs/DESIGN_backup.md](docs/DESIGN_backup.md), N-B1 costruita nella
+stessa sessione (vedi sezione sotto). Nessuna scrittura correttiva
+ulteriore necessaria su PROD: Marco conferma "non c'è niente di
+bloccato o perso".
+
+## N-B1 (backup PROD) — DONE, in attesa di N-B2/N-B3 (2026-08-19)
+
+Riferimento: [docs/DESIGN_backup.md](docs/DESIGN_backup.md), §3/§4/§8
+(N-B1). Su richiesta esplicita di Marco, subito dopo aver progettato il
+programma (vedi incidente sopra) — non una sessione autonoma separata.
+
+**Codice** (nuovo file `apps-script/src/Backup.gs`):
+- `ensureBackupFolder_()` — cartella Drive dedicata ("SigmaFlow —
+  Backup PROD"), creata solo se assente, idempotente.
+- `backupRetentionDays_(ss)` — legge `backup_retention_giorni` da un
+  foglio config passato esplicitamente (mai ambientale — stesso motivo
+  del bugfix sopra), ricade sul default (14) se assente.
+- `backupProd_()` — apre `SIGMAFLOW.DEFAULT_SPREADSHEET_ID` (id reale,
+  mai `getSpreadsheet_()` ambientale), verifica
+  `ss.getName() === 'SigmaFlow Database'` (stesso pattern di
+  `allineaSchemaSuProd()`, Schema.gs), `ss.copy(...)` + sposta il file
+  nella cartella dedicata. Non tocca mai il foglio sorgente.
+- `pruneOldBackups_(retentionDays)` — elimina dalla cartella i file più
+  vecchi della soglia, confrontando `getDateCreated()` (mai il nome).
+- `eseguiBackupGiornalieroProd()` — handler del trigger: backup e
+  pulizia restano due passi indipendenti, un fallimento della pulizia
+  non invalida un backup appena creato con successo.
+- `installaBackupGiornalieroProd()` — **scritta ma non invocata da
+  nessun altro codice** (esattamente come
+  `installaTriggerArchiviazioneAutomatica` in N3): il passo che rende
+  il backup un'automazione non presidiata resta riservato a Marco
+  (N-B3), dopo N-B2.
+- `readConfig_()` (Utils.gs) esteso con un parametro `ss` opzionale
+  (invariato per ogni chiamante esistente) — necessario perché
+  `backupRetentionDays_` non dipenda dalla stessa risoluzione
+  ambientale che ha causato l'incidente.
+- Nuovo scope OAuth in `appsscript.json`:
+  `https://www.googleapis.com/auth/drive.file` — **stessa sorpresa già
+  vista in N3** (scope mancante trovato solo al primo tentativo reale
+  su GAS): qui anticipata in fase di design, Marco dovrà aspettarsi una
+  nuova richiesta di consenso Google alla prima esecuzione.
+
+**Harness Node esteso** (`apps-script/test-harness/gas-harness.js`):
+mock minimale di `DriveApp` (file/cartelle, iteratori
+`hasNext`/`next`, `getDateCreated`/`setTrashed`) e `Spreadsheet.copy()`
+— puramente in memoria, nessuna chiamata di rete. `Backup.gs` aggiunto
+all'elenco dei file caricati.
+
+**Test aggiunti** (`Tests.gs`), 8 nuovi — **mai contro il vero PROD**:
+`SIGMAFLOW.DEFAULT_SPREADSHEET_ID` nell'harness apre solo un
+`MockSpreadsheet` in memoria (`resetProdMock_`, nuovo helper, ricostruisce
+uno stato pulito a ogni test — stesso principio già corretto per
+`jobs_archivio`/`jobs_cestino` in N6, applicato qui da subito):
+`testBackupRetentionDaysFallsBackToDefaultWhenConfigMissing`,
+`testBackupRetentionDaysReadsConfiguredValue`,
+`testBackupProdRejectsWrongSpreadsheetName`,
+`testBackupProdCreatesFullCopyInDedicatedFolder`,
+`testBackupProdNeverModifiesSourceSheet`,
+`testPruneOldBackupsDeletesOnlyFilesOlderThanRetention`,
+`testEseguiBackupGiornalieroProdReturnsBackupAndPruneResult`,
+`testEseguiBackupGiornalieroProdKeepsBackupWhenPruneFails` (quest'ultima
+sostituisce temporaneamente `ensureBackupFolder_` per simulare un
+fallimento solo nella fase di pulizia, verificando che il backup
+appena creato resti comunque valido). **130/130 test passati
+nell'harness Node** (122 preesistenti + 8 nuovi, nessuna regressione).
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(16/16 file, incluso il nuovo `Backup.gs`).
+
+**Criteri di accettazione §9 chiusi da N-B1** (aggiornati nel documento
+di design): tutti tranne gli ultimi due, riservati a N-B2/N-B3.
+
+**Gate 🔴 UMANO in attesa — N-B2 poi N-B3**: il codice è pronto e
+verificato su TEST, ma **nessun backup reale è mai stato creato**.
+Quando Marco vuole procedere: eseguire `backupProd_()` (Backup.gs)
+dall'editor Apps Script **sul progetto reale**, verificare che la copia
+compaia nella cartella Drive "SigmaFlow — Backup PROD" col nome
+atteso — solo dopo, eseguire `installaBackupGiornalieroProd()` per
+attivare il trigger. Entrambi i passi restano riservati a Marco, mai a
+Claude (regola assoluta su PROD).
 
 ## N6 (archiviazione) — DONE, programma completo (2026-08-18)
 
@@ -659,7 +735,7 @@ non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
 ("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
 tutti gli effetti.
 
-## Prossima esecuzione — B1 del backup, su richiesta esplicita
+## Prossima esecuzione — ferma al gate di N-B2
 
 Il programma di archiviazione (N1-N6, `docs/DESIGN_archiviazione.md`)
 è **completo**: tutte le sotto-fasi DONE, tutti i criteri di
@@ -667,12 +743,11 @@ accettazione §10 verificati TRUE (vedi sezione N6 sopra). Il lavoro
 vive su `feat/n1-archiviazione-schema`, non ancora unito a `main` —
 decisione di Marco quando/se aprire la pull request.
 
-**Nuovo programma progettato, non ancora costruito**:
-[docs/DESIGN_backup.md](docs/DESIGN_backup.md) (backup giornaliero di
-PROD, nato dall'incidente sopra). **B1** (config additivo, funzioni di
-backup/retention, test — nessun gate) è la prossima sotto-fase quando
-Marco chiede di procedere; **B2/B3** restano riservate a un'esecuzione
-di Marco stesso (mai di Claude), come da regola assoluta su PROD.
+Il programma di backup PROD ([docs/DESIGN_backup.md](docs/DESIGN_backup.md))
+ha **N-B1 chiusa** (vedi sezione sopra) — **N-B2/N-B3 restano riservate
+a un'esecuzione di Marco stesso**, mai di Claude, come da regola
+assoluta su PROD: primo backup reale dall'editor Apps Script, poi
+installazione del trigger, solo dopo conferma.
 
 ## Stato generale
 

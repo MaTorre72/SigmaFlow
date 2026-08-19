@@ -96,9 +96,68 @@ class MockSpreadsheet {
   }
 }
 
+// N-B1 (DESIGN_backup.md): mock minimale di Drive - solo cio' che
+// backupProd_()/pruneOldBackups_() usano davvero (file, cartelle,
+// getDateCreated/setTrashed, iteratori hasNext/next come la vera API).
+// Nessuna persistenza reale, nessuna chiamata di rete: un test che apre
+// SIGMAFLOW.DEFAULT_SPREADSHEET_ID qui crea solo un oggetto in memoria
+// per la durata del processo Node, mai il vero foglio PROD.
+class MockDriveFile {
+  constructor(id, name) {
+    this.id = id;
+    this.name = name;
+    this.created = new Date();
+    this.trashed = false;
+  }
+  getId() { return this.id; }
+  getName() { return this.name; }
+  getDateCreated() { return this.created; }
+  setTrashed(value) { this.trashed = Boolean(value); return this; }
+  isTrashed() { return this.trashed; }
+}
+
+class MockDriveFolder extends MockDriveFile {
+  constructor(id, name) {
+    super(id, name);
+    this.fileIds = new Set();
+  }
+}
+
 function createHarness() {
   const spreadsheets = {};
   const scriptProperties = {};
+  const driveFiles = {}; // id -> MockDriveFile | MockDriveFolder
+
+  function driveIterator(items) {
+    let idx = 0;
+    return { hasNext: () => idx < items.length, next: () => items[idx++] };
+  }
+
+  const rootFolder = new MockDriveFolder('drive-root', 'Il mio Drive');
+  driveFiles[rootFolder.getId()] = rootFolder;
+
+  const DriveApp = {
+    createFolder(name) {
+      const folder = new MockDriveFolder('drive-folder-' + Object.keys(driveFiles).length, name);
+      driveFiles[folder.getId()] = folder;
+      return folder;
+    },
+    getFoldersByName(name) {
+      return driveIterator(Object.keys(driveFiles)
+        .map(id => driveFiles[id])
+        .filter(f => f instanceof MockDriveFolder && f.getName() === name));
+    },
+    getFileById(id) { return driveFiles[id] || null; },
+    getRootFolder() { return rootFolder; }
+  };
+  // addFile/removeFile sul prototipo di MockDriveFolder: hanno bisogno di
+  // driveFiles per risolvere gli id, quindi definiti qui dentro
+  // createHarness() invece che nella dichiarazione di classe sopra.
+  MockDriveFolder.prototype.addFile = function(file) { this.fileIds.add(file.getId()); return this; };
+  MockDriveFolder.prototype.removeFile = function(file) { this.fileIds.delete(file.getId()); return this; };
+  MockDriveFolder.prototype.getFiles = function() {
+    return driveIterator(Array.from(this.fileIds).map(id => driveFiles[id]).filter(Boolean));
+  };
 
   const SpreadsheetApp = {
     openById(id) {
@@ -107,6 +166,27 @@ function createHarness() {
     },
     getActiveSpreadsheet() { return null; },
     flush() {} // mock sincrono: nulla da forzare, no-op
+  };
+
+  // Spreadsheet.copy(name) - copia integrale di tutti i fogli (stesso
+  // principio della vera API: nuovo id, nuovo file Drive, sorgente
+  // invariata), registrata anche come MockDriveFile nella cartella
+  // radice - stesso punto di partenza della vera API prima di uno
+  // spostamento esplicito in una cartella dedicata.
+  MockSpreadsheet.prototype.copy = function(name) {
+    const newId = 'copy-' + Object.keys(spreadsheets).length + '-' + Math.random().toString(36).slice(2, 8);
+    const copySs = new MockSpreadsheet(newId);
+    copySs.name = name;
+    Object.keys(this.sheets).forEach(sheetName => {
+      const src = this.sheets[sheetName];
+      const dst = copySs.insertSheet(sheetName);
+      dst.data = src.data.map(row => row.slice());
+    });
+    spreadsheets[newId] = copySs;
+    const file = new MockDriveFile(newId, name);
+    driveFiles[newId] = file;
+    rootFolder.addFile(file);
+    return copySs;
   };
 
   const PropertiesService = {
@@ -151,12 +231,12 @@ function createHarness() {
 
   const context = {
     console,
-    SpreadsheetApp, PropertiesService, LockService, Utilities, ContentService, HtmlService, Logger,
+    SpreadsheetApp, PropertiesService, LockService, Utilities, ContentService, HtmlService, Logger, DriveApp,
     Math, Date, JSON, Object, Array, String, Number, Boolean, isNaN, parseInt, parseFloat
   };
   vm.createContext(context);
 
-  const files = ['Constants.gs', 'Schema.gs', 'Utils.gs', 'ActivityLog.gs', 'Model.gs', 'Kanban.gs', 'Tests.gs'];
+  const files = ['Constants.gs', 'Schema.gs', 'Utils.gs', 'ActivityLog.gs', 'Model.gs', 'Kanban.gs', 'Backup.gs', 'Tests.gs'];
   files.forEach(file => {
     const code = fs.readFileSync(path.join(SRC_DIR, file), 'utf8');
     vm.runInContext(code, context, { filename: file });

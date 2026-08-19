@@ -101,6 +101,7 @@ var SIGMAFLOW = {
     team_size: 4,
     observation_window_days: 30,
     archiviazione_giorni_default: 30,
+    backup_retention_giorni: 14,
     theoretical_capacity_per_day: '',
     size_XS_days: 0.5,
     size_S_days: 1,

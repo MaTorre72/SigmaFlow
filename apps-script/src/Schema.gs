@@ -299,6 +299,7 @@ function seedDefaultConfig_(sheet) {
     team_size: 'Numero di persone attive',
     observation_window_days: 'Finestra temporale metriche',
     archiviazione_giorni_default: 'Giorni dopo la chiusura oltre cui un caso e\' eleggibile all\'archiviazione automatica',
+    backup_retention_giorni: 'Giorni di backup PROD da conservare prima che i piu\' vecchi vengano eliminati',
     theoretical_capacity_per_day: 'Capacita teorica configurata in passaggi al giorno',
     size_XS_days: 'Giorni medi attesi per taglia XS',
     size_S_days: 'Giorni medi attesi per taglia S',

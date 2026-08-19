@@ -360,7 +360,15 @@ function runAllTests() {
     testAddActivityEventAlignsOpenVisitStartTs,
     testUpdateActivityEventAlignsOpenVisitField,
     testDeleteActivityEventRealignsOpenVisit,
-    testMigrateToActivityLogAlignsOpenVisit
+    testMigrateToActivityLogAlignsOpenVisit,
+    testBackupRetentionDaysFallsBackToDefaultWhenConfigMissing,
+    testBackupRetentionDaysReadsConfiguredValue,
+    testBackupProdRejectsWrongSpreadsheetName,
+    testBackupProdCreatesFullCopyInDedicatedFolder,
+    testBackupProdNeverModifiesSourceSheet,
+    testPruneOldBackupsDeletesOnlyFilesOlderThanRetention,
+    testEseguiBackupGiornalieroProdReturnsBackupAndPruneResult,
+    testEseguiBackupGiornalieroProdKeepsBackupWhenPruneFails
   ];
 
   tests.forEach(function(testFn) {
@@ -2984,6 +2992,147 @@ function testEseguiMigrazioneCompletaEndToEndOnOldSchemaData() {
     assertEquals_(1, visite1.length, 'una visita ricostruita per JOB-OLD-1 (mai rientrato)');
     assertEquals_('2026-01-01T09:00:00+02:00', visite1[0].apertura_ts, 'apertura_ts della visita = arrival_ts storico');
   });
+}
+
+// N-B1 (docs/DESIGN_backup.md): test su backupProd_/pruneOldBackups_/
+// eseguiBackupGiornalieroProd. SIGMAFLOW.DEFAULT_SPREADSHEET_ID qui non
+// e' MAI il vero foglio PROD - nell'harness Node, SpreadsheetApp.openById
+// crea un oggetto MockSpreadsheet puramente in memoria, senza nessuna
+// chiamata di rete (vedi gas-harness.js). resetProdMock_ ricostruisce
+// ogni volta un punto di partenza pulito (nome corretto, jobs/config
+// vuoti, cartella di backup svuotata) - senza questo, i test
+// inquinerebbero lo stesso oggetto condiviso da un'esecuzione all'altra,
+// stesso principio gia' corretto per jobs_archivio/jobs_cestino in N6.
+function resetProdMock_() {
+  var ss = SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
+  ss.name = 'SigmaFlow Database';
+  ss.sheets = {};
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
+  seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+  ensureBackupFolder_().fileIds.clear();
+  return ss;
+}
+
+function testBackupRetentionDaysFallsBackToDefaultWhenConfigMissing() {
+  var ss = resetProdMock_();
+  clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG), CONFIG_HEADERS);
+  assertEquals_(14, backupRetentionDays_(ss), 'senza config, deve ricadere sul default in DEFAULT_CONFIG');
+}
+
+// writeConfigValue_ (Utils.gs) legge/scrive in modo ambientale
+// (getSpreadsheet_()) - qui non riusabile senza reintrodurre proprio la
+// risoluzione ambientale che questo programma vuole evitare (§4 del
+// design), quindi si scrive direttamente sul foglio config del mock PROD
+// gia' in mano, stesso meccanismo di writeConfigValue_ applicato a un ss
+// esplicito.
+function testBackupRetentionDaysReadsConfiguredValue() {
+  var ss = resetProdMock_();
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
+  var headers = getHeaderMap_(sheet);
+  var rows = readTable_(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key === 'backup_retention_giorni') {
+      sheet.getRange(i + 2, headers.value).setValue('7');
+      break;
+    }
+  }
+  assertEquals_(7, backupRetentionDays_(ss), 'deve leggere il valore configurato su PROD, non il default');
+}
+
+function testBackupProdRejectsWrongSpreadsheetName() {
+  var ss = resetProdMock_();
+  ss.name = 'Nome sbagliato';
+  var failed = false;
+  try {
+    backupProd_();
+  } catch (err) {
+    failed = err.message.indexOf('controllo di sicurezza fallito') !== -1;
+  }
+  assertTrue_(failed, 'backupProd_ deve rifiutarsi di procedere se il nome del foglio PROD non corrisponde');
+}
+
+function testBackupProdCreatesFullCopyInDedicatedFolder() {
+  var ss = resetProdMock_();
+  ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS).appendRow(jobToRow_({ job_id: 'JOB-PROD-1', title: 'Caso reale' }));
+
+  var result = backupProd_();
+  assertTrue_(Boolean(result.backup_id), 'backupProd_ deve restituire l\'id del nuovo file');
+
+  var copy = SpreadsheetApp.openById(result.backup_id);
+  var copiedJobs = readTable_(copy.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+  assertEquals_(1, copiedJobs.length, 'la copia deve contenere gli stessi dati del foglio jobs di PROD');
+  assertEquals_('Caso reale', copiedJobs[0].title, 'i dati copiati devono corrispondere a quelli reali');
+
+  var folder = ensureBackupFolder_();
+  var found = false;
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    if (files.next().getId() === result.backup_id) { found = true; }
+  }
+  assertTrue_(found, 'il file di backup deve trovarsi nella cartella dedicata, non nella radice');
+}
+
+function testBackupProdNeverModifiesSourceSheet() {
+  var ss = resetProdMock_();
+  ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS).appendRow(jobToRow_({ job_id: 'JOB-PROD-2', title: 'Non deve sparire' }));
+
+  backupProd_();
+
+  var jobsAfter = readTable_(SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID).getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+  assertEquals_(1, jobsAfter.length, 'il foglio PROD sorgente deve restare invariato dopo un backup');
+  assertEquals_('Non deve sparire', jobsAfter[0].title, 'nessuna modifica ai dati sorgente');
+}
+
+function testPruneOldBackupsDeletesOnlyFilesOlderThanRetention() {
+  resetProdMock_();
+  var recent = backupProd_();
+  var old = backupProd_();
+
+  var oldDate = new Date();
+  oldDate.setDate(oldDate.getDate() - 20);
+  DriveApp.getFileById(old.backup_id).created = oldDate;
+
+  var result = pruneOldBackups_(14);
+  assertEquals_(1, result.deleted_count, 'solo il file piu\' vecchio della soglia deve essere eliminato');
+  assertTrue_(result.deleted_names.indexOf(old.backup_name) !== -1, 'il nome del file vecchio deve comparire tra gli eliminati');
+
+  assertTrue_(DriveApp.getFileById(old.backup_id).isTrashed(), 'il file vecchio deve risultare cestinato');
+  assertTrue_(!DriveApp.getFileById(recent.backup_id).isTrashed(), 'il file recente non deve essere toccato');
+}
+
+function testEseguiBackupGiornalieroProdReturnsBackupAndPruneResult() {
+  resetProdMock_();
+  var result = eseguiBackupGiornalieroProd();
+  assertTrue_(Boolean(result.backup.backup_id), 'deve restituire il risultato del backup');
+  assertTrue_(Boolean(result.prune), 'deve restituire anche il risultato della pulizia retention');
+  assertEquals_(0, result.prune.deleted_count, 'un backup appena creato non deve eliminare nulla');
+}
+
+// §3 del design: "un fallimento nella pulizia retention non deve
+// invalidare un backup appena creato con successo" - simulato rompendo
+// temporaneamente ensureBackupFolder_ solo per la fase di pulizia (dopo
+// che backupProd_ l'ha gia' usata con successo per creare il file).
+function testEseguiBackupGiornalieroProdKeepsBackupWhenPruneFails() {
+  resetProdMock_();
+  var originalEnsureBackupFolder = ensureBackupFolder_;
+  var callCount = 0;
+  ensureBackupFolder_ = function() {
+    callCount++;
+    if (callCount > 1) {
+      throw new Error('Cartella non raggiungibile (simulato)');
+    }
+    return originalEnsureBackupFolder();
+  };
+
+  try {
+    var result = eseguiBackupGiornalieroProd();
+    assertTrue_(Boolean(result.backup.backup_id), 'il backup deve restare valido anche se la pulizia fallisce');
+    assertEquals_(null, result.prune, 'prune deve essere null quando la pulizia fallisce');
+    assertTrue_(Boolean(result.prune_error), 'l\'errore di pulizia deve essere riportato, non inghiottito');
+  } finally {
+    ensureBackupFolder_ = originalEnsureBackupFolder;
+  }
 }
 
 function runSingleTest_(testFn) {
