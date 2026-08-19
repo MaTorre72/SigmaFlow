@@ -365,6 +365,7 @@ function runAllTests() {
     testBackupRetentionDaysReadsConfiguredValue,
     testBackupProdRejectsWrongSpreadsheetName,
     testBackupProdCreatesFullCopyInDedicatedFolder,
+    testBackupFolderLivesInSameFolderAsProdSpreadsheet,
     testBackupProdNeverModifiesSourceSheet,
     testPruneOldBackupsDeletesOnlyFilesOlderThanRetention,
     testEseguiBackupGiornalieroProdReturnsBackupAndPruneResult,
@@ -3010,7 +3011,7 @@ function resetProdMock_() {
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
-  ensureBackupFolder_().fileIds.clear();
+  ensureBackupFolder_(ss).fileIds.clear();
   return ss;
 }
 
@@ -3064,13 +3065,43 @@ function testBackupProdCreatesFullCopyInDedicatedFolder() {
   assertEquals_(1, copiedJobs.length, 'la copia deve contenere gli stessi dati del foglio jobs di PROD');
   assertEquals_('Caso reale', copiedJobs[0].title, 'i dati copiati devono corrispondere a quelli reali');
 
-  var folder = ensureBackupFolder_();
+  var folder = ensureBackupFolder_(ss);
   var found = false;
   var files = folder.getFiles();
   while (files.hasNext()) {
     if (files.next().getId() === result.backup_id) { found = true; }
   }
   assertTrue_(found, 'il file di backup deve trovarsi nella cartella dedicata, non nella radice');
+}
+
+// Su richiesta esplicita di Marco: la cartella di backup vive dentro la
+// STESSA cartella Drive del foglio PROD, non un id fisso da tenere
+// sincronizzato a mano. Simulato spostando il file mock del foglio PROD
+// in una cartella "reparto Amministrazione" di prova e verificando che
+// la cartella di backup compaia li' dentro, non nella radice di Drive
+// (dove il mock lo mette di default al primo openById).
+function testBackupFolderLivesInSameFolderAsProdSpreadsheet() {
+  var ss = resetProdMock_();
+  var prodFile = DriveApp.getFileById(ss.getId());
+  var department = DriveApp.getRootFolder().createFolder('Reparto Amministrazione (prova)');
+  DriveApp.getRootFolder().removeFile(prodFile);
+  department.addFile(prodFile);
+
+  var folder = ensureBackupFolder_(ss);
+
+  var found = false;
+  var subfolders = department.getFoldersByName('SigmaFlow — Backup PROD');
+  while (subfolders.hasNext()) {
+    if (subfolders.next().getId() === folder.getId()) { found = true; }
+  }
+  assertTrue_(found, 'la cartella di backup deve essere una sottocartella diretta della cartella che contiene il foglio PROD');
+
+  var inRoot = false;
+  var rootSubfolders = DriveApp.getRootFolder().getFoldersByName('SigmaFlow — Backup PROD');
+  while (rootSubfolders.hasNext()) {
+    if (rootSubfolders.next().getId() === folder.getId()) { inRoot = true; }
+  }
+  assertTrue_(!inRoot, 'la cartella di backup non deve finire nella radice quando PROD vive altrove');
 }
 
 function testBackupProdNeverModifiesSourceSheet() {
@@ -3085,7 +3116,7 @@ function testBackupProdNeverModifiesSourceSheet() {
 }
 
 function testPruneOldBackupsDeletesOnlyFilesOlderThanRetention() {
-  resetProdMock_();
+  var ss = resetProdMock_();
   var recent = backupProd_();
   var old = backupProd_();
 
@@ -3093,7 +3124,7 @@ function testPruneOldBackupsDeletesOnlyFilesOlderThanRetention() {
   oldDate.setDate(oldDate.getDate() - 20);
   DriveApp.getFileById(old.backup_id).created = oldDate;
 
-  var result = pruneOldBackups_(14);
+  var result = pruneOldBackups_(14, ss);
   assertEquals_(1, result.deleted_count, 'solo il file piu\' vecchio della soglia deve essere eliminato');
   assertTrue_(result.deleted_names.indexOf(old.backup_name) !== -1, 'il nome del file vecchio deve comparire tra gli eliminati');
 
@@ -3117,12 +3148,12 @@ function testEseguiBackupGiornalieroProdKeepsBackupWhenPruneFails() {
   resetProdMock_();
   var originalEnsureBackupFolder = ensureBackupFolder_;
   var callCount = 0;
-  ensureBackupFolder_ = function() {
+  ensureBackupFolder_ = function(ss) {
     callCount++;
     if (callCount > 1) {
       throw new Error('Cartella non raggiungibile (simulato)');
     }
-    return originalEnsureBackupFolder();
+    return originalEnsureBackupFolder(ss);
   };
 
   try {

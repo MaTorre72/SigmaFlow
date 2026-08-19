@@ -63,8 +63,14 @@ Riferimento: [docs/DESIGN_backup.md](docs/DESIGN_backup.md), §3/§4/§8
 programma (vedi incidente sopra) — non una sessione autonoma separata.
 
 **Codice** (nuovo file `apps-script/src/Backup.gs`):
-- `ensureBackupFolder_()` — cartella Drive dedicata ("SigmaFlow —
-  Backup PROD"), creata solo se assente, idempotente.
+- `ensureBackupFolder_(ss)` — cartella dedicata ("SigmaFlow — Backup
+  PROD"), creata solo se assente, idempotente. **Dove vive, deciso da
+  Marco durante questa stessa sessione** (non un id fisso proposto
+  inizialmente): dentro la **stessa cartella Drive del foglio PROD
+  reale** — `prodParentFolder_(ss)` risale al genitore del file
+  (`DriveApp.getFileById(ss.getId()).getParents()`), così se il foglio
+  PROD viene spostato il backup lo segue automaticamente, senza una
+  costante da tenere sincronizzata a mano.
 - `backupRetentionDays_(ss)` — legge `backup_retention_giorni` da un
   foglio config passato esplicitamente (mai ambientale — stesso motivo
   del bugfix sopra), ricade sul default (14) se assente.
@@ -73,8 +79,8 @@ programma (vedi incidente sopra) — non una sessione autonoma separata.
   `ss.getName() === 'SigmaFlow Database'` (stesso pattern di
   `allineaSchemaSuProd()`, Schema.gs), `ss.copy(...)` + sposta il file
   nella cartella dedicata. Non tocca mai il foglio sorgente.
-- `pruneOldBackups_(retentionDays)` — elimina dalla cartella i file più
-  vecchi della soglia, confrontando `getDateCreated()` (mai il nome).
+- `pruneOldBackups_(retentionDays, ss)` — elimina dalla cartella i file
+  più vecchi della soglia, confrontando `getDateCreated()` (mai il nome).
 - `eseguiBackupGiornalieroProd()` — handler del trigger: backup e
   pulizia restano due passi indipendenti, un fallimento della pulizia
   non invalida un backup appena creato con successo.
@@ -94,12 +100,16 @@ programma (vedi incidente sopra) — non una sessione autonoma separata.
   nuova richiesta di consenso Google alla prima esecuzione.
 
 **Harness Node esteso** (`apps-script/test-harness/gas-harness.js`):
-mock minimale di `DriveApp` (file/cartelle, iteratori
-`hasNext`/`next`, `getDateCreated`/`setTrashed`) e `Spreadsheet.copy()`
-— puramente in memoria, nessuna chiamata di rete. `Backup.gs` aggiunto
-all'elenco dei file caricati.
+mock minimale di `DriveApp` (file/cartelle **annidate** — `Folder.
+getFoldersByName`/`createFolder`/`getParents`, oltre ai metodi globali
+di `DriveApp` — iteratori `hasNext`/`next`, `getDateCreated`/
+`setTrashed`) e `Spreadsheet.copy()` — puramente in memoria, nessuna
+chiamata di rete. Ogni `SpreadsheetApp.openById(id)` registra anche un
+file Drive corrispondente (di default nella radice), necessario perché
+`prodParentFolder_` possa risalire al genitore anche nei test.
+`Backup.gs` aggiunto all'elenco dei file caricati.
 
-**Test aggiunti** (`Tests.gs`), 8 nuovi — **mai contro il vero PROD**:
+**Test aggiunti** (`Tests.gs`), 9 nuovi — **mai contro il vero PROD**:
 `SIGMAFLOW.DEFAULT_SPREADSHEET_ID` nell'harness apre solo un
 `MockSpreadsheet` in memoria (`resetProdMock_`, nuovo helper, ricostruisce
 uno stato pulito a ogni test — stesso principio già corretto per
@@ -108,17 +118,19 @@ uno stato pulito a ogni test — stesso principio già corretto per
 `testBackupRetentionDaysReadsConfiguredValue`,
 `testBackupProdRejectsWrongSpreadsheetName`,
 `testBackupProdCreatesFullCopyInDedicatedFolder`,
+`testBackupFolderLivesInSameFolderAsProdSpreadsheet` (sposta il file
+mock di PROD in una cartella di prova, verifica che la cartella di
+backup compaia lì e non nella radice),
 `testBackupProdNeverModifiesSourceSheet`,
 `testPruneOldBackupsDeletesOnlyFilesOlderThanRetention`,
 `testEseguiBackupGiornalieroProdReturnsBackupAndPruneResult`,
 `testEseguiBackupGiornalieroProdKeepsBackupWhenPruneFails` (quest'ultima
 sostituisce temporaneamente `ensureBackupFolder_` per simulare un
 fallimento solo nella fase di pulizia, verificando che il backup
-appena creato resti comunque valido). **130/130 test passati
-nell'harness Node** (122 preesistenti + 8 nuovi, nessuna regressione).
+appena creato resti comunque valido). **131/131 test passati
+nell'harness Node** (122 preesistenti + 9 nuovi, nessuna regressione).
 
-**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
-(16/16 file, incluso il nuovo `Backup.gs`).
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`.
 
 **Criteri di accettazione §9 chiusi da N-B1** (aggiornati nel documento
 di design): tutti tranne gli ultimi due, riservati a N-B2/N-B3.
@@ -128,11 +140,13 @@ verificato su TEST, ma **nessun backup reale è mai stato creato**.
 Quando Marco vuole procedere: eseguire `eseguiBackupGiornalieroProd()`
 (Backup.gs, non `backupProd_()` da sola — logga un esito leggibile ed
 è la funzione esatta che il trigger chiamerà in seguito) dall'editor
-Apps Script **sul progetto reale**, verificare che la copia compaia
-nella cartella Drive "SigmaFlow — Backup PROD" col nome
-atteso — solo dopo, eseguire `installaBackupGiornalieroProd()` per
-attivare il trigger. Entrambi i passi restano riservati a Marco, mai a
-Claude (regola assoluta su PROD).
+Apps Script **sul progetto reale**, verificare che compaia una cartella
+"SigmaFlow — Backup PROD" **nella stessa cartella Drive dove vive già
+il foglio PROD** (non nella radice di Drive), con dentro il file di
+backup col nome atteso — solo dopo, eseguire
+`installaBackupGiornalieroProd()` per attivare il trigger. Entrambi i
+passi restano riservati a Marco, mai a Claude (regola assoluta su
+PROD).
 
 ## N6 (archiviazione) — DONE, programma completo (2026-08-18)
 

@@ -46,10 +46,15 @@ da costruire.
   proprio l'errore corretto oggi in `archiveEligibleJobs_()`, qui
   evitato dall'inizio invece che scoperto più tardi), verifica
   `ss.getName() === 'SigmaFlow Database'`, poi `ss.copy('SigmaFlow Database — backup ' + oggi)`
-  dentro una cartella Drive dedicata (creata se assente,
-  `ensureBackupFolder_()` — nome proposto **"SigmaFlow — Backup PROD"**,
-  da confermare con Marco prima di N-B2, cartella root di Drive salvo
-  indicazione diversa).
+  dentro una cartella dedicata (`ensureBackupFolder_()`, nome
+  **"SigmaFlow — Backup PROD"**, creata se assente). **Decisione di
+  Marco**: questa cartella vive **nella stessa cartella Drive del
+  foglio PROD reale** (`prodParentFolder_()` — risale al genitore del
+  file tramite `DriveApp.getFileById(ss.getId()).getParents()`), non un
+  id fisso da tenere sincronizzato a mano — se il foglio PROD viene
+  spostato, il backup lo segue automaticamente. Fallback alla radice di
+  Drive solo nel caso limite (non atteso) in cui il file non abbia
+  nessun genitore.
 - `pruneOldBackups_()` — nella stessa cartella, elimina i file più
   vecchi di `backup_retention_giorni` (config, **default 14**, stesso
   pattern di `archiviazione_giorni_default`), confrontando

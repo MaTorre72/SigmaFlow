@@ -150,7 +150,8 @@ function createHarness() {
     getFileById(id) { return driveFiles[id] || null; },
     getRootFolder() { return rootFolder; }
   };
-  // addFile/removeFile sul prototipo di MockDriveFolder: hanno bisogno di
+  // addFile/removeFile/getFoldersByName/createFolder/getParents sul
+  // prototipo di MockDriveFile/MockDriveFolder: hanno bisogno di
   // driveFiles per risolvere gli id, quindi definiti qui dentro
   // createHarness() invece che nella dichiarazione di classe sopra.
   MockDriveFolder.prototype.addFile = function(file) { this.fileIds.add(file.getId()); return this; };
@@ -158,10 +159,63 @@ function createHarness() {
   MockDriveFolder.prototype.getFiles = function() {
     return driveIterator(Array.from(this.fileIds).map(id => driveFiles[id]).filter(Boolean));
   };
+  // Sottocartelle dirette di questa cartella (non una ricerca globale su
+  // Drive come DriveApp.getFoldersByName) - stessa semantica della vera
+  // API Folder.getFoldersByName.
+  MockDriveFolder.prototype.getFoldersByName = function(name) {
+    return driveIterator(Array.from(this.fileIds)
+      .map(id => driveFiles[id])
+      .filter(f => f instanceof MockDriveFolder && f.getName() === name));
+  };
+  // Crea una cartella FIGLIA di questa (Folder.createFolder della vera
+  // API, distinto da DriveApp.createFolder che non traccia un genitore).
+  MockDriveFolder.prototype.createFolder = function(name) {
+    const folder = new MockDriveFolder('drive-folder-' + Object.keys(driveFiles).length, name);
+    driveFiles[folder.getId()] = folder;
+    this.fileIds.add(folder.getId());
+    return folder;
+  };
+  // Cartelle che contengono questo file in questo momento (File.getParents()
+  // della vera API) - ricerca lineare su driveFiles, sufficiente per il
+  // volume minuscolo di oggetti che un test crea.
+  MockDriveFile.prototype.getParents = function() {
+    const id = this.getId();
+    return driveIterator(Object.keys(driveFiles)
+      .map(k => driveFiles[k])
+      .filter(f => f instanceof MockDriveFolder && f.fileIds.has(id)));
+  };
+  // Sottocartelle dirette di questa cartella (non una ricerca globale su
+  // Drive come DriveApp.getFoldersByName) - stessa semantica della vera
+  // API Folder.getFoldersByName.
+  MockDriveFolder.prototype.getFoldersByName = function(name) {
+    return driveIterator(Array.from(this.fileIds)
+      .map(id => driveFiles[id])
+      .filter(f => f instanceof MockDriveFolder && f.getName() === name));
+  };
+  // Crea una cartella FIGLIA di questa (Folder.createFolder della vera
+  // API, distinto da DriveApp.createFolder che non traccia un genitore).
+  MockDriveFolder.prototype.createFolder = function(name) {
+    const folder = new MockDriveFolder('drive-folder-' + Object.keys(driveFiles).length, name);
+    driveFiles[folder.getId()] = folder;
+    this.fileIds.add(folder.getId());
+    return folder;
+  };
 
   const SpreadsheetApp = {
     openById(id) {
-      if (!spreadsheets[id]) { spreadsheets[id] = new MockSpreadsheet(id); }
+      if (!spreadsheets[id]) {
+        spreadsheets[id] = new MockSpreadsheet(id);
+        // N-B1: ogni foglio e' anche un file Drive - il backup deve poter
+        // risalire alla sua cartella genitore (DriveApp.getFileById(id).
+        // getParents()). Di default vive nella radice, come qualunque
+        // file appena aperto per la prima volta senza un genitore noto -
+        // un test puo' spostarlo esplicitamente altrove.
+        if (!driveFiles[id]) {
+          const file = new MockDriveFile(id, id);
+          driveFiles[id] = file;
+          rootFolder.addFile(file);
+        }
+      }
       return spreadsheets[id];
     },
     getActiveSpreadsheet() { return null; },

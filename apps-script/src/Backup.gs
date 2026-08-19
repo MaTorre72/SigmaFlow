@@ -12,14 +12,30 @@
 
 var BACKUP_FOLDER_NAME = 'SigmaFlow — Backup PROD';
 
+// Su richiesta esplicita di Marco: la cartella di backup vive dentro la
+// STESSA cartella Drive del foglio PROD reale, non in un id fisso da
+// tenere sincronizzato a mano - se il foglio PROD viene spostato, il
+// backup lo segue automaticamente. Fallback alla radice di Drive nel
+// caso limite (non atteso in pratica) in cui il file non abbia nessuna
+// cartella genitore.
+function prodParentFolder_(ss) {
+  var parents = DriveApp.getFileById(ss.getId()).getParents();
+  if (parents.hasNext()) {
+    return parents.next();
+  }
+  return DriveApp.getRootFolder();
+}
+
 // Restituisce sempre la stessa cartella (idempotente): la crea solo se
-// non esiste ancora.
-function ensureBackupFolder_() {
-  var existing = DriveApp.getFoldersByName(BACKUP_FOLDER_NAME);
+// non esiste ancora, come sottocartella diretta della cartella che
+// contiene il foglio PROD in questo momento.
+function ensureBackupFolder_(ss) {
+  var parent = prodParentFolder_(ss);
+  var existing = parent.getFoldersByName(BACKUP_FOLDER_NAME);
   if (existing.hasNext()) {
     return existing.next();
   }
-  return DriveApp.createFolder(BACKUP_FOLDER_NAME);
+  return parent.createFolder(BACKUP_FOLDER_NAME);
 }
 
 // §4 del design: legge backup_retention_giorni direttamente dal config
@@ -52,7 +68,7 @@ function backupProd_() {
   // (stesso pattern standard di Apps Script: nessun parametro "cartella"
   // su copy() stesso).
   var file = DriveApp.getFileById(copy.getId());
-  var folder = ensureBackupFolder_();
+  var folder = ensureBackupFolder_(ss);
   folder.addFile(file);
   DriveApp.getRootFolder().removeFile(file);
 
@@ -62,8 +78,8 @@ function backupProd_() {
 // §3 del design: elimina dalla cartella di backup i file più vecchi
 // della soglia di retention - confronta getDateCreated(), mai il nome
 // (parsing fragile, §3: "non dipendere da un parsing fragile").
-function pruneOldBackups_(retentionDays) {
-  var folder = ensureBackupFolder_();
+function pruneOldBackups_(retentionDays, ss) {
+  var folder = ensureBackupFolder_(ss);
   var cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - retentionDays);
 
@@ -100,7 +116,7 @@ function eseguiBackupGiornalieroProd() {
   try {
     var prodSs = SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
     var retentionDays = backupRetentionDays_(prodSs);
-    var pruneResult = pruneOldBackups_(retentionDays);
+    var pruneResult = pruneOldBackups_(retentionDays, prodSs);
     Logger.log(
       'Backup PROD creato: ' + backupResult.backup_name + '. Pulizia retention: ' +
       pruneResult.deleted_count + ' file rimossi (soglia ' + retentionDays + ' giorni).'
