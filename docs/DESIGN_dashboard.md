@@ -111,6 +111,8 @@ Marco come primo passo di M2**, non da assumere:
    esistenti per il drag-and-drop reale (divieto di rientro diretto in
    `wip`), quindi non ogni `move` manuale qualifica.
 
+**Decisione presa da Marco (2026-08-19): opzione 2.**
+
 ### Contenuto
 - Presentare a Marco le due opzioni con le implicazioni pratiche di
   ciascuna, raccogliere la decisione.
@@ -121,17 +123,17 @@ Marco come primo passo di M2**, non da assumere:
   già usata in N4/N5/N6), push su TEST verificato.
 
 ### Criteri di accettazione
-- [ ] Decisione tra le due opzioni presa esplicitamente da Marco,
+- [x] Decisione tra le due opzioni presa esplicitamente da Marco,
       registrata in `PROGRAMMA_STATO.md`
-- [ ] Comportamento scelto verificato con un test che riproduce lo
+- [x] Comportamento scelto verificato con un test che riproduce lo
       scenario esatto trovato il 19/08 (correzione manuale di un
       evento 'move' che rappresenta un rientro)
-- [ ] Nessuna regressione sulla suite esistente
-- [ ] Push su TEST verificato
+- [x] Nessuna regressione sulla suite esistente
+- [x] Push su TEST verificato
 
 **Gate 🔴 Umano**: dopo la presentazione delle due opzioni, prima di
 scrivere codice — è una decisione di design, non un dettaglio
-implementativo.
+implementativo. **Confermato** (opzione 2), vedi sopra.
 
 ---
 

@@ -1,6 +1,88 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-19
 
+## M2 (dashboard) — DONE, gate confermato da Marco (2026-08-19)
+
+Proseguita subito dopo la conferma del gate (nessuna nuova richiesta di
+Marco necessaria per procedere all'implementazione, come da CLAUDE.md).
+Riferimento: [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §3.
+
+**Decisione presa da Marco: opzione 2** — un evento 'move' inserito a
+mano in Cronologia che rappresenta un vero rientro deve ricalcolare
+`job.status` e creare la visita mancante, rispettando le stesse regole
+di validazione del drag-and-drop reale.
+
+**Codice**:
+- `ActivityLog.gs` (`validateSequence_`): nuovo hard error
+  `RIENTRO_DIRETTO_WIP_NON_CONSENTITO` — un evento 'move' manuale la cui
+  provenienza (`candidate.from`, già calcolato da
+  `computeFromForCandidate_`) è un'attesa/completato e la cui
+  destinazione è WIP viene rifiutato, **anche con `force: true`** (è un
+  hard error, non un warning superabile) — stessa regola già applicata
+  al drag-and-drop reale in `moveJob` (Kanban.gs), ora estesa alla
+  Cronologia manuale: prima non c'era, la Cronologia poteva registrare
+  uno stato che l'interfaccia normale non avrebbe mai permesso di
+  raggiungere.
+- `Kanban.gs`: nuova `applyManualReentryIfNeeded_(job, candidate)`,
+  chiamata da `applyStructuralAlignment_` (ora con un terzo parametro
+  `candidate`) **solo** dai percorsi `addActivityEvent`/
+  `updateActivityEvent` — quando il candidato rappresenta un rientro
+  vero (provenienza stand_by/done, destinazione backlog/prep, stessa
+  regola di `moveJob`), aggiorna `job.status`/`status_since_ts`,
+  azzera `incarico_chiuso_ts` se valorizzato (stessa regola N2, §8c),
+  chiude la visita aperta (`rientro_ts`/`rientro_da`) e ne apre una
+  nuova — stesso meccanismo di `updateVisiteForMove_`, applicato "live"
+  sulla visita attualmente aperta (non alla posizione storica
+  dell'evento corretto, stessa convenzione già in uso per gli altri
+  campi strutturali). **Idempotente**: `reentryAlreadyApplied_` verifica
+  se questo stesso rientro (job + `rientro_ts` + `rientro_da`) è già
+  stato registrato, per non duplicare la visita se lo stesso evento
+  viene risalvato (es. solo per correggere la nota).
+  **Deliberatamente non applicata** a `deleteActivityEvent` (la
+  riallineatura dell'ultimo move rimasto dopo una cancellazione non
+  correlata duplicherebbe una visita già aperta) né alla migrazione
+  storica Fase F (`migrateSingleJobActivityLog_`, già autorevole via la
+  materializzazione L5) — entrambe continuano a chiamare
+  `applyStructuralAlignment_` senza il terzo parametro, comportamento
+  invariato.
+- `client.html`: messaggio utente per il nuovo hard error
+  (`HARD_ERROR_MESSAGES_`).
+
+**Test aggiunti** (`Tests.gs`, harness Node), 3 nuovi:
+`testAddActivityEventManualReentryUpdatesStatusAndOpensVisit`
+(riproduce lo scenario esatto del 19/08: caso in attesa, correzione
+manuale verso backlog — `job.status` diventa `backlog`, 2 visite,
+`rientro_ts`/`rientro_da`/`rework_cause` corretti),
+`testAddActivityEventManualReentryDirectToWipBlocked` (stesso divieto
+di `moveJob`, anche con `force: true`),
+`testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit`
+(risalvare lo stesso evento senza cambiare data/colonne non duplica la
+visita). **137/137 test passati nell'harness Node** (134 preesistenti
++ 3 nuovi, nessuna regressione) — **due test preesistenti aggiustati**
+(`testDeleteActivityEventRealignsOpenVisit`,
+`testDeleteActivityEventManual`): usavano un rientro diretto a WIP via
+Cronologia manuale solo come sequenza di comodo per testare la
+cancellazione, ora vietato per lo stesso motivo — cambiata la colonna
+intermedia da un'attesa a una colonna neutrale, nessun cambiamento
+all'intento originale dei due test.
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(16/16 file identici).
+
+**Criteri di accettazione §3 di `docs/DESIGN_dashboard.md` — tutti
+[x]**, aggiornati direttamente nel documento di design.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `be41198` (dopo `b5f4b60`/`e3a908b` di M1).
+
+**Prossima sotto-fase**: M3 (Ricognizione — inventario di quanto esiste
+in dashboard oggi, confronto con la dispensa FSC), §4 di
+`docs/DESIGN_dashboard.md`. Nessun gate su M3 stessa, ma produce le
+sotto-fasi M4..Mn che **hanno** un gate 🔴 Umano (conferma del piano
+prima di iniziare M4) — quindi M3 può procedere in autonomia, la
+sessione si fermerà solo dopo aver prodotto il piano M4..Mn, per la
+conferma di Marco.
+
 ## M1 (dashboard) — DONE, nessun gate di design (2026-08-19)
 
 Sessione autonoma (`docs/RUNBOOK_esecuzione_autonoma.md`), prima
@@ -44,13 +126,11 @@ resta una decisione di Marco, riservata a lui, quando vorrà — M1 rende
 PROD stabile anche senza quel passo (niente più errore, solo viste
 vuote).
 
-**Prossima sotto-fase**: M2 (Cronologia — chiudere il buco "correzione
-manuale non aggiorna lo stato derivato"), §3 di
-`docs/DESIGN_dashboard.md`. **Ha un gate 🔴 Umano**: prima di scrivere
-codice, presentare a Marco le due opzioni descritte nel documento e
-raccogliere la sua decisione — non assumibile in autonomia. Questa
-sessione si ferma qui, come da runbook, per raccogliere quella
-decisione.
+**Prossima sotto-fase, al momento della chiusura di M1**: M2
+(Cronologia — chiudere il buco "correzione manuale non aggiorna lo
+stato derivato"), §3 di `docs/DESIGN_dashboard.md` — gate 🔴 Umano
+confermato da Marco nella stessa sessione, vedi sezione M2 sopra
+(opzione 2 scelta, implementazione completata subito dopo).
 
 ## Incidente — property ambientale bloccata su TEST, PROD mostrava dati di TEST (2026-08-19)
 
