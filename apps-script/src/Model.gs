@@ -183,6 +183,14 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
     var job = jobsById[visit.job_id];
     return Boolean(job) && !job.incarico_chiuso_ts;
   }).length;
+  // M7 (DESIGN_dashboard.md, §4.2, decisione di Marco 2026-08-19): profilo
+  // di ritardo (Cap. 13 della dispensa FSC, "quanto e quando rientra il
+  // lavoro") - a differenza di M4-M6 richiede tutta la storia disponibile
+  // (allVisite, non filtrata sulla finestra di osservazione: una stima
+  // statistica beneficia di piu' campioni, e il documento tratta la
+  // finestra "flusso" e il profilo di ritardo come due concetti distinti),
+  // non solo un'aggregazione su periodo.
+  var delayProfile = delayProfile_(allVisite);
   var workload = currentWorkload_(jobs, columnMap);
   var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
 
@@ -240,6 +248,7 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       window_days: windowDays,
       count: latentBacklogCount
     },
+    delayProfileMetrics: delayProfile,
     stabilityMetrics: stability === null ? null : {
       margin: stability.margin,
       congestion_factor: stability.congestion_factor,
@@ -618,6 +627,50 @@ function stabilityMetrics_(rho, rhoEffective, cs2) {
     congestion_factor: rho >= 1 ? null : round_(rho / (1 - rho)),
     variability_factor: round_((1 + cs2) / 2),
     system_state: state
+  };
+}
+
+// M7 (DESIGN_dashboard.md, §4.2): profilo di ritardo (dispensa FSC, Cap.
+// 13). D_i = rientro_ts - consegna_ts per ogni visita che e' stata
+// consegnata E POI e' rientrata (entrambi i campi valorizzati sulla
+// stessa riga 'visite' - esattamente il campione {D_i} definito dal
+// capitolo, "si osservano solo i casi che rientrano"). alpha = massa
+// media di lavoro che rientra per consegna (numero di rientri osservati
+// / numero di consegne osservate, entrambe su tutta la storia
+// disponibile). k[m] = istogramma discretizzato di {D_i} su bin di 7
+// giorni (Delta, l'esempio esplicito del capitolo: "spesso sufficiente e
+// piu' semplice da stimare/aggiornare" della KDE continua), normalizzato
+// a somma 1; l'ultimo bin raccoglie la coda (>= bin_days * (bin_count-1))
+// per restare un array di dimensione fissa. Nessuna correzione per
+// censura a destra (il capitolo la introduce come raffinamento
+// successivo, non come requisito minimo) - documentato come limite noto,
+// non un bug.
+function delayProfile_(visite) {
+  var MIN_SAMPLES = 5;
+  var BIN_DAYS = 7;
+  var BIN_COUNT = 8;
+
+  var deliveries = visite.filter(function(visit) { return Boolean(visit.consegna_ts); });
+  var delays = visite
+    .filter(function(visit) { return visit.consegna_ts && visit.rientro_ts; })
+    .map(function(visit) { return diffDays(visit.consegna_ts, visit.rientro_ts); })
+    .filter(function(days) { return days >= 0; });
+
+  if (delays.length < MIN_SAMPLES) {
+    return { sample_size: delays.length, alpha: null, bin_days: BIN_DAYS, kernel: null };
+  }
+
+  var kernelCounts = new Array(BIN_COUNT).fill(0);
+  delays.forEach(function(days) {
+    var bin = Math.min(Math.floor(days / BIN_DAYS), BIN_COUNT - 1);
+    kernelCounts[bin]++;
+  });
+
+  return {
+    sample_size: delays.length,
+    alpha: deliveries.length ? round_(delays.length / deliveries.length) : null,
+    bin_days: BIN_DAYS,
+    kernel: kernelCounts.map(function(count) { return round_(count / delays.length); })
   };
 }
 

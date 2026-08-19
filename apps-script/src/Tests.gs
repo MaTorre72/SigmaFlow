@@ -306,6 +306,10 @@ function runAllTests() {
     testBuildSystemStateStabilityMetricsNullWhenInsufficientData,
     testBuildSystemStateSumsWaitTimeByType,
     testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
+    testDelayProfileNullBelowMinimumSamples,
+    testDelayProfileComputesAlphaAndKernelFromDeliveredThenReentered,
+    testDelayProfileAlphaCountsAllDeliveriesNotOnlyReentered,
+    testBuildSystemStateExposesDelayProfileInSystemState,
     testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
     testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
     testBuildSystemStateTimelineIncludesArchivedJobs,
@@ -2066,6 +2070,78 @@ function testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries() {
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
   assertEquals_(1, state.latentBacklogMetrics.count, 'solo la consegna non chiusa e mai rientrata conta come esposizione futura');
+}
+
+// M7 (DESIGN_dashboard.md, §4.2): profilo di ritardo (Cap. 13) - alpha e
+// il kernel k[m] devono restare null sotto la soglia minima di campioni
+// (5 rientri osservati), coerente con enoughCompleted altrove.
+function testDelayProfileNullBelowMinimumSamples() {
+  var visite = [
+    { job_id: 'JOB-1', numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00', rientro_ts: '2026-01-05T09:00:00+02:00' },
+    { job_id: 'JOB-2', numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00' }
+  ];
+
+  var profile = delayProfile_(visite);
+
+  assertEquals_(1, profile.sample_size, 'un solo rientro osservato');
+  assertEquals_(null, profile.alpha, 'alpha non stimabile sotto la soglia minima');
+  assertEquals_(null, profile.kernel, 'kernel non stimabile sotto la soglia minima');
+}
+
+// Riproduce l'esempio del capitolo: 5 rientri, tutti entro la prima
+// settimana (bin 0) - k[0] deve valere 1 (100%), gli altri bin 0.
+// alpha = 5 rientri / 5 consegne = 1.
+function testDelayProfileComputesAlphaAndKernelFromDeliveredThenReentered() {
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    visite.push({
+      job_id: 'JOB-DELAY-' + i,
+      numero_visita: 1,
+      consegna_ts: '2026-01-01T09:00:00+02:00',
+      rientro_ts: '2026-01-03T09:00:00+02:00'
+    });
+  }
+
+  var profile = delayProfile_(visite);
+
+  assertEquals_(5, profile.sample_size, '5 rientri osservati');
+  assertEquals_(1, profile.alpha, 'alpha = 5 rientri / 5 consegne');
+  assertEquals_(1, profile.kernel[0], 'tutti i rientri nel primo bin (0-6 giorni)');
+  assertEquals_(0, profile.kernel[1], 'nessun rientro nel secondo bin');
+  assertEquals_(1, profile.kernel.reduce(function(sum, share) { return sum + share; }, 0), 'il kernel somma a 1');
+}
+
+// Una consegna senza rientro non produce un campione D_i (§10: "si
+// osservano solo i casi che rientrano"), ma conta comunque come consegna
+// al denominatore di alpha.
+function testDelayProfileAlphaCountsAllDeliveriesNotOnlyReentered() {
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    visite.push({ job_id: 'JOB-REENTER-' + i, numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00', rientro_ts: '2026-01-03T09:00:00+02:00' });
+  }
+  for (var j = 0; j < 5; j++) {
+    visite.push({ job_id: 'JOB-NO-REENTER-' + j, numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00' });
+  }
+
+  var profile = delayProfile_(visite);
+
+  assertEquals_(5, profile.sample_size, 'solo le visite rientrate producono un campione D_i');
+  assertEquals_(0.5, profile.alpha, 'alpha = 5 rientri / 10 consegne totali');
+}
+
+function testBuildSystemStateExposesDelayProfileInSystemState() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-PROFILE', status: 'backlog', arrival_ts: nowIso_(), visit_number: 2 }];
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    visite.push({ job_id: 'JOB-PROFILE-' + i, numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00', rientro_ts: '2026-01-08T09:00:00+02:00' });
+  }
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Boolean(state.delayProfileMetrics), 'delayProfileMetrics presente in systemState');
+  assertEquals_(5, state.delayProfileMetrics.sample_size, 'campione letto da tutta la storia, non solo dalla finestra osservata');
+  assertEquals_(1, state.delayProfileMetrics.kernel[1], 'rientro dopo 7 giorni cade nel secondo bin (7-13 giorni)');
 }
 
 function testBuildSystemStateStabilityMetricsNullWhenInsufficientData() {

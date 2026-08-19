@@ -1889,6 +1889,8 @@
       'Consegne non ancora chiuse': valueOrDash(latentBacklog.count)
     });
 
+    renderDelayProfile(system.delayProfileMetrics || {});
+
     renderScenarios(system.scenarioReadiness || {});
     renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
     renderGauge('gauge-capacity', system.capacityMetrics.available_share, 1, false);
@@ -1911,6 +1913,39 @@
     root.className = 'gauge gauge-' + tone;
     root.style.setProperty('--gauge-value', Math.round(ratio * 100) + '%');
     label.textContent = Math.round(Number(value) * 100) + '%';
+  }
+
+  function renderDelayProfile(profile) {
+    renderDl('delay-profile-metrics', {
+      'Rientri osservati (campione)': valueOrDash(profile.sample_size),
+      'Rientri medi per consegna (alpha)': estimableValue(profile.alpha)
+    });
+
+    var headerRow = document.getElementById('delay-profile-header');
+    var bodyRow = document.getElementById('delay-profile-body');
+    headerRow.innerHTML = '';
+    bodyRow.innerHTML = '';
+
+    var kernel = profile.kernel;
+    if (!kernel) {
+      var th = document.createElement('th');
+      th.textContent = 'Dato non ancora stimabile (servono almeno 5 rientri osservati)';
+      headerRow.appendChild(th);
+      return;
+    }
+
+    var binDays = profile.bin_days || 7;
+    kernel.forEach(function(share, index) {
+      var th = document.createElement('th');
+      th.textContent = index < kernel.length - 1
+        ? (index * binDays) + '-' + ((index + 1) * binDays - 1) + ' giorni'
+        : (index * binDays) + '+ giorni';
+      headerRow.appendChild(th);
+
+      var td = document.createElement('td');
+      td.textContent = formatPercent(share);
+      bodyRow.appendChild(td);
+    });
   }
 
   function renderPointsMetrics(points) {
