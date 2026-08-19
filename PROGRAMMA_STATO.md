@@ -125,9 +125,11 @@ di design): tutti tranne gli ultimi due, riservati a N-B2/N-B3.
 
 **Gate 🔴 UMANO in attesa — N-B2 poi N-B3**: il codice è pronto e
 verificato su TEST, ma **nessun backup reale è mai stato creato**.
-Quando Marco vuole procedere: eseguire `backupProd_()` (Backup.gs)
-dall'editor Apps Script **sul progetto reale**, verificare che la copia
-compaia nella cartella Drive "SigmaFlow — Backup PROD" col nome
+Quando Marco vuole procedere: eseguire `eseguiBackupGiornalieroProd()`
+(Backup.gs, non `backupProd_()` da sola — logga un esito leggibile ed
+è la funzione esatta che il trigger chiamerà in seguito) dall'editor
+Apps Script **sul progetto reale**, verificare che la copia compaia
+nella cartella Drive "SigmaFlow — Backup PROD" col nome
 atteso — solo dopo, eseguire `installaBackupGiornalieroProd()` per
 attivare il trigger. Entrambi i passi restano riservati a Marco, mai a
 Claude (regola assoluta su PROD).

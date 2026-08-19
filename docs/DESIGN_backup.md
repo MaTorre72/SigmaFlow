@@ -124,7 +124,7 @@ di codice a parte, fuori da questo programma). Non in scope da N-B1 a N-B3.
 | Sotto-fase | Contenuto | Gate |
 |---|---|---|
 | **N-B1** | Config additivo (`backup_retention_giorni`); `backupProd_()`, `pruneOldBackups_()`, `eseguiBackupGiornalieroProd()`; scope Drive in `appsscript.json`; test (harness Node, spreadsheet "PROD-like" mockato — **mai il vero PROD**, stesso principio di `allineaSchemaSuProd()` mai testata su dati reali dall'harness) | — |
-| **N-B2** | Primo backup reale — **eseguito da Marco stesso**, mai da Claude (regola assoluta di CLAUDE.md: qualunque azione che tocca PROD, anche solo in lettura per una funzione mai provata prima su dati veri, resta riservata a Marco), da editor Apps Script, verificando che la copia compaia nella cartella Drive col nome atteso | 🔴 Umano |
+| **N-B2** | Primo backup reale — **eseguito da Marco stesso**, mai da Claude (regola assoluta di CLAUDE.md: qualunque azione che tocca PROD, anche solo in lettura per una funzione mai provata prima su dati veri, resta riservata a Marco), da editor Apps Script eseguendo `eseguiBackupGiornalieroProd()` (non `backupProd_()` da sola: logga un esito leggibile ed è la funzione esatta che il trigger chiamerà in N-B3 — la pulizia retention che contiene in più non fa nulla sulla cartella ancora vuota), verificando che la copia compaia nella cartella Drive col nome atteso | 🔴 Umano |
 | **N-B3** | Installazione del trigger a tempo (`installaBackupGiornalieroProd()`, stesso pattern idempotente di `installaTriggerArchiviazioneAutomatica`) — **eseguita da Marco**, solo dopo N-B2 confermato | 🔴 Umano |
 
 N-B2 e N-B3 possono essere fatte da Marco nella stessa sessione, una dopo
