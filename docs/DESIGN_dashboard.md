@@ -219,17 +219,48 @@ questo limite, non a un dato misurato.
 | **M4** | Collegare `stability` (già calcolato) a `systemState` + nuovo pannello "Margine di stabilità" in dashboard | Zero nuovo calcolo, solo collegamento — il pezzo più economico del quadro Cap. 15 mancante |
 | **M5** | Calcolare e mostrare $T_{cliente}$/$T_{ente}$/$T_{interno}$ (somma `t_*_d` su `visite` nella finestra osservata) — nuovo pannello "Dove si blocca il lavoro" | Dato già raccolto per ogni visita (§9 del modello caso/visita), solo mai sommato — nessuna decisione di design aperta, un aggregato in più su dati esistenti |
 | **M6** | Calcolare e mostrare $B_{lat}(t)$ (consegne recenti con `incarico_chiuso_ts` nullo, esposizione futura a rientri) | Stessa categoria di M5 — dato già presente (`incarico_chiuso_ts` su `jobs`, `consegna_ts` su `visite`), solo mai aggregato in questo modo |
-| **M7** | $\alpha$/kernel $k[m]$ (Cap. 13, profilo del ritardo — "quanto e quando rientra il lavoro") | **Fuori scope raccomandato per ora** — a differenza di M4-M6 richiede una vera stima statistica (non una somma), il documento FSC la tratta in un capitolo a parte (Cap. 13, "Stima del profilo di ritardo e simulazione di scenari") con un livello di complessità che merita una sessione di design dedicata, non un innesto rapido in Fase M |
-| **M8** | Ottimizzazioni frontend residue (`renderBoard()` DOM completo, letture `getDataRange()` integrali) | Decisione esplicita da prendere con Marco (vedi sotto) — non incluso di default |
+| **M7** | $\alpha$/kernel $k[m]$ (Cap. 13, profilo del ritardo — "quanto e quando rientra il lavoro") | Richiede una vera stima statistica, non una somma — **ha un gate 🔴 Umano proprio** (§4.3) prima di scrivere codice: la scelta del metodo di stima va presentata a Marco, non assunta, esattamente come M2 |
+| **M8** | Ottimizzazioni frontend residue (`renderBoard()` DOM completo, letture `getDataRange()` integrali) | Incluso su decisione di Marco |
+| **M9** | Pannello "quadro avanzato": espone le metriche di Cap. 3-9 già calcolate (`calculateMetrics_`) ma mai renderizzate ($\lambda$/$\mu$/$\rho$/$C_v^2$/Pollaczek-Khinchine/$E[S_0]$/$E[S_1]$/$E[K]$) | Incluso su decisione di Marco — zero nuovo calcolo, solo un pannello che li legge da `calculateMetrics_` invece che da `systemState` (oggi l'unico letto dal frontend) |
 
-**Raccomandazione**: includere M4-M6 in questa fase (basso rischio,
-nessuna decisione di design aperta, dati già raccolti — solo
-calcolo/esposizione mancante). Lasciare M7 fuori scope, da riprendere
-con un documento dedicato quando serve davvero stimare il profilo di
-ritardo. Su M8 (ottimizzazioni frontend) e sull'inclusione di un
-pannello "quadro avanzato" per le metriche di §10 già calcolate ma non
-esposte (Cap. 3-9: $\lambda$/$\mu$/$\rho$/$C_v^2$/PK/$E[S_0,S_1,K]$) —
-decisione esplicita di Marco, non assunta da questa ricognizione.
+**Decisione di Marco (2026-08-19, gate 🔴 confermato)**: incluse tutte
+e sei — M4, M5, M6 come proposto; **M7 incluso in Fase M nonostante la
+raccomandazione contraria** (Marco ha scelto esplicitamente di non
+rimandarlo); **M8** (ottimizzazioni frontend) **e M9** (nuovo, pannello
+"quadro avanzato" per le metriche di Cap. 3-9 già calcolate ma non
+esposte) **entrambi inclusi**. Nessuna sotto-fase lasciata fuori scope.
+
+**M4-M9 — tutte DONE (2026-08-19)**, eseguite in sequenza subito dopo
+la conferma del gate (nessun gate ulteriore tra una sotto-fase e la
+successiva). Dettaglio verificabile in `PROGRAMMA_STATO.md`. Riepilogo:
+- **M4**: `stabilityMetrics` collegata a `systemState`, nuovo pannello
+  "Margine di stabilità".
+- **M5**: `waitTimeMetrics` (T_cliente/T_ente/T_interno), nuovo
+  pannello "Dove si blocca il lavoro".
+- **M6**: `latentBacklogMetrics` (B_lat(t)), nuovo pannello
+  "Esposizione futura a rientri".
+- **M7**: `delayProfileMetrics` (α, kernel k[m] su bin di 7 giorni),
+  nuovo pannello "Profilo di rientro". Nessuna correzione per censura a
+  destra — limite noto, documentato nel codice (`delayProfile_`,
+  Model.gs).
+- **M8**: `loadBoard()` (`client.html`) salta `renderBoard()` sul
+  polling periodico (45s) quando i dati letti dal server sono identici
+  al giro precedente — verificato nel Browser pane con un server locale
+  di riproduzione. Deliberatamente **fuori scope**: caching lato server
+  delle letture `getDataRange().getValues()` — stessa classe di rischio
+  dei due incidenti già documentati su questo progetto attorno a stato
+  condiviso (`PROP_SCHEMA_VERSION`, `SIGMAFLOW_SPREADSHEET_ID`).
+- **M9**: nuovo pannello "Quadro avanzato (teoria delle code)" —
+  espone λ/μ/ρ/E[S]/Cv²/M-M-1/M-G-1/rework, già calcolati in
+  `calculateMetrics_` ma mai letti dal frontend prima di M9. **Corretto
+  un errore della ricognizione M3**: E[S0]/E[S1] (Cap. 6) erano stati
+  classificati per sbaglio come "già calcolati" — in realtà mai
+  implementati, aggiunti in questa stessa sotto-fase.
+
+147/147 test nell'harness Node al termine di M4-M9 (134 dopo M2 + 13
+nuovi attraverso M4-M9, nessuna regressione). Push su TEST verificato
+ad ogni sotto-fase (`clasp pull` isolato + diff, sempre 16/16 file
+identici).
 
 ---
 

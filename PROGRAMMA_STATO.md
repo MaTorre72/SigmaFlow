@@ -1,6 +1,124 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-19
 
+## M4-M9 (dashboard) — DONE, programma Fase M completo salvo merge (2026-08-19)
+
+Eseguite in sequenza subito dopo la conferma del gate M3 (nessun gate
+intermedio tra una sotto-fase e la successiva, come da runbook).
+Riferimento: [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §4.2.
+
+**M4 — Margine di stabilità (Cap. 15)**: `stabilityMetrics_`
+(`Model.gs`) era già calcolata in `calculateMetrics_` ma mai passata a
+`systemState` (trovato in M3). Ora collegata dentro `buildSystemState_`
+con gli stessi ingredienti già in scope (rho grezzo = newRate/
+effectiveCapacity, rho effettivo = effectiveLoad, variabilità =
+stats.cs2) — zero nuovo dato raccolto. Nuovo pannello "Margine di
+stabilità" (`dashboard.html`/`client.html`). Null sotto la soglia
+minima di campioni (stessa soglia >=5 di `enoughCompleted`).
+
+**M5 — Dove si blocca il lavoro (T_cliente/T_ente/T_interno)**: somma
+di `t_cliente_d`/`t_ente_d`/`t_interno_d` (già accumulati per visita da
+`accumulateWaitTime_`, Kanban.gs, mai sommati) sulla stessa finestra
+"observed" di flowMetrics/reworkMetrics. Nuovo helper `sumVisitField_`
+(Model.gs), nuovo pannello "Dove si blocca il lavoro".
+
+**M6 — Esposizione futura a rientri (B_lat(t))**: conta le visite con
+`consegna_ts` nella finestra osservata, mai rientrate (`rientro_ts`
+vuoto — "ultima visita del caso") il cui job non è formalmente chiuso
+(`incarico_chiuso_ts` vuoto). Un caso archiviato non può mai comparire
+(`archiveJob_` richiede `incarico_chiuso_ts` valorizzato per
+costruzione). Nuovo pannello "Esposizione futura a rientri".
+
+**M7 — Profilo di ritardo, α e kernel k[m] (Cap. 13)**: letto il
+capitolo della dispensa FSC (`docs/fsc.md`) per implementare
+correttamente la definizione, non inventata. $D_i$ = `rientro_ts` −
+`consegna_ts` per ogni visita consegnata e poi rientrata (**su tutta la
+storia disponibile**, non solo la finestra di osservazione — una stima
+statistica beneficia di più campioni, scelta deliberata diversa dalle
+altre metriche di questa fase). α = rientri osservati / consegne
+osservate. k[m] = istogramma discretizzato di {D_i} su bin di 7 giorni
+(l'esempio esplicito del capitolo), normalizzato a somma 1, coda
+raccolta nell'ultimo bin. **Nessuna correzione per censura a destra**
+(raffinamento del capitolo, non requisito minimo) — limite noto,
+documentato nel codice (`delayProfile_`, Model.gs). Null sotto soglia
+(5 campioni). Nuovo pannello "Profilo di rientro" (tabella dei bin +
+α).
+
+**M8 — Ottimizzazioni frontend (salta il ridisegno del polling)**:
+`loadBoard()` (`client.html`) confronta un'istantanea testuale dello
+stato che guida il disegno (columns/jobs/columnMeta/priorityClasses)
+con quella del giro precedente — se identica e non è un refresh
+esplicito (`force`), salta `renderBoard()`/`renderToolbarFilters()`,
+non l'aggiornamento dell'orario. Il percorso drag-and-drop
+(`moveJob`/`deleteJob`) evitava già un `renderBoard()` completo dal M0-B
+precedente; questo completa lo stesso principio sul polling periodico
+(45s), l'unico rimasto a ridisegnare incondizionatamente. **Verificato
+nel Browser pane** con un server locale di riproduzione (markup reale +
+`routeAction_` via l'harness Node, `/tmp/sf-scratch/repro-server.js`,
+rimosso a fine verifica): un marcatore su un nodo DOM di card sopravvive
+a un poll con dati invariati (nessun ridisegno) e sparisce dopo un poll
+successivo a una modifica reale sul server (ridisegno avvenuto, nuova
+card visibile) — nessun errore in console in nessuno dei due casi.
+**Deliberatamente fuori scope**: caching lato server delle letture
+`getDataRange().getValues()` — stessa classe di rischio (stato
+condiviso che può disallinearsi) dei due incidenti già documentati in
+questo file (`PROP_SCHEMA_VERSION`, `SIGMAFLOW_SPREADSHEET_ID`) su un
+tool in produzione con scritture concorrenti reali — da riprendere solo
+se una latenza misurata lo giustifica.
+
+**M9 — Pannello "quadro avanzato" (Cap. 3-9)**: espone λ/μ/ρ/E[S]/Cv²,
+M/M/1 e M/G/1 (Wq/W/Lq/L), rework (p1/r/E[K]/lambda_effective/
+rho_effective) — tutti già calcolati in `calculateMetrics_` ma mai
+renderizzati (`client.html` leggeva solo `metrics.systemState`, mai i
+campi top-level — confermato in M3). **Corretto un errore della
+ricognizione M3**: E[S0]/E[S1] (tempo medio di servizio di prima visita
+vs rework, Cap. 6) erano stati classificati per sbaglio come "già
+calcolati" insieme a E[K] — in realtà mai implementati. Aggiunta la
+separazione mancante in `calculateMetrics_` (GROUP BY `numero_visita` =
+1 vs > 1 sullo stesso campione già usato per E_S/E_S2/Cs2).
+
+**Test aggiunti attraverso M4-M9** (`Tests.gs`, harness Node), 13
+nuovi: `testBuildSystemStateExposesStabilityMetrics`,
+`testBuildSystemStateStabilityMetricsNullWhenInsufficientData`,
+`testBuildSystemStateSumsWaitTimeByType`,
+`testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries`,
+`testDelayProfileNullBelowMinimumSamples`,
+`testDelayProfileComputesAlphaAndKernelFromDeliveredThenReentered`,
+`testDelayProfileAlphaCountsAllDeliveriesNotOnlyReentered`,
+`testBuildSystemStateExposesDelayProfileInSystemState`,
+`testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus`,
+`testCalculateMetricsE_S0E_S1NullWhenNoSamples` (M8 non ha test
+nell'harness — cambia solo comportamento client, verificato nel
+Browser pane come sopra). **147/147 test passati nell'harness Node**
+(134 dopo M2 + 13 nuovi, nessuna regressione), verificati ad ogni
+sotto-fase, non solo alla fine.
+
+**Push su TEST verificato ad ogni sotto-fase**:
+`bash apps-script/test-harness/push-and-verify.sh` (16/16 file
+identici, sempre).
+
+**Verifica UI reale**: server locale di riproduzione (stessa tecnica di
+N4/N5/N6/N-B2), seed con due card attive. Tutti i nuovi pannelli (M4,
+M5, M6, M7, M9) renderizzati correttamente con placeholder "Dato non
+ancora stimabile" sotto soglia dati, nessun errore in console.
+
+**Criteri di accettazione**: nessun elenco dedicato in
+`DESIGN_dashboard.md` per M4-M9 (proposte durante M3, non nella
+struttura a caselle di M1/M2) — verificati per via del Definition of
+Done del runbook (test, push, questo aggiornamento) invece che da una
+lista di spunta nel documento di design.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `dd27edf` (M4-M6), `d9f2a96` (M7), `93cd790` (M9), `b155e37`
+(M8) — dopo `f9b2a05` (M3).
+
+**Programma Fase M — completo salvo un solo passo**: tutte le
+sotto-fasi M1-M9 di `docs/DESIGN_dashboard.md` sono DONE. **Unico gate
+rimasto**: §6 del design doc, "fusione del fix in `main`" — prassi
+ordinaria (mai push diretto su `main`), riservata a Marco tramite pull
+request, non un gate di design. Nessuna sotto-fase residua da eseguire
+in autonomia.
+
 ## M3 (dashboard) — Ricognizione completata, GATE 🔴 UMANO in attesa (2026-08-19)
 
 Riferimento: [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §4.
