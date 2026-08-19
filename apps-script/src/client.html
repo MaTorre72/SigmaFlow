@@ -250,13 +250,36 @@
       return;
     }
     callApi('getBoard').then(function(data) {
-      state.board = data.columns || {};
-      state.jobs = data.jobs || [];
-      state.columnMeta = data.column_meta || defaultColumns;
-      state.priorityClasses = data.priority_classes || {};
+      var columns = data.columns || {};
+      var jobs = data.jobs || [];
+      var columnMeta = data.column_meta || defaultColumns;
+      var priorityClasses = data.priority_classes || {};
+
+      // M8 (DESIGN_dashboard.md, §4.2): il polling periodico (ogni 45s,
+      // bindVisibilityPolling_) richiama loadBoard(false) anche quando
+      // nulla e' cambiato sul server - ridisegnare comunque l'intera board
+      // (svuota e ricostruisce tutto il DOM, renderBoard) ad ogni giro
+      // costa quanto un caricamento completo, senza alcun beneficio
+      // visibile quando i dati sono identici. Confronto testuale del solo
+      // stato che guida il disegno (non l'intera risposta, che include
+      // anche opzioni/metadati che non cambiano la resa): se identico al
+      // giro precedente e non e' un refresh esplicito (force), si salta
+      // solo il ridisegno - l'orario "Aggiornato alle" si aggiorna
+      // comunque, il poll ha confermato che i dati sono aggiornati.
+      var renderSnapshot = JSON.stringify({ columns: columns, jobs: jobs, columnMeta: columnMeta, priorityClasses: priorityClasses });
+      var unchanged = !force && renderSnapshot === state.lastRenderSnapshot_;
+
+      state.board = columns;
+      state.jobs = jobs;
+      state.columnMeta = columnMeta;
+      state.priorityClasses = priorityClasses;
       state.options = data.options || state.options;
-      renderToolbarFilters();
-      renderBoard();
+
+      if (!unchanged) {
+        state.lastRenderSnapshot_ = renderSnapshot;
+        renderToolbarFilters();
+        renderBoard();
+      }
       updateLastUpdated();
     }).catch(showError);
   }
