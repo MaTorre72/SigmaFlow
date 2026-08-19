@@ -17,7 +17,9 @@
     touchTimer: null,
     touchStart: null,
     suppressCardClick: false,
-    metricsLoaded: false
+    metricsLoaded: false,
+    archivioLoaded: false,
+    cestinoLoaded: false
   };
 
   var defaultColumns = [
@@ -46,6 +48,7 @@
     bindNavigation();
     bindToolbar();
     bindModal();
+    bindCestinoToolbar();
     loadBoard();
     bindVisibilityPolling_();
   });
@@ -122,10 +125,17 @@
           item.classList.remove('active');
         });
         button.classList.add('active');
-        document.getElementById('view-board').hidden = button.dataset.view !== 'board';
-        document.getElementById('view-dashboard').hidden = button.dataset.view !== 'dashboard';
-        if (button.dataset.view === 'dashboard') {
+        var view = button.dataset.view;
+        document.getElementById('view-board').hidden = view !== 'board';
+        document.getElementById('view-dashboard').hidden = view !== 'dashboard';
+        document.getElementById('view-archivio').hidden = view !== 'archivio';
+        document.getElementById('view-cestino').hidden = view !== 'cestino';
+        if (view === 'dashboard') {
           loadMetrics();
+        } else if (view === 'archivio') {
+          loadArchivio();
+        } else if (view === 'cestino') {
+          loadCestino();
         }
       });
     });
@@ -215,6 +225,7 @@
     });
 
     document.getElementById('modal-create-button').addEventListener('click', saveCardFromModal);
+    document.getElementById('modal-archive-button').addEventListener('click', archiveJobFromModal);
     document.querySelectorAll('.modal-tabs .nav-button').forEach(function(button) {
       button.addEventListener('click', function() { setModalTab_(button.dataset.modalTab); });
     });
@@ -417,7 +428,7 @@
       job.description ? '<span class="description-icon" title="Descrizione presente">note</span>' : '',
       '</div>',
       '<div class="card-actions">',
-      '<button type="button" class="delete-card-button" title="Elimina card" aria-label="Elimina card">x</button>',
+      '<button type="button" class="delete-card-button" title="Sposta nel cestino" aria-label="Sposta nel cestino">x</button>',
       '</div>'
     ].join('');
     card.querySelector('.card-title').textContent = job.title || '(senza titolo)';
@@ -677,6 +688,7 @@
     document.getElementById('card-modal-context').textContent = 'Modifica card';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Salva e chiudi';
+    updateArchiveButtonState_(job);
     resetCustomValueFields();
     updateLivePriorityBadge();
     renderReworkHistory(job);
@@ -684,6 +696,37 @@
     document.querySelector('.modal-tabs').hidden = false;
     setModalTab_('info');
     document.getElementById('card-modal').showModal();
+  }
+
+  // §4.1: eleggibile solo con incarico_chiuso_ts valorizzato sul caso
+  // aperto nel modale — stessa regola applicata lato server in
+  // archiveJob_ (Kanban.gs), qui solo per riflettere lo stato nel
+  // bottone (il server resta l'unica fonte di verita').
+  function updateArchiveButtonState_(job) {
+    document.getElementById('modal-archive-button').disabled = !(job && job.incarico_chiuso_ts);
+  }
+
+  function archiveJobFromModal() {
+    var job = state.activeJob;
+    if (!job || !job.incarico_chiuso_ts) { return; }
+    if (!confirm('Archiviare "' + (job.title || job.job_id) + '"? Il caso lascera\' la board e finira\' nella vista Archivio.')) {
+      return;
+    }
+    var previousBoard = cloneBoard();
+    var fromStatus = removeJobLocally(job.job_id);
+    removeCardEl_(job.job_id);
+    updateColumnCounters_(fromStatus);
+    document.getElementById('card-modal').close();
+    state.activeJob = null;
+    state.activeColumnId = null;
+    callApi('archiveJob', { job_id: job.job_id }).then(function() {
+      updateLastUpdated();
+    }).catch(function(error) {
+      state.board = previousBoard;
+      renderBoard();
+      showError(error);
+      loadBoard(true);
+    });
   }
 
   function openNewJobModal(columnId) {
@@ -711,6 +754,7 @@
     document.getElementById('modal-recent-activity-list').innerHTML = '';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
+    updateArchiveButtonState_(null);
     resetCustomValueFields();
     updateLivePriorityBadge();
     // La Cronologia richiede un job_id gia' esistente: nascosta in creazione.
@@ -960,12 +1004,15 @@
     incarico_ts: 'Data incarico (incarico_ts)',
     prep_ts: 'Data inizio preparazione (prep_ts)',
     start_ts: 'Data inizio lavorazione (start_ts)',
-    done_ts: 'Data completamento (done_ts)'
+    done_ts: 'Data completamento (done_ts)',
+    incarico_chiuso_ts: 'Chiusura incarico (incarico_chiuso_ts)'
   };
   var HARD_ERROR_MESSAGES_ = {
     TS_IN_FUTURO: 'La data non puo\' essere nel futuro.',
     COLONNA_NON_TROVATA: 'La colonna selezionata non e\' valida.',
-    REASON_OBBLIGATORIA: 'Il motivo della correzione e\' obbligatorio.'
+    REASON_OBBLIGATORIA: 'Il motivo della correzione e\' obbligatorio.',
+    CAMPO_NON_CORREGGIBILE: 'Il campo selezionato non e\' correggibile da qui.',
+    DATA_NON_VALIDA: 'Il nuovo valore non e\' una data valida.'
   };
   var SEQUENCE_WARNING_MESSAGES_ = {
     SEQUENZA_MODIFICATA: function(w) {
@@ -1155,6 +1202,7 @@
     var type = document.getElementById('activity-form-type').value;
     document.getElementById('activity-form-move-fields').hidden = type !== 'move';
     document.getElementById('activity-form-note-fields').hidden = type !== 'note';
+    document.getElementById('activity-form-correction-fields').hidden = type !== 'correction';
   }
 
   function validateActivityFormTs_() {
@@ -1186,12 +1234,18 @@
       document.getElementById('activity-form-to').value = eventToEdit.type === 'move' ? (eventToEdit.to || '') : '';
       document.getElementById('activity-form-move-note').value = eventToEdit.type === 'move' ? (eventToEdit.note || '') : '';
       document.getElementById('activity-form-note-text').value = eventToEdit.type === 'note' ? (eventToEdit.note || '') : '';
+      document.getElementById('activity-form-correction-field').value = eventToEdit.type === 'correction' ? (eventToEdit.field || 'arrival_ts') : 'arrival_ts';
+      document.getElementById('activity-form-correction-new').value = eventToEdit.type === 'correction' ? isoToDatetimeLocal_(eventToEdit.new || '') : '';
+      document.getElementById('activity-form-correction-reason').value = eventToEdit.type === 'correction' ? (eventToEdit.reason || '') : '';
     } else {
       tsInput.value = isoToDatetimeLocal_(new Date().toISOString());
       typeSelect.value = 'move';
       document.getElementById('activity-form-to').value = '';
       document.getElementById('activity-form-move-note').value = '';
       document.getElementById('activity-form-note-text').value = '';
+      document.getElementById('activity-form-correction-field').value = 'arrival_ts';
+      document.getElementById('activity-form-correction-new').value = '';
+      document.getElementById('activity-form-correction-reason').value = '';
     }
     updateActivityFormFieldsVisibility_();
     document.getElementById('modal-activity-form').hidden = false;
@@ -1218,6 +1272,10 @@
       if (note) { payload.note = note; }
     } else if (payload.type === 'note') {
       payload.note = document.getElementById('activity-form-note-text').value.trim();
+    } else if (payload.type === 'correction') {
+      payload.field = document.getElementById('activity-form-correction-field').value;
+      payload.new = document.getElementById('activity-form-correction-new').value;
+      payload.reason = document.getElementById('activity-form-correction-reason').value.trim();
     }
     if (state.activityFormEditId) {
       payload.event_id = state.activityFormEditId;
@@ -1238,6 +1296,14 @@
     }
     if (type === 'note' && !document.getElementById('activity-form-note-text').value.trim()) {
       errorEl.hidden = false; errorEl.textContent = 'Inserisci il testo della nota.'; return;
+    }
+    if (type === 'correction') {
+      if (!document.getElementById('activity-form-correction-new').value) {
+        errorEl.hidden = false; errorEl.textContent = 'Inserisci il nuovo valore.'; return;
+      }
+      if (!document.getElementById('activity-form-correction-reason').value.trim()) {
+        errorEl.hidden = false; errorEl.textContent = 'Inserisci il motivo della correzione.'; return;
+      }
     }
 
     var payload = buildActivityFormPayload_();
@@ -1343,7 +1409,9 @@
   }
 
   function deleteJob(job) {
-    if (!confirm('Eliminare "' + (job.title || job.job_id) + '"?')) {
+    // §4.2: conferma leggera (non quella pesante di una cancellazione
+    // vera) - lo spostamento nel Cestino e' reversibile (Ripristina, N4).
+    if (!confirm('La card "' + (job.title || job.job_id) + '" verra\' spostata nel Cestino. Potrai ripristinarla o eliminarla definitivamente in seguito.')) {
       return;
     }
     var previousBoard = cloneBoard();
@@ -1571,6 +1639,144 @@
   // Caricata la prima volta che si apre la tab, poi tenuta in cache per
   // il resto della sessione — force=true (bottone dati demo TEST) la
   // invalida esplicitamente perche' i dati sono davvero cambiati.
+  // N4 (DESIGN_archiviazione.md, §6): vista Archivio, sola lettura -
+  // anagrafica + riepilogo cronologia, nessuna azione. Stesso pattern
+  // pigro/con cache di loadMetrics (§ sopra): non ricaricare ad ogni
+  // apertura del tab, solo la prima volta o su richiesta esplicita
+  // (force), dato che "consultata molto raramente" (design, §6).
+  function loadArchivio(force) {
+    if (state.archivioLoaded && !force) {
+      return;
+    }
+    callApi('getArchivio').then(function(data) {
+      state.archivioLoaded = true;
+      renderArchivioList_(data.items || []);
+    }).catch(showError);
+  }
+
+  function renderArchivioList_(items) {
+    var body = document.getElementById('archivio-table-body');
+    var empty = document.getElementById('archivio-empty');
+    body.innerHTML = '';
+    empty.hidden = items.length > 0;
+    items.forEach(function(item) {
+      var row = document.createElement('tr');
+      row.innerHTML =
+        '<td>' + escapeHtml(item.title || item.job_id) + '</td>' +
+        '<td>' + escapeHtml(item.client || '') + '</td>' +
+        '<td>' + escapeHtml(item.assignee || '') + '</td>' +
+        '<td>' + formatItalianDate(item.arrival_ts) + '</td>' +
+        '<td>' + formatItalianDate(item.incarico_chiuso_ts) + '</td>' +
+        '<td>' + formatItalianDate(item.archiviato_ts) + '</td>' +
+        '<td>' + (item.total_visits || 0) + '</td>' +
+        '<td class="row-actions">' +
+          '<button type="button" class="secondary-button" data-action="duplica">Usa come nuovo caso</button>' +
+        '</td>';
+      row.querySelector('[data-action="duplica"]').addEventListener('click', function() {
+        duplicaJobFromArchivio(item.job_id, item.title || item.job_id);
+      });
+      body.appendChild(row);
+    });
+  }
+
+  // N5 (§7): "Usa come nuovo caso" (etichetta rivista su richiesta di
+  // Marco il 2026-08-19: "Duplica" non rendeva l'idea che nasce una card
+  // NUOVA e vuota, non una copia della cronologia) crea un caso NUOVO
+  // attivo a partire da un caso archiviato - nessun dato storico
+  // riportato (arrival_ts/incarico_chiuso_ts/status/visite/log ripartono
+  // da zero, vedi duplicaJob_ lato server - nome interno invariato,
+  // tocca solo l'etichetta rivolta all'utente). Conferma leggera: non
+  // e' un'azione distruttiva, ne' sul caso archiviato (resta li'
+  // invariato) ne' altrove.
+  function duplicaJobFromArchivio(jobId, label) {
+    if (!confirm('Creare un nuovo caso attivo sulla board a partire da "' + label + '"? Il nuovo caso riparte da zero: nessuna cronologia ne\' visita pregressa viene riportata.')) {
+      return;
+    }
+    callApi('duplicaJob', { job_id: jobId }).then(function() {
+      showMessage('Nuovo caso creato sulla board.');
+    }).catch(showError);
+  }
+
+  // N4 (§6b): vista Cestino, stessa forma dell'Archivio (design: "stessa
+  // forma della vista Archivio") + tre azioni. "Ripristina" ha conferma
+  // leggera (azione reversibile); "Elimina definitivamente"/"Svuota
+  // cestino" hanno conferma pesante, essendo l'unico punto di reale
+  // perdita di dati in questo intero programma (§4.3).
+  function loadCestino(force) {
+    if (state.cestinoLoaded && !force) {
+      return;
+    }
+    callApi('getCestino').then(function(data) {
+      state.cestinoLoaded = true;
+      renderCestinoList_(data.items || []);
+    }).catch(showError);
+  }
+
+  function renderCestinoList_(items) {
+    var body = document.getElementById('cestino-table-body');
+    var empty = document.getElementById('cestino-empty');
+    body.innerHTML = '';
+    empty.hidden = items.length > 0;
+    items.forEach(function(item) {
+      var row = document.createElement('tr');
+      var label = escapeHtml(item.title || item.job_id);
+      row.innerHTML =
+        '<td>' + label + '</td>' +
+        '<td>' + escapeHtml(item.client || '') + '</td>' +
+        '<td>' + escapeHtml(item.assignee || '') + '</td>' +
+        '<td>' + formatItalianDate(item.arrival_ts) + '</td>' +
+        '<td>' + formatItalianDate(item.cestinato_ts) + '</td>' +
+        '<td>' + (item.total_visits || 0) + '</td>' +
+        '<td class="row-actions">' +
+          '<button type="button" class="secondary-button" data-action="ripristina">Ripristina</button>' +
+          '<button type="button" class="danger-button" data-action="elimina">Elimina definitivamente</button>' +
+        '</td>';
+      row.querySelector('[data-action="ripristina"]').addEventListener('click', function() {
+        ripristinaJobFromCestino(item.job_id, item.title || item.job_id);
+      });
+      row.querySelector('[data-action="elimina"]').addEventListener('click', function() {
+        eliminaJobDefinitivamenteFromCestino(item.job_id, item.title || item.job_id);
+      });
+      body.appendChild(row);
+    });
+  }
+
+  function ripristinaJobFromCestino(jobId, label) {
+    if (!confirm('Ripristinare "' + label + '"? Il caso tornera\' attivo sulla board.')) {
+      return;
+    }
+    callApi('ripristinaJob', { job_id: jobId }).then(function() {
+      showMessage('Caso ripristinato.');
+      loadCestino(true);
+    }).catch(showError);
+  }
+
+  function eliminaJobDefinitivamenteFromCestino(jobId, label) {
+    if (!confirm('Eliminare definitivamente "' + label + '"? L\'azione non e\' reversibile: il caso e tutte le sue visite andranno persi per sempre.')) {
+      return;
+    }
+    callApi('eliminaJobDefinitivamente', { job_id: jobId }).then(function() {
+      showMessage('Caso eliminato definitivamente.');
+      loadCestino(true);
+    }).catch(showError);
+  }
+
+  function bindCestinoToolbar() {
+    var button = document.getElementById('svuota-cestino-button');
+    if (!button) {
+      return;
+    }
+    button.addEventListener('click', function() {
+      if (!confirm('Svuotare completamente il Cestino? L\'azione non e\' reversibile: tutti i casi al suo interno e le loro visite andranno persi per sempre.')) {
+        return;
+      }
+      callApi('svuotaCestino').then(function(data) {
+        showMessage('Cestino svuotato (' + (data.deleted_count || 0) + ' casi eliminati).');
+        loadCestino(true);
+      }).catch(showError);
+    });
+  }
+
   function loadMetrics(force) {
     if (state.metricsLoaded && !force) {
       return;

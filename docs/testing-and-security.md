@@ -107,8 +107,27 @@ La suite copre, tra l'altro:
 - colonne dinamiche, ruoli e opzioni dropdown
 - `getMetrics` (stato unificato dashboard, campione insufficiente, tempi/capacita'/rientri)
 - validazione errori per parametri mancanti
+- schema additivo archiviazione/cestino (`jobs_archivio`/`visite_archivio`/`jobs_cestino`/`visite_cestino`, N1)
+- Cronologia, evento `correction` su campi whitelisted (`arrival_ts`/`incarico_chiuso_ts`, N1)
 
-La suite corrente contiene 68 test. Dopo la sincronizzazione eseguire `setupSigmaFlow`, quindi `runAllTestsAndLog`, e verificare `passed: 68`, `failed: 0`.
+La suite corrente contiene 87 test. Dopo la sincronizzazione eseguire `setupSigmaFlow`, quindi `runAllTestsAndLog`, e verificare `passed: 87`, `failed: 0`.
+
+**Tempo di esecuzione su GAS reale**: ogni test paga la latenza fissa
+delle chiamate a Sheets API (1-3s a chiamata) — l'intera suite su GAS
+reale richiede 20+ minuti. Per la verifica di routine ad ogni modifica
+usare l'harness Node (sub-secondo per l'intera suite, vedi sotto);
+riservare `runAllTestsAndLog` su GAS reale a conferme mirate (un
+singolo test, o un numero ridotto rilevante per il cambiamento in
+corso) — non è la stessa cosa dell'harness: gira sulla vera API Sheets,
+può rivelare problemi di consistenza (es. riferimenti allo spreadsheet
+tenuti attraverso operazioni che ne cambiano la struttura, trovato in
+collaudo N1) che un mock sincrono non riproduce.
+
+`runAllTestsAndLog` scrive tre righe di log separate (riepilogo,
+falliti in dettaglio, nomi dei passati) proprio per evitare che
+l'editor tronchi l'output — con un solo `Logger.log` sull'intero
+risultato, il limite di dimensione di un log si supera facilmente con
+80+ test e tronca proprio a metà dei falliti.
 
 ## Smoke test dashboard
 

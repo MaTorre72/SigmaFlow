@@ -60,6 +60,13 @@ function routeAction_(params) {
     migrateToActivityLog: migrateToActivityLog,
     migrateVisiteFromHistory: migrateVisiteFromHistory,
     deleteJob: deleteJob,
+    archiveJob: archiveJob,
+    getArchivio: getArchivio,
+    getCestino: getCestino,
+    ripristinaJob: ripristinaJob,
+    duplicaJob: duplicaJob,
+    eliminaJobDefinitivamente: eliminaJobDefinitivamente,
+    svuotaCestino: svuotaCestino,
     updateColumnLabel: updateColumnLabel,
     addColumn: addColumn,
     updateColumn: updateColumn,
@@ -257,6 +264,17 @@ function moveJob(params) {
 
   if (targetColumn.role === 'backlog' && !job.arrival_ts) {
     job.arrival_ts = now;
+  }
+
+  // N2 (DESIGN_archiviazione.md, §8c): un rientro reale (apertura di una
+  // nuova visita) su un caso gia' marcato "Chiuso" lo rende di nuovo
+  // attivo — incarico_chiuso_ts, che guida sia il bottone "Archivia" sia
+  // il trigger automatico (§4.1), non deve piu' riferirsi a una chiusura
+  // ormai superata. invoiced (la spunta "Chiuso" in UI) resta invariato
+  // di proposito: e' un campo separato, gestito solo da updateJob (§1) -
+  // qui si tocca solo il campo che guida l'eleggibilita' all'archiviazione.
+  if (closesVisit && job.incarico_chiuso_ts) {
+    job.incarico_chiuso_ts = '';
   }
 
   job.status = status;
@@ -457,9 +475,22 @@ function appendVisitRow_(sheet, visit) {
 //   esplicitamente su jobs per L4 — hanno ancora un done_ts per calcolare
 //   punti completati e timeline.
 function loadJobsWithVisitSummary_() {
+  return loadJobsWithVisitSummaryFrom_(SIGMAFLOW.SHEETS.JOBS, SIGMAFLOW.SHEETS.VISITE);
+}
+
+// N6 (DESIGN_archiviazione.md, §8/§9): stesso ricalcolo di sopra ma sulle
+// tabelle dell'Archivio - serve a getMetrics() per unire i casi archiviati
+// alle metriche storiche su finestra temporale, con lo stesso done_ts/
+// visit_number ricalcolato al volo che i casi attivi hanno gia'. Mai
+// un equivalente per il Cestino: nessuna metrica lo legge (§8).
+function loadArchivedJobsWithVisitSummary_() {
+  return loadJobsWithVisitSummaryFrom_(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO);
+}
+
+function loadJobsWithVisitSummaryFrom_(jobsSheetName, visiteSheetName) {
   var ss = getSpreadsheet_();
-  var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-  var visite = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+  var jobs = readTable_(ss.getSheetByName(jobsSheetName));
+  var visite = readTable_(ss.getSheetByName(visiteSheetName));
 
   var latestByJob = {};
   visite.forEach(function(visit) {
@@ -616,6 +647,17 @@ function addActivityEvent(params) {
   var job = readJobFromRow_(sheet, row, headers);
   var log = parseActivityLog_(job.activity_log_json);
   var candidate = buildActivityEventCandidate_(params, log);
+
+  // N1 (DESIGN_archiviazione.md, §8b): 'old' di un evento 'correction'
+  // nuovo non arriva mai dal client (non e' nel form) — si registra qui
+  // il valore reale del campo PRIMA della correzione, letto dal job
+  // appena caricato. Su modifica di un evento gia' esistente resta
+  // invece quello originale (ereditato da 'existing' in
+  // updateActivityEvent): un correttivo storico non riscrive il proprio
+  // "prima", solo il proprio "dopo".
+  if (candidate.type === 'correction' && candidate.old === undefined) {
+    candidate.old = job[candidate.field] !== undefined ? job[candidate.field] : '';
+  }
 
   var validation = validateSequence_(log, candidate);
   if (validation.hardErrors.length) {
@@ -843,15 +885,389 @@ function correctJobTimestamps(params) {
   return ok_({ job_id: jobId, corrections_applied: 1, job: job });
 }
 
-function deleteJob(params) {
-  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
-  var row = findRowById_(sheet, 'job_id', requireParam_(params, 'job_id'));
-  if (row < 0) {
-    throw new Error('Job non trovato: ' + params.job_id);
-  }
+// N2 (DESIGN_archiviazione.md, §4/§9): funzione unica di spostamento
+// riga condivisa da archiviazione, cestino e ripristino (§6b) — non tre
+// implementazioni parallele. Sposta la riga job + tutte le sue righe
+// 'visite' da un foglio sorgente a un foglio destinazione, valorizzando
+// gli eventuali campi extra richiesti dal percorso (archiviato_ts/
+// cestinato_ts). transformJobFn, se passato, puo' correggere il job
+// (es. fallback di colonna in ripristinaJob_) dopo l'applicazione dei
+// campi extra e prima della scrittura sulla destinazione.
+//
+// Sotto lock (piu' utenti potrebbero archiviare/cestinare/ripristinare
+// contemporaneamente) e idempotente: se il job non e' piu' nella
+// sorgente ma e' gia' presente nella destinazione, una chiamata
+// precedente (o concorrente, nella stessa finestra di lock) ha gia'
+// completato lo spostamento — non e' un errore da segnalare una seconda
+// volta.
+function moveJobToSheet_(jobId, sourceJobsSheetName, sourceVisiteSheetName, destJobsSheetName, destVisiteSheetName, destJobHeaders, extraFields, transformJobFn) {
+  extraFields = extraFields || {};
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = getSpreadsheet_();
+    var sourceJobsSheet = ss.getSheetByName(sourceJobsSheetName);
+    var destJobsSheet = ss.getSheetByName(destJobsSheetName);
+    var sourceVisiteSheet = ss.getSheetByName(sourceVisiteSheetName);
+    var destVisiteSheet = ss.getSheetByName(destVisiteSheetName);
 
-  sheet.deleteRow(row);
-  return ok_({ job_id: params.job_id });
+    var sourceRow = findRowById_(sourceJobsSheet, 'job_id', jobId);
+    if (sourceRow < 0) {
+      if (findRowById_(destJobsSheet, 'job_id', jobId) >= 0) {
+        return ok_({ job_id: jobId, already_moved: true });
+      }
+      throw new Error('Job non trovato: ' + jobId);
+    }
+
+    var sourceHeaders = getHeaderMap_(sourceJobsSheet);
+    var job = readJobFromRow_(sourceJobsSheet, sourceRow, sourceHeaders);
+    Object.keys(extraFields).forEach(function(key) {
+      job[key] = extraFields[key];
+    });
+    if (transformJobFn) {
+      transformJobFn(job);
+    }
+
+    destJobsSheet.appendRow(destJobHeaders.map(function(header) {
+      return job[header] === undefined ? '' : job[header];
+    }));
+
+    if (sourceVisiteSheet && destVisiteSheet) {
+      readTable_(sourceVisiteSheet).filter(function(visit) {
+        return visit.job_id === jobId;
+      }).forEach(function(visit) {
+        appendVisitRow_(destVisiteSheet, visit);
+      });
+    }
+
+    sourceJobsSheet.deleteRow(sourceRow);
+    if (sourceVisiteSheet) {
+      deleteVisiteRowsForJob_(sourceVisiteSheet, jobId);
+    }
+
+    return ok_({ job_id: jobId, job: job });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Elimina, dal basso verso l'alto (per non far scivolare gli indici di
+// riga durante il ciclo), tutte le righe 'visite' di un job — usata da
+// moveJobToSheet_ per portare con se' l'intera cronologia delle visite
+// (§3.1: "un caso archiviato porta con se' tutte le sue visite").
+function deleteVisiteRowsForJob_(sheet, jobId) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { return; }
+  var headers = getHeaderMap_(sheet);
+  var values = sheet.getRange(2, headers.job_id, lastRow - 1, 1).getValues();
+  for (var i = values.length - 1; i >= 0; i--) {
+    if (values[i][0] === jobId) {
+      sheet.deleteRow(i + 2);
+    }
+  }
+}
+
+// Wrapper §4.1: eleggibile solo con incarico_chiuso_ts valorizzato — la
+// stessa regola vale sia per il bottone manuale (via archiveJob, sotto)
+// sia per il futuro trigger automatico (N3), che chiamera' questa stessa
+// funzione dopo aver selezionato i casi scaduti: unica fonte della
+// regola, non duplicata tra i due percorsi.
+function archiveJob_(jobId) {
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row >= 0) {
+    var job = readJobFromRow_(sheet, row, getHeaderMap_(sheet));
+    if (!job.incarico_chiuso_ts) {
+      throw new Error('Il caso non e ancora chiuso: valorizza "Chiuso" prima di archiviare.');
+    }
+  }
+  // Se row < 0 (job gia' spostato da una chiamata precedente/concorrente),
+  // moveJobToSheet_ gestisce l'idempotenza senza bisogno di rileggere qui
+  // l'eleggibilita' di un job che non e' piu' in 'jobs'.
+  return moveJobToSheet_(
+    jobId,
+    SIGMAFLOW.SHEETS.JOBS, SIGMAFLOW.SHEETS.VISITE,
+    SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO,
+    JOB_ARCHIVIO_HEADERS,
+    { archiviato_ts: nowIso_() }
+  );
+}
+
+// Wrapper §4.2: nessuna eleggibilita' richiesta, qualunque card in
+// qualunque colonna puo' finire nel Cestino.
+function cestinaJob_(jobId) {
+  return moveJobToSheet_(
+    jobId,
+    SIGMAFLOW.SHEETS.JOBS, SIGMAFLOW.SHEETS.VISITE,
+    SIGMAFLOW.SHEETS.JOBS_CESTINO, SIGMAFLOW.SHEETS.VISITE_CESTINO,
+    JOB_CESTINO_HEADERS,
+    { cestinato_ts: nowIso_() }
+  );
+}
+
+// Wrapper §6b, simmetrico inverso: da Cestino a 'jobs'/'visite'. Nessun
+// campo extra da valorizzare (JOB_HEADERS non ha cestinato_ts, quindi
+// il campo si perde da solo scrivendo solo le colonne di destinazione);
+// transformJobFn applica il fallback a colonna 'backlog' se lo status
+// conservato non corrisponde piu' a nessuna colonna esistente
+// (columns_json potrebbe essere cambiato nel frattempo).
+function ripristinaJob_(jobId) {
+  return moveJobToSheet_(
+    jobId,
+    SIGMAFLOW.SHEETS.JOBS_CESTINO, SIGMAFLOW.SHEETS.VISITE_CESTINO,
+    SIGMAFLOW.SHEETS.JOBS, SIGMAFLOW.SHEETS.VISITE,
+    JOB_HEADERS,
+    {},
+    function(job) {
+      if (!findColumn_(readColumns_(), job.status)) {
+        job.status = firstColumnIdByRole_('backlog');
+      }
+    }
+  );
+}
+
+// Azione API esposta dal bottone "Archivia" (§4.1) — wrapper sottilissimo
+// su archiveJob_, unico punto in cui vive la regola di eleggibilita'.
+function archiveJob(params) {
+  return archiveJob_(requireParam_(params, 'job_id'));
+}
+
+// N4 (DESIGN_archiviazione.md, §6/§6b): liste sola lettura per le viste
+// Archivio/Cestino - anagrafica + riepilogo cronologia, lette direttamente
+// da jobs_archivio/visite_archivio o jobs_cestino/visite_cestino (§6:
+// "nessuna ricostruzione dal log necessaria"). Stessa forma per entrambe
+// (§6b: "stessa forma della vista Archivio") - un solo helper, non due
+// implementazioni parallele.
+function getArchivio() {
+  return ok_({ items: readArchivedList_(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO) });
+}
+
+function getCestino() {
+  return ok_({ items: readArchivedList_(SIGMAFLOW.SHEETS.JOBS_CESTINO, SIGMAFLOW.SHEETS.VISITE_CESTINO) });
+}
+
+function readArchivedList_(jobsSheetName, visiteSheetName) {
+  var ss = getSpreadsheet_();
+  var jobs = readTable_(ss.getSheetByName(jobsSheetName));
+
+  var visitCounts = {};
+  readTable_(ss.getSheetByName(visiteSheetName)).forEach(function(visit) {
+    visitCounts[visit.job_id] = (visitCounts[visit.job_id] || 0) + 1;
+  });
+
+  return jobs.map(function(job) {
+    return {
+      job_id: job.job_id,
+      title: job.title,
+      client: job.client,
+      assignee: job.assignee,
+      tag: job.tag,
+      description: job.description,
+      status: job.status,
+      arrival_ts: job.arrival_ts,
+      incarico_chiuso_ts: job.incarico_chiuso_ts,
+      // Presente solo sulla tabella pertinente (jobs_archivio o
+      // jobs_cestino) - readTable_ non valorizza campi assenti
+      // dall'intestazione del foglio letto, l'altro resta undefined da
+      // solo, nessun filtro esplicito necessario.
+      archiviato_ts: job.archiviato_ts,
+      cestinato_ts: job.cestinato_ts,
+      total_visits: visitCounts[job.job_id] || 0
+    };
+  });
+}
+
+// N5 (§7): "Duplica", solo dall'Archivio - crea un caso NUOVO attivo,
+// non un ripristino. Riusa addJob (stessa creazione di qualunque caso:
+// nuovo job_id, visita 1, log di creazione), non una copia riga
+// parallela - cosi' arrival_ts/incarico_chiuso_ts/status/visite/log
+// nascono da zero esattamente come per un caso creato a mano, senza
+// bisogno di azzerarli esplicitamente uno per uno. Copia solo i campi
+// che il design elenca come punto di partenza (titolo/cliente/tag/
+// assegnatario/ambasciatore/taglia) - tutto il resto (priorita',
+// descrizione, colore, ecc.) riparte dai default di addJob.
+function duplicaJob_(jobId) {
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO);
+  var row = findRowById_(sheet, 'job_id', jobId);
+  if (row < 0) {
+    throw new Error('Caso non trovato in Archivio: ' + jobId);
+  }
+  var archivedJob = readJobFromRow_(sheet, row, getHeaderMap_(sheet));
+  return addJob({
+    title: archivedJob.title,
+    client: archivedJob.client,
+    ambassador: archivedJob.ambassador,
+    tag: archivedJob.tag,
+    assignee: archivedJob.assignee,
+    size_class: archivedJob.size_class
+  });
+}
+
+// Azione API esposta dal bottone "Duplica" in Archivio - wrapper
+// sottilissimo su duplicaJob_, come archiveJob sopra su archiveJob_.
+function duplicaJob(params) {
+  return duplicaJob_(requireParam_(params, 'job_id'));
+}
+
+// Azione API esposta dal bottone "Ripristina" in Cestino (§6b) — wrapper
+// sottilissimo su ripristinaJob_, come archiveJob sopra su archiveJob_.
+function ripristinaJob(params) {
+  return ripristinaJob_(requireParam_(params, 'job_id'));
+}
+
+// §6b/§4.3: "Elimina definitivamente" — cancellazione vera di una singola
+// riga dal Cestino (job + tutte le sue visite), non uno spostamento.
+// Insieme a svuotaCestino sotto, l'unico punto di reale perdita di dati
+// in tutto il programma di archiviazione (§4.3). Mai sull'Archivio: il
+// design non prevede eliminazione diretta da li', solo Duplica (N5).
+function eliminaJobDefinitivamente(params) {
+  var jobId = requireParam_(params, 'job_id');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = getSpreadsheet_();
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO);
+    var row = findRowById_(sheet, 'job_id', jobId);
+    if (row < 0) {
+      throw new Error('Job non trovato nel Cestino: ' + jobId);
+    }
+    sheet.deleteRow(row);
+    deleteVisiteRowsForJob_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO), jobId);
+    return ok_({ job_id: jobId, deleted: true });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// §6b: "Svuota cestino" — azione di gruppo, elimina tutto il contenuto
+// del Cestino in un colpo solo. Stessa irreversibilita' di
+// eliminaJobDefinitivamente, su piu' righe insieme.
+function svuotaCestino() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = getSpreadsheet_();
+    var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO);
+    var deletedCount = readTable_(jobsSheet).length;
+    clearDataRows_(jobsSheet, JOB_CESTINO_HEADERS);
+    clearDataRows_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO), VISITE_CESTINO_HEADERS);
+    return ok_({ deleted_count: deletedCount });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// N3 (DESIGN_archiviazione.md, §4.1/§9): scansiona 'jobs' per i casi
+// eleggibili all'archiviazione automatica — incarico_chiuso_ts
+// valorizzato e oggi - incarico_chiuso_ts >= archiviazione_giorni_default
+// (config, default 30, sez. 3.3) — e li archivia uno per uno. Riusa
+// archiveJob_ (stessa regola di eleggibilita' del bottone manuale, un
+// solo punto in cui vive) invece di duplicare lo spostamento riga. Solo
+// archiviazione: il Cestino resta sempre manuale, nessuna scadenza
+// automatica lo riguarda (§4.2/§9).
+//
+// Un errore su un singolo job (es. una condizione di gara con un'altra
+// operazione concorrente sullo stesso job_id) non deve interrompere la
+// scansione degli altri: raccolto in errors, non rilanciato.
+function archiveEligibleJobs_() {
+  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var config = readConfig_();
+  var thresholdDays = Number(config.archiviazione_giorni_default);
+  if (!thresholdDays || thresholdDays <= 0) {
+    thresholdDays = Number(SIGMAFLOW.DEFAULT_CONFIG.archiviazione_giorni_default);
+  }
+  var now = nowIso_();
+
+  var jobs = readTable_(sheet);
+  var eligible = jobs.filter(function(job) {
+    return Boolean(job.incarico_chiuso_ts) && diffDays(job.incarico_chiuso_ts, now) >= thresholdDays;
+  });
+
+  var archivedJobIds = [];
+  var errors = [];
+  eligible.forEach(function(job) {
+    try {
+      archiveJob_(job.job_id);
+      archivedJobIds.push(job.job_id);
+    } catch (err) {
+      errors.push({ job_id: job.job_id, error: err.message });
+    }
+  });
+
+  return {
+    jobs_scanned: jobs.length,
+    jobs_eligible: eligible.length,
+    jobs_archived: archivedJobIds.length,
+    archived_job_ids: archivedJobIds,
+    errors: errors
+  };
+}
+
+// Handler pensato per essere collegato a un trigger giornaliero a tempo
+// (ScriptApp.newTrigger, sotto) — non e' raggiungibile da nessuna azione
+// UI/API, solo dal trigger stesso una volta installato. Loggato invece di
+// restituito silenziosamente: un trigger a tempo non ha un chiamante
+// interattivo che possa leggere il valore di ritorno.
+//
+// Bugfix 2026-08-19: un trigger a tempo non riceve mai un parametro 'env'
+// (non c'e' nessuna richiesta HTTP dietro) — a differenza di ogni azione
+// UI/API, che passa sempre da api()/withEnvironment_. Prima di questo fix
+// archiveEligibleJobs_() risolveva il foglio in modo "ambientale" tramite
+// getSpreadsheet_(), cioe' leggeva la Script Property condivisa
+// SIGMAFLOW_SPREADSHEET_ID cosi' come la trovava al momento — se quella
+// property fosse rimasta bloccata su un valore sbagliato (es. un'
+// esecuzione di test interrotta a meta', prima di raggiungere il proprio
+// finally di ripristino: incidente reale verificatosi il 2026-08-19,
+// stessa classe di rischio gia' documentata per PROP_SCHEMA_VERSION),
+// il trigger avrebbe scansionato/archiviato sul foglio sbagliato — nel
+// caso peggiore PROD, che il design vieta esplicitamente (§4.1/§9: "mai
+// scrittura su PROD senza gate umano"). Ora il trigger fissa esplicitamente
+// TEST per tutta la propria esecuzione tramite withEnvironment_ (stesso
+// meccanismo, con lock, gia' usato da api() per le richieste web) — non
+// dipende piu' da nessuno stato lasciato da un'esecuzione precedente.
+function eseguiArchiviazioneAutomaticaGiornaliera() {
+  var result = withEnvironment_('test', function() {
+    return archiveEligibleJobs_();
+  });
+  Logger.log(
+    'Archiviazione automatica: ' + result.jobs_archived + '/' + result.jobs_eligible +
+    ' casi eleggibili archiviati (' + result.jobs_scanned + ' scansionati).' +
+    (result.errors.length ? ' Errori: ' + JSON.stringify(result.errors) : '')
+  );
+  return result;
+}
+
+// Installa il trigger giornaliero che chiama eseguiArchiviazioneAutomaticaGiornaliera.
+// GATE UMANO (§9, dopo N3): questa funzione contiene il passo che rende
+// l'archiviazione un processo che scatta da solo, senza supervisione —
+// per questo nessun altro codice di questa sessione la invoca. Va
+// eseguita manualmente da Marco dall'editor Apps Script (menu Esegui ->
+// installaTriggerArchiviazioneAutomatica) solo dopo aver verificato su
+// TEST che eseguiArchiviazioneAutomaticaGiornaliera/archiveEligibleJobs_
+// si comportano come previsto.
+// Idempotente: rimuove un eventuale trigger preesistente con lo stesso
+// handler prima di crearne uno nuovo, cosi' un'esecuzione ripetuta per
+// errore non produce trigger duplicati che scatterebbero piu' volte al
+// giorno.
+function installaTriggerArchiviazioneAutomatica() {
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'eseguiArchiviazioneAutomaticaGiornaliera') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  return ScriptApp.newTrigger('eseguiArchiviazioneAutomaticaGiornaliera')
+    .timeBased()
+    .everyDays(1)
+    .atHour(3)
+    .create();
+}
+
+// §4.2: deleteJob cambia comportamento — non elimina piu' la riga, la
+// sposta nel Cestino. Nome/azione API invariati (routeAction_ non
+// cambia) per non toccare il contratto client/server: solo l'etichetta
+// del bottone in UI e il testo di conferma cambiano (client.html).
+function deleteJob(params) {
+  return cestinaJob_(requireParam_(params, 'job_id'));
 }
 
 function updateColumnLabel(params) {

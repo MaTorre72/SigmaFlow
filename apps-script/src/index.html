@@ -14,6 +14,8 @@
       <nav class="main-nav">
         <button class="nav-button active" data-view="board">Board</button>
         <button class="nav-button" data-view="dashboard">Dashboard</button>
+        <button class="nav-button" data-view="archivio">Archivio</button>
+        <button class="nav-button" data-view="cestino">Cestino</button>
       </nav>
       <div>
         <h1>SigmaFlow</h1>
@@ -28,6 +30,12 @@
       </section>
       <section id="view-dashboard" hidden>
         <?!= include('dashboard'); ?>
+      </section>
+      <section id="view-archivio" hidden>
+        <?!= include('archivio'); ?>
+      </section>
+      <section id="view-cestino" hidden>
+        <?!= include('cestino'); ?>
       </section>
     </main>
 

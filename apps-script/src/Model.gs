@@ -5,7 +5,13 @@ function getMetrics() {
   // monthBuckets_, che restano esplicitamente su jobs (L4).
   var jobs = loadJobsWithVisitSummary_();
   var visite = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE));
-  return ok_(calculateMetrics_(jobs, visite, config, new Date()));
+  // N6 (DESIGN_archiviazione.md, §8/§9): le metriche storiche su una
+  // finestra temporale devono includere anche l'Archivio (un caso chiuso
+  // 25 giorni fa con finestra di osservazione 30 giorni puo' gia' essere
+  // stato archiviato) — MAI il Cestino, che non e' letto qui ne' altrove.
+  var archivedJobs = loadArchivedJobsWithVisitSummary_();
+  var visiteArchivio = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+  return ok_(calculateMetrics_(jobs, visite, config, new Date(), archivedJobs, visiteArchivio));
 }
 
 // Fase L4 (DESIGN_modello_caso_visita.md, sez. 10-11): le metriche di
@@ -21,7 +27,14 @@ function getMetrics() {
 // storica completa e' L5, non ancora eseguita. Fino ad allora il
 // cruscotto su TEST mostrera' campioni parziali per lo storico non
 // ancora migrato: comportamento accettato consapevolmente, non un bug.
-function calculateMetrics_(jobs, visite, config, now) {
+// archivedJobs/visiteArchivio (N6): opzionali, di default assenti — le
+// chiamate esistenti (test compresi) restano valide cosi' come sono.
+// Solo systemState (sotto, l'unica parte letta dal frontend — vedi
+// buildSystemState_) li usa: i campi legacy top-level di questa funzione
+// (MM1/MG1/lambda/distributions/...) non sono mai renderizzati in UI
+// (verificato via grep su client.html), quindi restano volutamente
+// invariati — estenderli all'archivio sarebbe scope non necessario.
+function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchivio) {
   var windowDays = Number(config.observation_window_days || 30);
   var since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
   var jobsById = indexBy_(jobs, 'job_id');
@@ -67,11 +80,24 @@ function calculateMetrics_(jobs, visite, config, now) {
       lead_time_by_size: leadTimeBySize_(completed, jobsById)
     }
   };
-  result.systemState = buildSystemState_(jobs, visite, config, now);
+  result.systemState = buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchivio);
   return result;
 }
 
-function buildSystemState_(jobs, visite, config, now) {
+// N6: archivedJobs/visiteArchivio opzionali (default []) — le chiamate
+// dirette gia' esistenti nei test (senza questi due parametri) restano
+// valide, leggono solo jobs/visite attivi come prima. Le metriche su una
+// finestra temporale (§8: Flusso/Rientri/Tempi/Capacita'/"Andamento del
+// carico"/quadro di dettaglio) uniscono l'archivio senza filtri — un caso
+// chiuso e archiviato dentro la finestra osservata non deve sparire dal
+// conteggio solo perche' e' stato spostato fisicamente di foglio.
+// "Lavoro presente" (currentWorkload_) e "punti aperti"/"per taglia"/"per
+// assegnatario" (openJobs dentro pointsStatistics_) restano SOLO su jobs
+// attivi, mai sull'archivio, per definizione (§8: nessuno dei due e'
+// "presente"). Il Cestino non entra mai in questa funzione.
+function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchivio) {
+  archivedJobs = archivedJobs || [];
+  var allVisite = visite.concat(visiteArchivio || []);
   var windowDays = Math.max(1, Number(config.observation_window_days || 30));
   var teamSize = Math.max(1, Number(config.team_size || 1));
   var since = new Date(now.getTime() - windowDays * 864e5);
@@ -81,10 +107,10 @@ function buildSystemState_(jobs, visite, config, now) {
     columnMap[column.id] = column;
   });
 
-  var observed = visite.filter(function(visit) {
+  var observed = allVisite.filter(function(visit) {
     return visit.apertura_ts && new Date(visit.apertura_ts) >= since;
   });
-  var completed = visite.filter(function(visit) {
+  var completed = allVisite.filter(function(visit) {
     return visit.consegna_ts && new Date(visit.consegna_ts) >= since;
   });
   var completedSamples = completed.filter(function(visit) {
@@ -122,7 +148,7 @@ function buildSystemState_(jobs, visite, config, now) {
     ? queueMG1_(totalPassageRate, effectiveLoad, stats.mean, stats.secondMoment)
     : unstableQueue_();
   var workload = currentWorkload_(jobs, columnMap);
-  var points = pointsStatistics_(jobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
+  var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
 
   return {
     dataQuality: dataQuality,
@@ -187,18 +213,25 @@ function assigneeOrderFromConfig_(config, jobs) {
   return orderedUniqueValues_(values);
 }
 
-function pointsStatistics_(jobs, columnMap, since, now, assigneeOrder) {
+// N6: openJobs resta derivato SOLO da jobs (attivi) — "punti aperti"/"per
+// taglia"/"per assegnatario" non includono mai l'archivio (§8, sono
+// "lavoro presente" per definizione). allJobs (jobs + archivedJobs) copre
+// invece le metriche storiche su finestra temporale: completati, aggiunti,
+// "Andamento del carico"/"Carico mensile" (monthBuckets_) e "per colonna"
+// (pointsByColumn_, gia' non filtrata a solo openJobs prima di N6).
+function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrder) {
+  var allJobs = jobs.concat(archivedJobs || []);
   var openJobs = jobs.filter(function(job) {
     var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
     return column.role !== 'done';
   });
-  var completed = jobs.filter(function(job) {
+  var completed = allJobs.filter(function(job) {
     return job.done_ts && new Date(job.done_ts) >= since;
   });
-  var added = jobs.filter(function(job) {
+  var added = allJobs.filter(function(job) {
     return job.arrival_ts && new Date(job.arrival_ts) >= since;
   });
-  var months = monthBuckets_(jobs, now, 6);
+  var months = monthBuckets_(allJobs, now, 6);
 
   return {
     open_points: sumJobPoints_(openJobs),
@@ -207,7 +240,7 @@ function pointsStatistics_(jobs, columnMap, since, now, assigneeOrder) {
     open_cards: openJobs.length,
     timeline: months,
     by_size: pointsBreakdown_(openJobs, 'size_class', ['XS', 'S', 'M', 'L', 'XL']),
-    by_column: pointsByColumn_(jobs, columnMap),
+    by_column: pointsByColumn_(allJobs, columnMap),
     by_assignee: pointsBreakdown_(openJobs, 'assignee', assigneeOrder)
   };
 }

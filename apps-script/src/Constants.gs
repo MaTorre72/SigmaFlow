@@ -2,7 +2,7 @@ var SIGMAFLOW = {
   TZ: 'Europe/Rome',
   PROP_SPREADSHEET_ID: 'SIGMAFLOW_SPREADSHEET_ID',
   PROP_SCHEMA_VERSION: 'SIGMAFLOW_SCHEMA_VERSION',
-  SCHEMA_VERSION: '12',
+  SCHEMA_VERSION: '13',
   DEFAULT_SPREADSHEET_ID: '15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g',
   DEFAULT_TEST_SPREADSHEET_ID: '1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU',
   PROP_TEST_SPREADSHEET_ID: 'SIGMAFLOW_TEST_SPREADSHEET_ID',
@@ -10,8 +10,19 @@ var SIGMAFLOW = {
     JOBS: 'jobs',
     CASES: 'cases',
     VISITE: 'visite',
-    CONFIG: 'config'
+    CONFIG: 'config',
+    JOBS_ARCHIVIO: 'jobs_archivio',
+    VISITE_ARCHIVIO: 'visite_archivio',
+    JOBS_CESTINO: 'jobs_cestino',
+    VISITE_CESTINO: 'visite_cestino'
   },
+  // N1 (DESIGN_archiviazione.md, §8b): campi di 'jobs' correggibili
+  // manualmente tramite un evento 'correction' in Cronologia. Whitelist
+  // esplicita — non un editor generico su qualunque colonna del foglio,
+  // solo i due campi per cui esiste davvero un percorso di correzione
+  // pensato (arrival_ts, gia' prima di questa sessione; incarico_chiuso_ts,
+  // aggiunto qui).
+  CORRECTABLE_FIELDS: ['arrival_ts', 'incarico_chiuso_ts'],
   STATUS_ALIASES: {
     blocked: 'wait_internal',
     in_progress: 'wip',
@@ -89,6 +100,8 @@ var SIGMAFLOW = {
   DEFAULT_CONFIG: {
     team_size: 4,
     observation_window_days: 30,
+    archiviazione_giorni_default: 30,
+    backup_retention_giorni: 14,
     theoretical_capacity_per_day: '',
     size_XS_days: 0.5,
     size_S_days: 1,

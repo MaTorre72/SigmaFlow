@@ -88,6 +88,19 @@ var VISITE_HEADERS = [
 
 var CONFIG_HEADERS = ['key', 'value', 'description'];
 
+// N1 (DESIGN_archiviazione.md, sez. 3): fogli additivi per archiviazione
+// e cestino. Solo schema in questa sotto-fase — nessuna funzione di
+// spostamento riga (moveJobToSheet_/archiveJob_/cestinaJob_/
+// ripristinaJob_) ancora scritta, arriva in N2. jobs_archivio/
+// jobs_cestino sono JOB_HEADERS con un campo timestamp in piu' (§3.1/
+// 3.2); visite_archivio/visite_cestino hanno la stessa intestazione di
+// VISITE_HEADERS, invariata (nessun campo nuovo li' - la visita non sa
+// distinguere se il job che la possiede e' attivo, archiviato o cestinato).
+var JOB_ARCHIVIO_HEADERS = JOB_HEADERS.concat(['archiviato_ts']);
+var JOB_CESTINO_HEADERS = JOB_HEADERS.concat(['cestinato_ts']);
+var VISITE_ARCHIVIO_HEADERS = VISITE_HEADERS.slice();
+var VISITE_CESTINO_HEADERS = VISITE_HEADERS.slice();
+
 // Rinomina una tantum, in loco, delle intestazioni chiusura_ts/
 // chiusura_tipo -> rientro_ts/rientro_da su un foglio 'visite' che ha
 // ancora il nome precedente. Necessaria perche' il riallineamento
@@ -130,8 +143,20 @@ function setupSigmaFlow() {
   var ss = getSpreadsheet_();
   ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS, JOB_HEADERS);
   removeCasesSheet_(ss);
+  // N1: da qui in poi setupSigmaFlow crea fino a cinque fogli nuovi in
+  // sequenza (visite, se assente, + i quattro di archivio/cestino)
+  // subito dopo una cancellazione — su Apps Script reale (non
+  // riproducibile nell'harness Node, che e' sincrono per costruzione)
+  // questa sequenza ha causato un errore transitorio "Sheet non
+  // trovato" in fase di collaudo N1. flush() forza Sheets a scrivere la
+  // cancellazione prima di procedere con le creazioni successive.
+  SpreadsheetApp.flush();
   renameVisiteChiusuraFields_(ss);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, JOB_ARCHIVIO_HEADERS);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO, VISITE_ARCHIVIO_HEADERS);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.JOBS_CESTINO, JOB_CESTINO_HEADERS);
+  ensureSheet_(ss, SIGMAFLOW.SHEETS.VISITE_CESTINO, VISITE_CESTINO_HEADERS);
   ensureSheet_(ss, SIGMAFLOW.SHEETS.CONFIG, CONFIG_HEADERS);
   seedDefaultConfig_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
   seedAgingDaysForStandByColumns_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
@@ -273,6 +298,8 @@ function seedDefaultConfig_(sheet) {
   var descriptions = {
     team_size: 'Numero di persone attive',
     observation_window_days: 'Finestra temporale metriche',
+    archiviazione_giorni_default: 'Giorni dopo la chiusura oltre cui un caso e\' eleggibile all\'archiviazione automatica',
+    backup_retention_giorni: 'Giorni di backup PROD da conservare prima che i piu\' vecchi vengano eliminati',
     theoretical_capacity_per_day: 'Capacita teorica configurata in passaggi al giorno',
     size_XS_days: 'Giorni medi attesi per taglia XS',
     size_S_days: 'Giorni medi attesi per taglia S',

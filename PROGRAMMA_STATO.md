@@ -1,5 +1,778 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-16
+Aggiornato: 2026-08-19
+
+## Incidente — property ambientale bloccata su TEST, PROD mostrava dati di TEST (2026-08-19)
+
+Marco ha segnalato che in qualche momento la webapp PROD ha mostrato
+dati di TEST. Indagato subito dopo la chiusura di N6 (vedi sotto),
+prima di qualunque altro lavoro.
+
+**Causa confermata da Marco stesso, non solo ipotizzata**: la Script
+Property condivisa `SIGMAFLOW_SPREADSHEET_ID` (l'unica variabile che
+dice al codice "quale spreadsheet è PROD in questo momento", condivisa
+su **tutto** il progetto Apps Script — TEST e PROD sono lo stesso
+progetto, deploy separati) è rimasta bloccata sul valore di TEST dopo
+che un'esecuzione di test si è interrotta a metà, prima di raggiungere
+il proprio blocco `finally` di ripristino. Stessa classe di rischio già
+documentata per `PROP_SCHEMA_VERSION` (vedi sessione M0-C/bugfix più
+sotto in questo file) — qui la seconda occorrenza reale, non la prima.
+**Nessun dato perso o alterato**: `SpreadsheetApp.copy()` non esiste
+in questa storia, si trattava solo di lettura scambiata. Marco ha
+risolto riscrivendo a mano il valore corretto nella property, dall'
+editor Apps Script (Impostazioni progetto → Proprietà script).
+
+**Bug collegato, trovato investigando (non lo stesso incidente, stessa
+causa di fondo) e corretto in questa sessione**: `archiveEligibleJobs_()`
+(dietro al trigger N3, `eseguiArchiviazioneAutomaticaGiornaliera`, che
+scatta ogni notte alle 3:00 senza nessuno presente) risolveva lo
+spreadsheet in modo "ambientale" (`getSpreadsheet_()`, la stessa
+funzione che legge `SIGMAFLOW_SPREADSHEET_ID`) invece di fissare
+esplicitamente TEST — se quella property fosse rimasta sporca nel
+momento sbagliato, il trigger avrebbe scansionato/archiviato sul foglio
+sbagliato, nel caso peggiore PROD vero. Verificato il log Esecuzioni
+dell'editor: il trigger è scattato regolarmente stanotte (19 ago,
+03:28:53, 0% errori) — e PROD non ha nemmeno il foglio `jobs_archivio`
+(mai eseguito l'allineamento schema lì, correttamente, essendo
+riservato a un gate umano separato), quindi non ha comunque scritto
+niente su PROD questa notte. **Corretto** (Kanban.gs): il trigger ora
+fissa esplicitamente TEST per tutta la propria esecuzione tramite
+`withEnvironment_('test', ...)` — lo stesso meccanismo con lock già
+usato da `api()` per le richieste web — invece di affidarsi allo stato
+lasciato da chiunque altro. Un nuovo test
+(`testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty`)
+riproduce esattamente l'incidente (property sporcata deliberatamente
+prima di far scattare il trigger) e verifica che il trigger archivi
+comunque sul vero TEST, e che la property sporca preesistente resti
+intatta dopo l'esecuzione. **122/122 test passati nell'harness Node**
+(121 preesistenti + 1 nuovo). Push su TEST verificato (15/15 file
+identici) — bloccato una prima volta da un token OAuth clasp scaduto
+(`invalid_grant`/`invalid_rapt`, stesso tipo di blocco già capitato in
+N1), risolto con `clasp login` su richiesta esplicita di Marco.
+
+**Deciso in conseguenza**: progettato un backup giornaliero di PROD,
+sotto-programma separato — vedi
+[docs/DESIGN_backup.md](docs/DESIGN_backup.md), N-B1 costruita nella
+stessa sessione (vedi sezione sotto). Nessuna scrittura correttiva
+ulteriore necessaria su PROD: Marco conferma "non c'è niente di
+bloccato o perso".
+
+## N-B1/N-B2/N-B3 (backup PROD) — DONE, programma completo (2026-08-19)
+
+Riferimento: [docs/DESIGN_backup.md](docs/DESIGN_backup.md), §3/§4/§8
+(N-B1). Su richiesta esplicita di Marco, subito dopo aver progettato il
+programma (vedi incidente sopra) — non una sessione autonoma separata.
+
+**Codice** (nuovo file `apps-script/src/Backup.gs`):
+- `ensureBackupFolder_(ss)` — cartella dedicata ("SigmaFlow — Backup
+  PROD"), creata solo se assente, idempotente. **Dove vive, deciso da
+  Marco durante questa stessa sessione** (non un id fisso proposto
+  inizialmente): dentro la **stessa cartella Drive del foglio PROD
+  reale** — `prodParentFolder_(ss)` risale al genitore del file
+  (`DriveApp.getFileById(ss.getId()).getParents()`), così se il foglio
+  PROD viene spostato il backup lo segue automaticamente, senza una
+  costante da tenere sincronizzata a mano.
+- `backupRetentionDays_(ss)` — legge `backup_retention_giorni` da un
+  foglio config passato esplicitamente (mai ambientale — stesso motivo
+  del bugfix sopra), ricade sul default (14) se assente.
+- `backupProd_()` — apre `SIGMAFLOW.DEFAULT_SPREADSHEET_ID` (id reale,
+  mai `getSpreadsheet_()` ambientale), verifica
+  `ss.getName() === 'SigmaFlow Database'` (stesso pattern di
+  `allineaSchemaSuProd()`, Schema.gs), `ss.copy(...)` + sposta il file
+  nella cartella dedicata. Non tocca mai il foglio sorgente.
+- `pruneOldBackups_(retentionDays, ss)` — elimina dalla cartella i file
+  più vecchi della soglia, confrontando `getDateCreated()` (mai il nome).
+- `eseguiBackupGiornalieroProd()` — handler del trigger: backup e
+  pulizia restano due passi indipendenti, un fallimento della pulizia
+  non invalida un backup appena creato con successo.
+- `installaBackupGiornalieroProd()` — **scritta ma non invocata da
+  nessun altro codice** (esattamente come
+  `installaTriggerArchiviazioneAutomatica` in N3): il passo che rende
+  il backup un'automazione non presidiata resta riservato a Marco
+  (N-B3), dopo N-B2.
+- `readConfig_()` (Utils.gs) esteso con un parametro `ss` opzionale
+  (invariato per ogni chiamante esistente) — necessario perché
+  `backupRetentionDays_` non dipenda dalla stessa risoluzione
+  ambientale che ha causato l'incidente.
+- Nuovo scope OAuth in `appsscript.json` — **stessa sorpresa già vista
+  in N3**, ma anche peggio del previsto: lo scope proposto in fase di
+  design (`drive.file`) si è rivelato insufficiente al primo tentativo
+  reale su TEST (N-B2, vedi sotto) — `drive.file` copre solo i file
+  creati/aperti dallo script stesso, non un file preesistente aperto
+  per id come il vero foglio PROD, e `prodParentFolder_()` fa proprio
+  questo. Corretto ampliando lo scope a
+  `https://www.googleapis.com/auth/drive` (accesso completo — non
+  esiste una via di mezzo). Marco dovrà aspettarsi una **nuova**
+  richiesta di consenso Google al prossimo tentativo (la seconda per
+  questo programma).
+
+**Harness Node esteso** (`apps-script/test-harness/gas-harness.js`):
+mock minimale di `DriveApp` (file/cartelle **annidate** — `Folder.
+getFoldersByName`/`createFolder`/`getParents`, oltre ai metodi globali
+di `DriveApp` — iteratori `hasNext`/`next`, `getDateCreated`/
+`setTrashed`) e `Spreadsheet.copy()` — puramente in memoria, nessuna
+chiamata di rete. Ogni `SpreadsheetApp.openById(id)` registra anche un
+file Drive corrispondente (di default nella radice), necessario perché
+`prodParentFolder_` possa risalire al genitore anche nei test.
+`Backup.gs` aggiunto all'elenco dei file caricati.
+
+**Test aggiunti** (`Tests.gs`), 9 nuovi — **mai contro il vero PROD**:
+`SIGMAFLOW.DEFAULT_SPREADSHEET_ID` nell'harness apre solo un
+`MockSpreadsheet` in memoria (`resetProdMock_`, nuovo helper, ricostruisce
+uno stato pulito a ogni test — stesso principio già corretto per
+`jobs_archivio`/`jobs_cestino` in N6, applicato qui da subito):
+`testBackupRetentionDaysFallsBackToDefaultWhenConfigMissing`,
+`testBackupRetentionDaysReadsConfiguredValue`,
+`testBackupProdRejectsWrongSpreadsheetName`,
+`testBackupProdCreatesFullCopyInDedicatedFolder`,
+`testBackupFolderLivesInSameFolderAsProdSpreadsheet` (sposta il file
+mock di PROD in una cartella di prova, verifica che la cartella di
+backup compaia lì e non nella radice),
+`testBackupProdNeverModifiesSourceSheet`,
+`testPruneOldBackupsDeletesOnlyFilesOlderThanRetention`,
+`testEseguiBackupGiornalieroProdReturnsBackupAndPruneResult`,
+`testEseguiBackupGiornalieroProdKeepsBackupWhenPruneFails` (quest'ultima
+sostituisce temporaneamente `ensureBackupFolder_` per simulare un
+fallimento solo nella fase di pulizia, verificando che il backup
+appena creato resti comunque valido). **131/131 test passati
+nell'harness Node** (122 preesistenti + 9 nuovi, nessuna regressione).
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`.
+
+**N-B2 — CONFERMATA da Marco il 2026-08-19** ("tutto perfetto"), dopo
+due correzioni trovate proprio in questo primo tentativo reale (non
+rilevabili dall'harness Node): il bugfix della cartella di backup
+(vedi sopra) e lo scope OAuth `drive.file` → `drive` (vedi sotto). Il
+primo backup reale di PROD esiste, nella cartella "SigmaFlow — Backup
+PROD" accanto al foglio PROD vero.
+
+**N-B3 — CONFERMATA da Marco il 2026-08-19** ("tutto ok"):
+`installaBackupGiornalieroProd()` eseguita dall'editor Apps Script sul
+progetto reale, trigger giornaliero (`eseguiBackupGiornalieroProd`,
+ore 2) attivo. **Tutti i criteri di accettazione §9 di
+`docs/DESIGN_backup.md` sono ora [x].**
+
+**Programma di backup PROD (N-B1-N-B3) — completo.** Nessuna
+sotto-fase residua in `docs/DESIGN_backup.md` §8. Come per
+l'archiviazione, tutto il lavoro è su `feat/n1-archiviazione-schema`,
+non ancora unito a `main`.
+
+## N6 (archiviazione) — DONE, programma completo (2026-08-18)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita automaticamente dopo N5 (nessun gate). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §8, §9
+(N6). **Ultima sotto-fase del programma di archiviazione** — con N6
+chiusa, tutte le sotto-fasi N1-N6 di §9 sono DONE.
+
+**Ricognizione preliminare (necessaria, non assumibile)**: il
+frontend (`client.html`, `renderMetrics`) legge **solo**
+`metrics.systemState.*` — i campi legacy in cima a `calculateMetrics_`
+(`MM1`/`MG1`/`lambda`/`distributions`/...) non sono mai renderizzati
+(verificato via grep), quindi **volutamente non estesi** all'archivio:
+nessun beneficio visibile, solo rischio aggiunto. Tutto il lavoro di
+N6 è su `buildSystemState_` (Model.gs), l'unica funzione che produce
+ciò che la dashboard mostra davvero.
+
+**Backend** (Kanban.gs): `loadJobsWithVisitSummary_` fattorizzata in
+`loadJobsWithVisitSummaryFrom_(jobsSheetName, visiteSheetName)` — nuovo
+`loadArchivedJobsWithVisitSummary_()` la riusa puntata su
+`jobs_archivio`/`visite_archivio`, stesso ricalcolo di `done_ts`/
+`visit_number` che i casi attivi hanno già (nessuna implementazione
+parallela).
+
+**Backend** (Model.gs): `getMetrics()` legge anche `archivedJobs`/
+`visiteArchivio` e li passa a `calculateMetrics_`/`buildSystemState_`
+(parametri opzionali, default `[]` — le chiamate dirette già esistenti
+nei test restano valide invariate). Dentro `buildSystemState_`:
+`visite` diventa `visite.concat(visiteArchivio)` per Flusso/Rientri/
+Tempi/Capacità (calcolati da `visite`, mai da `jobs` — tutti e quattro
+ora vedono anche l'archivio quando la finestra osservata lo tocca).
+`pointsStatistics_` riceve **sia** `jobs` (attivi) **sia**
+`archivedJobs`, con una separazione esplicita: `openJobs` (→ punti
+aperti, card aperte, "per taglia", "per assegnatario") resta derivato
+**solo** da `jobs` attivi, mai dall'unione — cablaggio deliberato
+dell'unico vincolo esplicito del design (§8: "lavoro presente" non è
+mai archivio né cestino). `allJobs = jobs.concat(archivedJobs)` alimenta
+invece "punti completati"/"punti aggiunti"/`monthBuckets_` ("Andamento
+del carico" + "Carico mensile")/`pointsByColumn_` ("Punti per
+colonna") — tutte storiche su finestra temporale o già non filtrate a
+solo `openJobs` prima di N6. Il Cestino non entra in nessun punto di
+questa funzione (nessun `loadCestino...` equivalente creato).
+
+**Bug di harness trovato e corretto, non nel codice di produzione**:
+`resetTestDatabase_` (Tests.gs) puliva solo `jobs`/`visite`/`config`
+tra un test e l'altro — mai `jobs_archivio`/`jobs_cestino` (nota già
+presente in questo file da N2, allora non bloccante perché nulla
+leggeva l'archivio per intero). Con `getMetrics()` che ora unisce
+l'intero contenuto di `jobs_archivio`/`visite_archivio`, i residui
+lasciati da **tutti** i test precedenti nello stesso spreadsheet
+condiviso della suite si sono messi a inquinare silenziosamente
+`testMetrics` (qualità dati passata da "bassa" a "media" per
+iniziative osservate mai pulite) — non un test che parla
+esplicitamente di archivio, un effetto collaterale trasversale.
+Corretto svuotando anche `jobs_archivio`/`jobs_cestino`/
+`visite_archivio`/`visite_cestino` a ogni `resetTestDatabase_`.
+**Secondo bug di harness**, trovato scrivendo i test nuovi:
+`gas-harness.js` (mock di `Utilities.formatDate`) non gestiva i
+pattern `'yyyy-MM'`/`'MM/yyyy'` usati da `monthBuckets_` per le chiavi
+mensili — cadeva nel formato di default (timestamp completo con
+ora/minuti), producendo chiavi diverse per date nello stesso mese.
+Nessun test precedente confrontava le chiavi di `timeline` con un
+valore atteso (solo `.length === 6`), quindi il gap è rimasto
+invisibile fino al primo test che lo ha fatto. Corretto aggiungendo
+entrambi i pattern al mock.
+
+**Test aggiunti** (`Tests.gs`, harness Node), 7 nuovi:
+`testBuildSystemStateIncludesArchivedJobsInHistoricPoints` (punti
+aggiunti/completati includono l'archivio),
+`testBuildSystemStateOpenPointsNeverIncludeArchivedJobs` (caso limite:
+anche con uno status archiviato che mapperebbe su una colonna non-done,
+punti aperti/card aperte/lavoro pronto restano solo sugli attivi),
+`testBuildSystemStateTimelineIncludesArchivedJobs` ("Andamento del
+carico"), `testBuildSystemStatePointsByColumnIncludesArchivedJobs`
+("Punti per colonna"), `testBuildSystemStateFlowMetricsIncludeArchivedVisite`
+(Flusso legge anche `visite_archivio`), `testGetMetricsIncludesArchivedCaseInHistoricPoints`
+(end-to-end via `archiveJob_` + `getMetrics()` reale, non solo
+`buildSystemState_` diretta), `testGetMetricsNeverReadsCestino`
+(un job cestinato non sposta di un punto nessuna metrica, prima/dopo
+confrontati). **121/121 test passati nell'harness Node** (114
+preesistenti + 7 nuovi, nessuna regressione).
+
+**Verifica UI reale**: stessa tecnica di N4/N5 — server HTTP locale
+temporaneo (rimosso a fine verifica) con `routeAction_` reale via
+l'harness Node. Seed: un caso attivo in WIP (M, 8pt) + un caso chiuso
+e archiviato (L, 13pt, invoiced). Tab Dashboard, nessun errore in
+console. Numeri osservati, tutti corretti: **Punti aperti 8pt** (solo
+l'attivo — l'archiviato, pur da 13pt, non compare), **Punti aggiunti
+21pt** e **Punti completati 13pt** (entrambi includono l'archiviato),
+**Punti per colonna**: "WIP 8pt/1 card" (attivo) + "DA INVIARE / DA
+FATTURARE 13pt/1 card" (l'archiviato, sotto lo status conservato al
+momento dell'archiviazione), **Carico mensile** (riga 08/2026): 2 card
+entrate, 1 completata, 21/13/8 punti entrati/completati/aperti —
+combina correttamente attivo+archiviato nello stesso mese,
+**Distribuzione per taglia**/**Punti per assegnatario**: solo "M 8pt/1
+card"/"Non assegnato 8pt/1 card" — **l'archiviato correttamente
+escluso**, confermando che questi due restano ancorati a "lavoro
+presente" come gli altri due esplicitamente esclusi dal design.
+Comportamento verificato end-to-end, non solo letto dal codice.
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(15/15 file identici).
+
+**Criteri di accettazione §10 chiusi da N6**: "Cestino mai letto da
+nessuna metrica" e "'Lavoro presente'/punti aperti invariati (mai
+archivio né cestino); 'Andamento del carico' e quadro di dettaglio
+verificati che includano l'archivio (unione diretta, senza filtri)
+quando pertinente" — entrambi verificati TRUE. **Con N6, tutti i
+criteri di accettazione di §10 sono ora [x]** (aggiornati direttamente
+nel documento di design, non solo qui).
+
+**Programma di archiviazione (N1-N6) — completo.** Nessuna sotto-fase
+residua in `docs/DESIGN_archiviazione.md` §9. Tutto il lavoro è su
+`feat/n1-archiviazione-schema`, mai unito a `main` in questa sessione
+(nessuna richiesta di merge ricevuta) — resta a Marco decidere quando
+aprire la pull request verso `main`.
+
+## N5 (archiviazione) — DONE, nessun gate (2026-08-18)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita automaticamente dopo N4 (nessun gate). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §7, §9
+(N5).
+
+**Backend** (Kanban.gs): `duplicaJob_(jobId)` legge il caso da
+`jobs_archivio` (`findRowById_`/`readJobFromRow_`, stesso pattern usato
+da `archiveJob_` per il controllo di eleggibilità) e **riusa `addJob`**
+per crearne uno nuovo — non una funzione di copia riga parallela: cosi'
+`arrival_ts`/`status_since_ts`/visita 1/log di creazione nascono da zero
+esattamente come per un caso creato a mano, senza doverli azzerare uno
+per uno. Copia solo i campi che il design elenca come punto di partenza
+(§7: titolo/cliente/tag/assegnatario/ambasciatore/taglia) — priorità,
+descrizione, colore, ecc. ripartono dai default di `addJob`. Lancia
+errore esplicito se il `job_id` non è presente in Archivio. `duplicaJob(params)`
+è il thin wrapper esposto via `routeAction_` (bottone "Duplica").
+
+**Frontend** (`archivio.html`/`client.html`): colonna "Azioni" aggiunta
+alla vista Archivio (era sola lettura in N4, §6 non lo escludeva per
+N5), un bottone "Duplica" per riga, stesso pattern di
+`row-actions`/conferma di Cestino (N4) ma conferma **leggera** — non è
+un'azione distruttiva, né sul caso archiviato (resta invariato) né
+altrove. Nessuna azione sul Cestino (§7: "non applicabile al Cestino,
+che ha Ripristina invece").
+
+**Test aggiunti** (`Tests.gs`, harness Node), 4 nuovi:
+`testDuplicaJobCreatesNewActiveJobCopyingAnagrafica` (titolo/cliente/tag/
+assegnatario/taglia copiati, nuovo `job_id`, attivo su `jobs`),
+`testDuplicaJobDoesNotCopyClosureStatusOrVisitHistory` (`incarico_chiuso_ts`
+vuoto, status riparte dalla colonna iniziale — non da quello archiviato,
+un solo evento nel log, una sola visita — nessuno storico riportato),
+`testDuplicaJobThrowsWhenJobNotInArchivio`,
+`testDuplicaJobApiActionWrapsDuplicaJob`. **114/114 test passati
+nell'harness Node** (110 preesistenti + 4 nuovi, nessuna regressione).
+
+**Verifica UI reale**: stessa tecnica di N4 — server HTTP locale
+temporaneo (rimosso a fine verifica) che serve il markup vero
+(`index`/`archivio`/`client`/`style` .html) con `google.script.run.api(...)`
+inoltrato a un endpoint locale che esegue `routeAction_` reale via
+l'harness Node, `window.confirm` auto-accettato e loggato in console per
+restare verificabile. Seed: un caso archiviato (`Bonifica sito Rossi`,
+Rossi Srl, tag "urgente", assegnatario Mario, taglia L). Click su
+"Duplica" in Archivio → conferma catturata in console → riga Archivio
+invariata dopo il click (il caso archiviato non viene toccato) → nuova
+card comparsa in colonna BACKLOG sulla Board con la stessa anagrafica
+copiata (cliente, tag, assegnatario, 13 pt = taglia L) e nessun dato
+storico (non in DONE, nessuna chiusura). Comportamento verificato end-to-end,
+non solo letto dal codice.
+
+**Criteri di accettazione §10 chiusi da N5**: "'Duplica' (solo da
+Archivio) crea un caso nuovo, nessun dato storico riportato" —
+verificato TRUE.
+
+**Fuori scope di N5, per §9**: N6 (metriche estese all'archivio) resta
+aperta. Nessun gate dopo N5 — si procede a N6.
+
+## N4 (archiviazione) — DONE, nessun gate (2026-08-18)
+
+Proseguita automaticamente dopo la conferma del gate N3 (nessuna nuova
+richiesta di Marco necessaria tra una sotto-fase e l'altra, come
+chiarito nella sezione "Nessuna conferma in chat" di CLAUDE.md, scritta
+in questa stessa sessione). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §6, §6b,
+§9 (N4).
+
+**Backend** (Kanban.gs):
+- `getArchivio()`/`getCestino()` — liste sola lettura, lette
+  direttamente da `jobs_archivio`/`visite_archivio` o
+  `jobs_cestino`/`visite_cestino` (§6: "nessuna ricostruzione dal log
+  necessaria"). Fattorizzate in un solo helper `readArchivedList_`
+  (§6b: "stessa forma della vista Archivio"), non due implementazioni
+  parallele. Ogni riga: anagrafica (titolo, cliente, assegnatario, tag,
+  descrizione), stato al momento dello spostamento, `arrival_ts`,
+  `incarico_chiuso_ts`, il timestamp specifico al percorso
+  (`archiviato_ts` o `cestinato_ts`), numero totale di visite (contato
+  da `visite_archivio`/`visite_cestino`, non ricostruito dal log).
+- `ripristinaJob(params)` — wrapper sottile su `ripristinaJob_` (già
+  scritta in N2), stesso pattern di `archiveJob(params)`.
+- `eliminaJobDefinitivamente(params)` — cancellazione vera di una
+  singola riga dal Cestino (job + tutte le sue visite), mai
+  dall'Archivio (il design non la prevede lì, solo Duplica in N5).
+- `svuotaCestino()` — azione di gruppo, azzera `jobs_cestino`/
+  `visite_cestino` in un colpo solo. Insieme a
+  `eliminaJobDefinitivamente`, l'unico punto di reale perdita di dati
+  in tutto il programma (§4.3) — sotto lock, come le altre funzioni di
+  spostamento/cancellazione.
+- `clearDataRows_` spostata da Tests.gs a Utils.gs: `svuotaCestino()` è
+  codice di produzione, non doveva dipendere da un helper vissuto solo
+  nei test.
+- Tutte e cinque registrate in `routeAction_`.
+
+**Frontend** (`index.html`/`client.html` + due file nuovi
+`archivio.html`/`cestino.html`): due voci di navigazione "Archivio"/
+"Cestino" accanto a Board/Dashboard, caricamento pigro con cache (stesso
+pattern di `loadMetrics`, §6: "consultata molto raramente" — non
+ricaricare ad ogni apertura del tab). Vista Archivio: tabella sola
+lettura, nessuna azione (Duplica resta N5). Vista Cestino: stessa
+tabella + colonna Azioni per riga ("Ripristina", conferma leggera
+essendo reversibile; "Elimina definitivamente", conferma pesante) e
+bottone di gruppo "Svuota cestino" (stessa conferma pesante) — entrambe
+le conferme pesanti nominano esplicitamente l'irreversibilità
+dell'azione, come da design (§6b, §4.3).
+
+**Test aggiunti** (`Tests.gs`, harness Node), 6 nuovi:
+`testGetArchivioReturnsAnagraficaAndVisitCount`,
+`testGetCestinoReturnsAnagraficaAndVisitCount`,
+`testRipristinaJobApiActionRestoresJob`,
+`testEliminaJobDefinitivamenteRemovesJobAndVisiteFromCestino`,
+`testEliminaJobDefinitivamenteThrowsWhenJobNotInCestino`,
+`testSvuotaCestinoRemovesAllRowsFromCestino`. **110/110 test passati
+nell'harness Node** (104 preesistenti + 6 nuovi, nessuna regressione).
+
+**Verifica UI reale, non solo lettura del codice**: essendo una sessione
+senza accesso al deployment TEST reale (richiede login del dominio
+sigmapiu.it), stessa tecnica già usata nella sessione M0-C — server
+HTTP locale temporaneo (sotto `/tmp/sf-scratch/`, rimosso a fine
+verifica) che serve il markup vero (`index`/`archivio`/`cestino`/
+`client`/`style` .html) con `google.script.run.api(...)` inoltrato a un
+endpoint locale che esegue la logica reale (`routeAction_`) via
+l'harness Node — non dati finti. Le cinque azioni verificate end-to-end
+via richieste dirette all'endpoint reale: `getArchivio`/`getCestino`
+(anagrafica e riepilogo corretti), `ripristinaJob` (torna su `jobs`,
+sparisce dal Cestino), `eliminaJobDefinitivamente` (riga e visite
+cancellate, Cestino torna coerente), `svuotaCestino` (`deleted_count`
+corretto, Cestino azzerato). Un bug reale trovato e corretto proprio in
+questa verifica — non nel codice di produzione, nello script di
+riproduzione stesso: il seed iniziale chiamava `setupSigmaFlow()`/
+`addJob()` fuori da `withEnvironment_('test', ...)`, scrivendo su uno
+spreadsheet mock diverso da quello letto dalle chiamate `/api` reali
+(stesso genere di rischio già documentato per `PROP_SCHEMA_VERSION`
+condivisa, §"Bugfix" più sotto in questo file) — corretto avvolgendo il
+seed nello stesso wrapper che il codice reale usa sempre.
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(15/15 file, inclusi i due nuovi `archivio.html`/`cestino.html`).
+**Bug trovato nello script stesso durante questa verifica**: l'elenco
+file di `verify-test-push.sh` era cablato (13 nomi fissi, scritto prima
+che N4 aggiungesse i due file nuovi) — avrebbe dichiarato "13/13
+identici" ignorando in silenzio gli unici due file che questa
+sotto-fase ha aggiunto. Corretto: lo script ora scopre i file da
+verificare leggendo `apps-script/src/` invece di un elenco fisso, cosa
+che l'avrebbe reso corretto automaticamente anche stavolta.
+
+**Criteri di accettazione §10 chiusi da N4**: "Vista Archivio e vista
+Cestino mostrano anagrafica + riepilogo cronologia, nessuna board
+Kanban" — verificato TRUE.
+
+**Fuori scope di N4, per §9**: N5 (Duplica, solo da Archivio) e N6
+(metriche estese all'archivio) restano aperte, come da tabella. Nessun
+gate dopo N4 — si procede a N5.
+
+## N3 (archiviazione) — CHIUSA, gate confermato da Marco (2026-08-18)
+
+Dopo il fix dello scope OAuth (sotto), Marco ha rieseguito
+`installaTriggerArchiviazioneAutomatica` su TEST: **"ho riprovato, ha
+funzionato — trigger installato"**. Trigger giornaliero
+(`eseguiArchiviazioneAutomaticaGiornaliera`, ore 3:00) attivo sul
+progetto TEST. **Gate 🔴 Umano di §9, dopo N3 — CONFERMATO.** N3 è
+chiusa a tutti gli effetti; N4 (vista Archivio/Cestino) è la prossima
+sotto-fase, senza gate.
+
+## N3 (archiviazione) — bug trovato al gate: scope OAuth mancante, corretto (2026-08-18)
+
+Marco ha eseguito `installaTriggerArchiviazioneAutomatica` (Kanban.gs)
+dall'editor Apps Script su TEST, come previsto dal gate sotto — fallita
+con:
+
+```
+Exception: Specified permissions are not sufficient to call ScriptApp.getProjectTriggers.
+Required permissions: https://www.googleapis.com/auth/script.scriptapp
+```
+
+**Causa, implementazione non design**: il manifest
+(`apps-script/src/appsscript.json`) dichiarava solo
+`spreadsheets`/`script.container.ui` in `oauthScopes` — nessun codice
+precedente a N3 aveva mai chiamato `ScriptApp.getProjectTriggers()`/
+`ScriptApp.newTrigger()`, quindi lo scope non era mai stato necessario
+finora. Non rilevabile dall'harness Node (mocka `ScriptApp` senza
+simulare gli scope OAuth reali) né dai 104/104 test — un gap tra
+verifica automatica e ambiente GAS reale, stesso tipo di caso già
+capitato in N1 (bug trovato solo su GAS reale, vedi sezione N1 sotto).
+
+**Corretto**: aggiunto `https://www.googleapis.com/auth/script.scriptapp`
+a `oauthScopes`. 104/104 test invariati (il fix non tocca logica, solo
+manifest). Push su TEST verificato di nuovo (`clasp push --force` poi
+`clasp pull` isolato in `/tmp/sf-scratch/` + diff, 13/13 file
+identici).
+
+**Nota per Marco**: cambiare gli scope OAuth del manifest tipicamente
+richiede una nuova autorizzazione — al prossimo tentativo di eseguire
+`installaTriggerArchiviazioneAutomatica` (o qualunque funzione) da
+editor Apps Script, aspettati la richiesta di consenso su Google a
+rivedere/accettare i permessi aggiornati prima che la funzione giri.
+
+**GATE 🔴 UMANO ancora in attesa**: il trigger resta da installare.
+Riprovare `installaTriggerArchiviazioneAutomatica` (Kanban.gs) su TEST.
+
+## N3 (archiviazione) — codice e test pronti, primo tentativo del gate (2026-08-18, poi fallito su scope OAuth, vedi sopra)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita automaticamente da N2 (nessun gate su N2). Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §4.1, §9
+(N3). **Su istruzione esplicita della sessione**: scritto e testato
+tutto il codice del trigger, ma **non eseguito il passo che lo attiva
+per davvero** — fermo qui per la conferma di Marco, esattamente come
+la tabella delle sotto-fasi richiede.
+
+**Codice** (Kanban.gs):
+- `archiveEligibleJobs_()` — scansiona `jobs`, seleziona i casi con
+  `incarico_chiuso_ts` valorizzato e `oggi - incarico_chiuso_ts >=`
+  soglia (config `archiviazione_giorni_default`, default 30 se il
+  valore in config e' vuoto/invalido), li archivia uno per uno
+  **riusando `archiveJob_`** (N2) — stessa regola di eleggibilita' del
+  bottone manuale, un solo punto in cui vive, non duplicata. Un errore
+  su un singolo job (es. concorrenza) non interrompe la scansione degli
+  altri: raccolto in `errors`, non rilanciato. **Non tocca mai il
+  Cestino** — solo archiviazione, come da §4.2/§9 ("il cestino resta
+  sempre manuale, nessuna scadenza automatica").
+- `eseguiArchiviazioneAutomaticaGiornaliera()` — handler pensato per il
+  trigger a tempo, loggato con `Logger.log` (un trigger non ha un
+  chiamante interattivo che legga il valore di ritorno). Non
+  raggiungibile da nessuna azione UI/API.
+- `installaTriggerArchiviazioneAutomatica()` — **contiene**
+  `ScriptApp.newTrigger(...).create()` ma **non e' chiamata da nessun
+  altro codice di questa sessione**: e' la funzione che Marco dovra'
+  eseguire lui stesso dall'editor Apps Script (menu Esegui) per
+  attivare davvero il trigger, dopo aver verificato su TEST il
+  comportamento di `eseguiArchiviazioneAutomaticaGiornaliera`/
+  `archiveEligibleJobs_`. Idempotente: rimuove un trigger preesistente
+  con lo stesso handler prima di crearne uno nuovo (nessun duplicato se
+  eseguita per errore piu' volte).
+
+**Test aggiunti** (`Tests.gs`, harness Node), 6 nuovi:
+`testArchiveEligibleJobsArchivesCasesPastThreshold` (soglia superata),
+`testArchiveEligibleJobsSkipsCasesBelowThreshold` (soglia non
+raggiunta), `testArchiveEligibleJobsSkipsCasesNeverClosed` (mai chiuso),
+`testArchiveEligibleJobsUsesConfiguredThreshold` (soglia diversa dal
+default, letta da config), `testArchiveEligibleJobsNeverTouchesCestino`
+(un job cestinato non e' piu' in `jobs`, quindi la scansione non lo
+tocca — verificato esplicitamente), `testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult`
+(l'handler del trigger produce lo stesso risultato dello scan diretto).
+**104/104 test passati nell'harness Node** (98 preesistenti + 6 nuovi,
+nessuna regressione). `installaTriggerArchiviazioneAutomatica` **non e'
+testata** (chiama `ScriptApp`, non mockato nell'harness, e non e'
+comunque il codice da verificare prima del gate — il gate riguarda
+proprio la sua esecuzione, non la sua correttezza sintattica).
+
+**Push su TEST verificato**: `clasp push --force` (13/13 file), poi
+`clasp pull` isolato in `/tmp/sf-scratch/clasp-verify/` + diff contro
+`apps-script/src/` — 13/13 file identici, 0 differenze. Cartella
+temporanea rimossa a fine verifica.
+
+**GATE 🔴 UMANO (§9, dopo N3) — IN ATTESA**: il codice e' pronto e
+verificato su TEST (test automatici + push confermato), ma il trigger
+**non e' installato**. Prossimo passo per Marco, quando vuole
+procedere: eseguire `installaTriggerArchiviazioneAutomatica` (Kanban.gs)
+dall'editor Apps Script **sul progetto TEST**, poi verificare che scatti
+come previsto prima di considerare l'idea di replicarlo anche altrove.
+Questa sessione autonoma si ferma qui: N4/N5/N6 (vista Archivio/Cestino,
+Duplica, metriche estese all'archivio) restano bloccate dietro questo
+gate, come da runbook — nessuna sotto-fase successiva iniziata.
+
+## N2 (archiviazione) — DONE, nessun gate (2026-08-18)
+
+Sessione autonoma (scheduled task, `docs/RUNBOOK_esecuzione_autonoma.md`),
+proseguita da dove N1 si era fermata. Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §4, §6b,
+§8c, §9 (N2), §10.
+
+**Codice**:
+- `moveJobToSheet_(jobId, sourceJobsSheetName, sourceVisiteSheetName, destJobsSheetName, destVisiteSheetName, destJobHeaders, extraFields, transformJobFn)`
+  (Kanban.gs) — unica funzione di spostamento riga, sotto
+  `LockService`, che sposta job + tutte le sue righe `visite` da un
+  foglio sorgente a uno di destinazione, valorizza i campi extra
+  richiesti (`archiviato_ts`/`cestinato_ts`) e applica un'eventuale
+  trasformazione del job prima di scriverlo (usata solo dal fallback di
+  colonna in `ripristinaJob_`). Idempotente: se il job non e' piu' nella
+  sorgente ma e' gia' nella destinazione, restituisce
+  `{ already_moved: true }` invece di un errore — copre sia il doppio
+  click sia una chiamata concorrente nella stessa finestra di lock.
+  `deleteVisiteRowsForJob_` elimina le righe `visite` del job dal basso
+  verso l'alto (evita lo slittamento degli indici durante il ciclo).
+- `archiveJob_(jobId)` — wrapper verso `jobs_archivio`/`visite_archivio`,
+  **rifiuta** (throw) un job senza `incarico_chiuso_ts` valorizzato: e'
+  l'unico punto in cui vive la regola di eleggibilita' (§4.1), riusata
+  sia dal bottone manuale sia — in N3 — dal trigger automatico.
+  `archiveJob(params)` e' il thin wrapper esposto via `routeAction_`.
+- `cestinaJob_(jobId)` — wrapper verso `jobs_cestino`/`visite_cestino`,
+  nessuna eleggibilita' richiesta (§4.2).
+- `ripristinaJob_(jobId)` — simmetrico inverso (da Cestino a
+  `jobs`/`visite`, §6b): se lo `status` conservato non corrisponde piu'
+  a nessuna colonna esistente, ricade sulla prima colonna di ruolo
+  `backlog` (`transformJobFn`).
+- `deleteJob(params)` (Kanban.gs) **cambia comportamento**: non elimina
+  piu' la riga, chiama `cestinaJob_` — stessa azione API (`deleteJob` in
+  `routeAction_`), nessuna rottura del contratto client/server.
+- §8c: `moveJob` svuota `incarico_chiuso_ts` quando la mossa apre una
+  nuova visita (`closesVisit`) su un caso gia' marcato "Chiuso" — un
+  rientro reale annulla una chiusura ormai superata. Tocca solo quel
+  campo, non `invoiced` (rimasto di competenza esclusiva di `updateJob`,
+  §1) — scelta letta cosi' dal design, non estesa di iniziativa.
+- Frontend (`board.html`/`client.html`): bottone "Archivia" nel modale
+  (`modal-archive-button`) abilitato solo quando il job aperto ha
+  `incarico_chiuso_ts` valorizzato (`updateArchiveButtonState_`,
+  richiamata da `openCardModal`/`openNewJobModal`); click ->
+  `archiveJobFromModal` (conferma, `callApi('archiveJob', ...)`,
+  rimozione ottimistica della card, rollback su errore — stesso pattern
+  di `deleteJob`/`moveJob` lato client). Bottone "x" sulla card e la sua
+  conferma aggiornati per riflettere lo spostamento nel Cestino (non
+  piu' "Eliminare?", ma "La card verra' spostata nel Cestino. Potrai
+  ripristinarla o eliminarla definitivamente in seguito.") — nessun
+  cambio di comportamento server oltre a quello di `deleteJob` sopra.
+
+**Test aggiunti** (`Tests.gs`, harness Node), 11 nuovi:
+`testArchiveJobMovesJobAndVisiteToArchivio`,
+`testArchiveJobRejectsCaseNotClosed`,
+`testArchiveJobIsIdempotentOnSecondCall`,
+`testArchiveJobApiActionRejectsCaseNotClosed`,
+`testCestinaJobMovesJobAndVisiteRegardlessOfClosure`,
+`testDeleteJobMovesToCestinoInsteadOfDeleting`,
+`testRipristinaJobRestoresJobAndVisiteToOriginalStatus`,
+`testRipristinaJobFallsBackToBacklogColumnWhenStatusNoLongerExists`,
+`testMoveJobToSheetIsIdempotentWhenCalledTwice`,
+`testMoveJobClearsIncaricoChiusoTsOnRealReentryFromDone`,
+`testMoveJobDoesNotClearIncaricoChiusoTsWhenNoNewVisitOpens`.
+**98/98 test passati nell'harness Node** (87 preesistenti + 11 nuovi,
+nessuna regressione). Nota tecnica per chi tocca ancora questi test:
+`resetTestDatabase_` svuota solo `jobs`/`visite`/`config` tra un test e
+l'altro, non `jobs_archivio`/`jobs_cestino` (fuori dal suo scopo,
+precedente a N2) — lo spreadsheet di test e' condiviso da tutta la
+suite, quindi le asserzioni su quei due fogli filtrano sempre per
+`job_id` invece di assumere la lunghezza assoluta della tabella (due
+asserzioni non filtrate sono state trovate e corrette in questa stessa
+sessione, prima del giro verde).
+
+**Push su TEST verificato**: `clasp push --force` (13/13 file), poi
+`clasp pull` isolato in `/tmp/sf-scratch/clasp-verify-n2/` + diff contro
+`apps-script/src/` — 13/13 file identici, 0 differenze. Cartella
+temporanea rimossa a fine verifica (nessuna credenziale o dato
+persistito fuori da `/tmp/sf-scratch/`).
+
+**Punti di §8d toccati in N2, non esaustivamente**:
+- *Concorrenza*: non affrontata con un messaggio dedicato — ma
+  `moveJobToSheet_` throw "Job non trovato: X" se il job non e' ne' in
+  sorgente ne' in destinazione, che e' il caso reale di un job
+  archiviato/cestinato nel frattempo da un altro utente mentre il primo
+  aveva ancora il modale aperto con dati non aggiornati. Messaggio
+  funzionale ma generico, non la frase dedicata ipotizzata dal design —
+  da rivedere in una sessione UI se Marco lo giudica insufficiente in
+  uso reale.
+- Vista Archivio/Cestino, ricerca/filtro, quadro Cap.13-15: non in scope
+  di N2, rimangono N4/N6 come da tabella §9.
+
+**Criteri di accettazione §10 chiusi da N2** (verificati TRUE uno per
+uno, non "il codice sembra corretto"): righe 2-6 della lista (svuotamento
+automatico di `incarico_chiuso_ts`, eleggibilita' del bottone Archivia,
+bottone Cestino su qualunque card con conferma leggera, `moveJobToSheet_`
+sotto lock/idempotente, Ripristina con fallback backlog). Le righe
+restanti (cancellazione vera solo con Elimina definitivamente/Svuota
+cestino, Cestino mai letto da metriche, trigger, viste, Duplica,
+"lavoro presente" + Andamento del carico estesi all'archivio) restano
+aperte per N3-N6, come da tabella §9 — nessuna sorpresa, previsto dal
+piano.
+
+## N1 (archiviazione) — CHIUSA, gate confermato da Marco (2026-08-18)
+
+Sessione autonoma (scheduled task, RUNBOOK_esecuzione_autonoma.md) su
+`feat/n1-archiviazione-schema`, a partire da lavoro di sotto-fase N1
+già presente non committato nel working tree. Riferimento:
+[docs/DESIGN_archiviazione.md](docs/DESIGN_archiviazione.md), §9 (N1),
+§10 (criteri), §8b.
+
+**Codice N1 (già presente + completato in questa sessione)**:
+- Schema additivo (Schema.gs/Constants.gs): fogli `jobs_archivio`
+  (`JOB_HEADERS` + `archiviato_ts`), `visite_archivio`
+  (`VISITE_HEADERS` invariata), `jobs_cestino` (`JOB_HEADERS` +
+  `cestinato_ts`), `visite_cestino` (`VISITE_HEADERS` invariata),
+  creati da `setupSigmaFlow()`. Config: `archiviazione_giorni_default`
+  (default 30). `SCHEMA_VERSION` 12→13.
+- §8b — `incarico_chiuso_ts` correggibile via Cronologia: ricognizione
+  confermata che il tipo evento `correction` esisteva già
+  strutturalmente (richiede `reason`) ma il menu tipo-evento in UI era
+  stato ridotto a "Spostamento"/"Nota" — opzione "Correzione"
+  ripristinata in `board.html`. Whitelist esplicita
+  `SIGMAFLOW.CORRECTABLE_FIELDS = ['arrival_ts', 'incarico_chiuso_ts']`
+  (Constants.gs); `validateSequence_`/`checkStructuralAlignment_`
+  (ActivityLog.gs) validano campo+data (`CAMPO_NON_CORREGGIBILE`/
+  `DATA_NON_VALIDA`) e applicano la correzione a `jobs` tramite lo
+  stesso percorso `applyStructuralAlignment_` già usato dai warning dei
+  `move` — nessuna via di scrittura parallela. Form di Cronologia
+  (`client.html`) esteso con i campi Campo/Nuovo valore/Motivo.
+
+**Test aggiunti** (`Tests.gs`, harness Node): `testSetupSchemaCreaFogliArchivioECestino`,
+`testSetupSchemaSeedaArchiviazioneGiorniDefault`,
+`testAddActivityEventCorrectionArrivalTsValida`,
+`testAddActivityEventCorrectionIncaricoChiusoTsValida`,
+`testAddActivityEventCorrectionCampoNonCorreggibile`,
+`testAddActivityEventCorrectionDataNonValida`. **87/87 test passati
+nell'harness Node** (81 preesistenti + 6 nuovi, nessuna regressione).
+
+**Push su TEST — inizialmente bloccato, poi risolto nella stessa
+sessione**: il primo `clasp push` era fallito con
+`invalid_grant`/`invalid_rapt` (token OAuth scaduto). Su richiesta
+esplicita di Marco ("run clasp login") ho eseguito `clasp login`: ha
+riconosciuto una sessione già valida (`You are logged in as
+marco@sigmapiu.it`) e rigenerato il token — nessuna credenziale
+gestita da me, solo l'esecuzione del comando. Push riuscito da quel
+momento in poi. **Ogni push di questa sessione è stato verificato con
+`clasp pull` isolato in `/tmp/sf-scratch/clasp-verify/` + diff contro
+`apps-script/src/`: sempre 13/13 file identici, 0 differenze.**
+
+**Collaudo reale su GAS (Marco) — due problemi trovati e corretti,
+non solo cosmetici**:
+
+1. **UI poco chiara**: l'opzione "Correzione" nel menu tipo-evento non
+   spiegava cosa correggesse. Marco l'aveva scambiata per un residuo
+   da rimuovere. Corretto: etichette senza nomi tecnici
+   (`arrival_ts`/`incarico_chiuso_ts`) e una riga esplicativa nel form
+   (`board.html`) — "corregge solo data di creazione o chiusura
+   incarico, non sposta la card".
+2. **Bug reale trovato da Marco durante `runAllTestsAndLog` su GAS
+   reale**, non riproducibile nell'harness Node (sincrono per
+   costruzione): `testEseguiMigrazioneCompletaEndToEndOnOldSchemaData`
+   falliva con `Sheet <gid> not found`. Causa vera, non un hiccup di
+   servizio come ipotizzato al primo tentativo: `setupSigmaFlow()` apre
+   un proprio riferimento indipendente allo spreadsheet
+   (`getSpreadsheet_()`), separato da qualunque riferimento `ss` che il
+   chiamante teneva già in mano da prima. Finché `setupSigmaFlow`
+   toccava poco lo schema il riferimento vecchio del chiamante restava
+   comunque valido; con N1 (cancella `cases` e crea cinque fogli nuovi
+   nella stessa chiamata) il riferimento vecchio può restare agganciato
+   a una struttura non più valida. Corretto in due punti — dentro
+   `eseguiMigrazioneCompleta_` (ActivityLog.gs) e nei tre test che
+   tengono un `ss` esterno da riusare dopo aver chiamato
+   `setupSigmaFlow()`/`eseguiMigrazioneCompleta_()` (Tests.gs) —
+   riaprendo esplicitamente `ss = SpreadsheetApp.openById(ss.getId())`
+   dopo la chiamata. Aggiunto anche `SpreadsheetApp.flush()` in
+   `setupSigmaFlow` subito dopo la cancellazione di `cases`, difesa
+   aggiuntiva sullo stesso tipo di rischio ma sul riferimento interno.
+   **Verificato da Marco**: il test rilanciato singolarmente su GAS
+   reale ora passa pulito, due volte di seguito.
+3. **Fix minore collegato**: `runAllTestsAndLog` scriveva un solo
+   `Logger.log` con l'intero risultato JSON — superava il limite di
+   dimensione di un log nell'editor e troncava proprio a metà dei
+   falliti (il problema che ha reso necessari più giri per isolare il
+   bug sopra). Ora tre log separati (riepilogo, falliti in dettaglio,
+   nomi dei passati), nessuno rischia più il troncamento.
+
+**Nota per le sessioni future**: Marco non rilancia l'intera suite
+`runAllTestsAndLog` su GAS reale come verifica di routine (20+ minuti,
+latenza fissa delle chiamate Sheets per ciascuno degli 87 test) — lo fa
+solo su richiesta mirata a un singolo test o a un numero ridotto.
+L'harness Node resta la verifica di routine (sub-secondo, 87/87 ad ogni
+fix di questa sessione). Salvato in memoria
+(`feedback_gas_test_suite_time.md`) per non richiederlo di nuovo per
+abitudine.
+
+Commit su `feat/n1-archiviazione-schema` (locale, non unito a `main`):
+`aa8f486`, `5eda886`, `0d519a1`, `3dd33a3`, `d448ebc`, `d13f8e0`,
+`4886929`.
+
+**I quattro punti della Definition of Done (RUNBOOK) sono soddisfatti**:
+criteri di accettazione N1 verificati (incluso il giudizio esplicito di
+Marco sullo schema, "ok"), 87/87 test nell'harness senza regressioni +
+il test problematico su GAS reale confermato pulito da Marco dopo il
+fix, push TEST verificato 0 differenze ad ogni commit, questo
+aggiornamento.
+
+**Fuori scope di N1, per §9 del design**: §8c (svuotamento automatico
+di `incarico_chiuso_ts` su rientro reale) è N2, non N1 — non toccato
+qui nonostante compaia nello stesso documento.
+
+**Aperto, non bloccante, da riprendere eventualmente in una sessione
+UI dedicata**: se dare a "Correzione" un punto di ingresso dedicato
+(icona accanto alla spunta "Chiuso" e alla data di creazione) invece
+del menu generico attuale — proposto a Marco durante il collaudo N1,
+nessuna decisione presa. Non è un criterio di accettazione di N1 (§10
+non lo richiede) e non blocca N2+: `moveJobToSheet_`/`archiveJob_`/
+`cestinaJob_` non toccano questo form.
+
+**Gate 🔴 Umano di §9, dopo N1 — CONFERMATO da Marco il 2026-08-18**
+("per me lo sviluppo è ok, N1 lo dichiaro chiuso"). N1 è chiusa a
+tutti gli effetti.
+
+## Prossima esecuzione — nessun programma attivo
+
+Sia il programma di archiviazione (N1-N6, `docs/DESIGN_archiviazione.md`)
+sia quello di backup PROD (N-B1-N-B3, `docs/DESIGN_backup.md`) sono
+**completi**: tutte le sotto-fasi DONE, tutti i criteri di accettazione
+verificati TRUE (vedi sezioni sopra), tutti i gate umani confermati da
+Marco. Il lavoro vive su `feat/n1-archiviazione-schema`, non ancora
+unito a `main` — decisione di Marco quando/se aprire la pull request.
+Il trigger di backup (ore 2) e quello di archiviazione (ore 3) sono
+entrambi attivi su TEST, indipendenti l'uno dall'altro.
+
+Una prossima sessione riparte da una richiesta esplicita di Marco
+(manutenzione ordinaria) o da un nuovo documento `DESIGN_*.md`, come da
+`CLAUDE.md`.
 
 ## Stato generale
 
@@ -415,6 +1188,31 @@ sulla pulizia campi e' stato chiuso in M0-A, vedi sopra):
   ricostruzione più accurata caso per caso.
 - **Migliore allineamento e lettura della dashboard alla dispensa FSC**
   — riferimento a un documento/manuale FSC esterno da riprendere.
+- **Buco trovato da Marco il 2026-08-19, non affrontato (esplicitamente
+  fuori scope della sessione archiviazione/backup)**: modificare la
+  Cronologia a mano (tab Cronologia, `addActivityEvent`/
+  `updateActivityEvent`, Kanban.gs) non aggiorna lo stato derivato
+  del caso. Verificato nel codice, non solo osservato: `checkStructuralAlignment_`/
+  `applyStructuralAlignment_`/`alignOpenVisitFields_` allineano **solo**
+  i campi di data (`start_ts`/`done_ts`/`incarico_ts`/`prep_ts`/
+  `arrival_ts`) sulla **visita già aperta** (`ensureOpenVisit_`) — mai
+  `job.status` (la card non cambia colonna sulla board) e mai la
+  creazione di una **nuova** riga `visite` per un vero rientro (quello
+  — nuova visita, `numero_visita` incrementato — vive solo dentro
+  `moveJob()`/`updateVisiteForMove_`, il percorso reale del
+  drag-and-drop, mai richiamato da qui). Conseguenza pratica: un
+  rientro (o un cambio di colonna) registrato a mano in Cronologia
+  resta visibile solo in `activity_log_json` — non sposta la card, non
+  crea la visita corrispondente, e sparisce da tutte le metriche che
+  leggono `visite` (rientri, tempi, capacità — quasi tutta la
+  dashboard). Da decidere in una sessione dedicata: se questo è il
+  comportamento voluto (Cronologia = solo racconto della storia, non
+  fonte di verità per lo stato derivato) o se serve un meccanismo che,
+  quando un evento 'move' in Cronologia rappresenta un rientro reale,
+  ricalcoli anche `status` e crei la visita mancante — non banale,
+  perché "rientro" non è "qualunque move" (regole di validazione come
+  il divieto di rientro diretto in `wip` andrebbero rispettate anche
+  fuori da un'interazione reale sulla board).
 
 ## Riferimenti tecnici correnti
 

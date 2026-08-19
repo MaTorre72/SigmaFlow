@@ -172,6 +172,16 @@ function normalizeCell_(value) {
   return value;
 }
 
+// Svuota un foglio mantenendo solo l'intestazione — usata sia dai test
+// (resetTestDatabase_) sia da svuotaCestino_ (§6b, N4: azione di gruppo
+// "Svuota cestino"), da qui invece che da Tests.gs perche' e' codice di
+// produzione, non solo di test.
+function clearDataRows_(sheet, headers) {
+  sheet.clear();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
+}
+
 function getHeaderMap_(sheet) {
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var map = {};
@@ -247,8 +257,13 @@ function coerceBoolean_(value) {
   return value === true || value === 'TRUE' || value === 'true';
 }
 
-function readConfig_() {
-  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
+// N-B1 (DESIGN_backup.md, §4): ss opzionale - se assente, risolve
+// l'ambiente ambientale (invariato per ogni chiamante esistente). Il
+// backup di PROD lo passa esplicitamente (il foglio PROD gia' in mano,
+// aperto per id) per non dipendere dalla stessa property condivisa che
+// ha causato l'incidente del 2026-08-19.
+function readConfig_(ss) {
+  var sheet = (ss || getSpreadsheet_()).getSheetByName(SIGMAFLOW.SHEETS.CONFIG);
   var config = {};
   Object.keys(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(key) {
     config[key] = SIGMAFLOW.DEFAULT_CONFIG[key];
