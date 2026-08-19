@@ -284,6 +284,9 @@ function runAllTests() {
     testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
+    testGetArchivioReturnsEmptyWhenSheetsMissing,
+    testGetCestinoReturnsEmptyWhenSheetsMissing,
+    testGetMetricsReturnsEmptyArchivedDataWhenSheetsMissing,
     testRipristinaJobApiActionRestoresJob,
     testEliminaJobDefinitivamenteRemovesJobAndVisiteFromCestino,
     testEliminaJobDefinitivamenteThrowsWhenJobNotInCestino,
@@ -1633,6 +1636,54 @@ function testGetCestinoReturnsAnagraficaAndVisitCount() {
     assertEquals_('Caso nel cestino', item.title, 'anagrafica: titolo');
     assertTrue_(Boolean(item.cestinato_ts), 'riepilogo: cestinato_ts valorizzato');
     assertEquals_(undefined, item.archiviato_ts, 'un caso nel cestino non ha archiviato_ts');
+  });
+}
+
+// M1 (DESIGN_dashboard.md, §2): su PROD i fogli archivio/cestino non
+// esistono ancora (nessuna sessione ha mai eseguito l'allineamento
+// schema li'). Simulato qui cancellando i quattro fogli dopo un setup
+// altrimenti normale - getArchivio_/getCestino_/getMetrics devono
+// comportarsi come "archivio/cestino vuoto", mai lanciare.
+function testGetArchivioReturnsEmptyWhenSheetsMissing() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO));
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+
+    var result = getArchivio();
+    assertTrue_(result.success, 'getArchivio non deve lanciare se i fogli archivio non esistono');
+    assertEquals_(0, result.data.items.length, 'archivio deve risultare vuoto, non un errore');
+  });
+}
+
+function testGetCestinoReturnsEmptyWhenSheetsMissing() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO));
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO));
+
+    var result = getCestino();
+    assertTrue_(result.success, 'getCestino non deve lanciare se i fogli cestino non esistono');
+    assertEquals_(0, result.data.items.length, 'cestino deve risultare vuoto, non un errore');
+  });
+}
+
+function testGetMetricsReturnsEmptyArchivedDataWhenSheetsMissing() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO));
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+    addJob({ title: 'Caso attivo, PROD senza archivio', size_class: 'M' });
+
+    var result = getMetrics();
+    assertTrue_(result.success, 'getMetrics non deve lanciare se i fogli archivio non esistono');
+    assertEquals_(8, result.data.systemState.pointsMetrics.open_points, 'i punti aperti restano leggibili anche senza i fogli archivio');
   });
 }
 
