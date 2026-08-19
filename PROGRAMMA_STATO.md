@@ -1,6 +1,57 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-19
 
+## M1 (dashboard) — DONE, nessun gate di design (2026-08-19)
+
+Sessione autonoma (`docs/RUNBOOK_esecuzione_autonoma.md`), prima
+sotto-fase di [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §2 —
+lo stesso bug null su PROD già registrato sul branch (non unito)
+`docs/nota-bug-archivio-prod-null`, ora risolto qui invece che solo
+documentato.
+
+**Codice** (`apps-script/src/Utils.gs`): `readTable_(sheet)` ricade su
+`[]` quando `sheet` è `null`, un solo punto — nessun controllo
+aggiuntivo necessario nei due chiamanti (`readArchivedList_` in
+Kanban.gs dietro `getArchivio`/`getCestino`,
+`loadJobsWithVisitSummaryFrom_` dietro
+`loadArchivedJobsWithVisitSummary_`/`getMetrics`): entrambi passano
+sempre `ss.getSheetByName(...)` a `readTable_`, quindi il fallback a
+monte li copre già senza modifiche loro.
+
+**Test aggiunti** (`Tests.gs`, harness Node), 3 nuovi — ognuno cancella
+i fogli archivio/cestino dopo un `setupSigmaFlow()` altrimenti normale,
+per simulare lo schema reale di PROD (mai allineato lì):
+`testGetArchivioReturnsEmptyWhenSheetsMissing`,
+`testGetCestinoReturnsEmptyWhenSheetsMissing`,
+`testGetMetricsReturnsEmptyArchivedDataWhenSheetsMissing` (un caso
+attivo resta leggibile nei punti aperti anche senza i fogli archivio).
+**134/134 test passati nell'harness Node** (131 preesistenti + 3
+nuovi, nessuna regressione).
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(16/16 file identici).
+
+**Criteri di accettazione §2 di `docs/DESIGN_dashboard.md` — tutti
+[x]**, aggiornati direttamente nel documento di design.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `b5f4b60`. Nessun gate di design su M1 stessa (§6: il solo
+"gate" elencato è la prassi ordinaria di unire tramite PR, mai push
+diretto su `main` — non un gate di design da confermare). Nota
+separata dal design (non richiesta per chiudere M1): l'allineamento
+schema vero e proprio su PROD, per creare davvero i quattro fogli lì,
+resta una decisione di Marco, riservata a lui, quando vorrà — M1 rende
+PROD stabile anche senza quel passo (niente più errore, solo viste
+vuote).
+
+**Prossima sotto-fase**: M2 (Cronologia — chiudere il buco "correzione
+manuale non aggiorna lo stato derivato"), §3 di
+`docs/DESIGN_dashboard.md`. **Ha un gate 🔴 Umano**: prima di scrivere
+codice, presentare a Marco le due opzioni descritte nel documento e
+raccogliere la sua decisione — non assumibile in autonomia. Questa
+sessione si ferma qui, come da runbook, per raccogliere quella
+decisione.
+
 ## Incidente — property ambientale bloccata su TEST, PROD mostrava dati di TEST (2026-08-19)
 
 Marco ha segnalato che in qualche momento la webapp PROD ha mostrato
