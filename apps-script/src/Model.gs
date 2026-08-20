@@ -644,29 +644,47 @@ function stabilityMetrics_(rho, rhoEffective, cs2) {
 }
 
 // M7 (DESIGN_dashboard.md, §4.2): profilo di ritardo (dispensa FSC, Cap.
-// 13). D_i = rientro_ts - consegna_ts per ogni visita che e' stata
-// consegnata E POI e' rientrata (entrambi i campi valorizzati sulla
-// stessa riga 'visite' - esattamente il campione {D_i} definito dal
-// capitolo, "si osservano solo i casi che rientrano"). alpha = massa
-// media di lavoro che rientra per consegna (numero di rientri osservati
-// / numero di consegne osservate, entrambe su tutta la storia
-// disponibile). k[m] = istogramma discretizzato di {D_i} su bin di 7
-// giorni (Delta, l'esempio esplicito del capitolo: "spesso sufficiente e
-// piu' semplice da stimare/aggiornare" della KDE continua), normalizzato
-// a somma 1; l'ultimo bin raccoglie la coda (>= bin_days * (bin_count-1))
-// per restare un array di dimensione fissa. Nessuna correzione per
-// censura a destra (il capitolo la introduce come raffinamento
-// successivo, non come requisito minimo) - documentato come limite noto,
-// non un bug.
+// 13). Definizione originaria del capitolo: D_i = rientro_ts -
+// consegna_ts, "si osservano solo i casi che rientrano DOPO una
+// consegna". Corretto il 2026-08-20 (segnalato da Marco: 0 campioni su
+// dati reali con 8-9 rientri veri) - quella definizione stretta non e'
+// applicabile a SigmaFlow, dove le colonne di attesa stanno PRIMA di
+// "DA INVIARE/FATTURARE" (DESIGN_modello_caso_visita.md §1, nota di
+// fedelta' al modello): un rientro tipico qui chiude la visita SENZA
+// mai passare da consegna_ts, quindi il campione restava quasi sempre
+// vuoto. Stessa estensione deliberata gia' adottata per p1/r in
+// reworkMetrics_ ("qualunque riapertura", non solo dopo consegna_ts,
+// §1 della stessa nota: "due letture possibili... Cap. 11 esteso,
+// adottato"): un rientro e' qualunque visita con rientro_ts
+// valorizzato, a prescindere da consegna_ts. D_i diventa il tempo di
+// attesa REALE accumulato in quella visita prima del rientro
+// (t_cliente_d + t_ente_d + t_interno_d, gia' calcolato da
+// accumulateWaitTime_ — lo stesso dato gia' esposto in "Dove si blocca
+// il lavoro", M5) invece di rientro_ts - consegna_ts (quasi sempre non
+// calcolabile su dati reali). alpha = rientri osservati / visite
+// "chiuse" in qualche modo (consegnate o rientrate - stessa nozione di
+// "chiusura" gia' usata da visitServiceTimeDays_ per il tempo di
+// servizio). k[m] = istogramma discretizzato di {D_i} su bin di 7
+// giorni (Delta, l'esempio esplicito del capitolo: "spesso sufficiente
+// e piu' semplice da stimare/aggiornare" della KDE continua),
+// normalizzato a somma 1; l'ultimo bin raccoglie la coda (>= bin_days *
+// (bin_count-1)) per restare un array di dimensione fissa. Nessuna
+// correzione per censura a destra (il capitolo la introduce come
+// raffinamento successivo, non come requisito minimo) - documentato
+// come limite noto, non un bug.
 function delayProfile_(visite) {
   var MIN_SAMPLES = 5;
   var BIN_DAYS = 7;
   var BIN_COUNT = 8;
 
-  var deliveries = visite.filter(function(visit) { return Boolean(visit.consegna_ts); });
-  var delays = visite
-    .filter(function(visit) { return visit.consegna_ts && visit.rientro_ts; })
-    .map(function(visit) { return diffDays(visit.consegna_ts, visit.rientro_ts); })
+  var reentries = visite.filter(function(visit) { return Boolean(visit.rientro_ts); });
+  var closedVisits = visite.filter(function(visit) {
+    return visitServiceTimeDays_(visit) > 0 || Boolean(visit.rientro_ts);
+  });
+  var delays = reentries
+    .map(function(visit) {
+      return Number(visit.t_cliente_d || 0) + Number(visit.t_ente_d || 0) + Number(visit.t_interno_d || 0);
+    })
     .filter(function(days) { return days >= 0; });
 
   if (delays.length < MIN_SAMPLES) {
@@ -681,7 +699,7 @@ function delayProfile_(visite) {
 
   return {
     sample_size: delays.length,
-    alpha: deliveries.length ? round_(delays.length / deliveries.length) : null,
+    alpha: closedVisits.length ? round_(reentries.length / closedVisits.length) : null,
     bin_days: BIN_DAYS,
     kernel: kernelCounts.map(function(count) { return round_(count / delays.length); })
   };

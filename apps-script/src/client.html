@@ -1988,9 +1988,15 @@
   // (verificato in M3).
   function renderAdvancedMetrics(metrics) {
     renderDl('advanced-base-metrics', {
-      'Iniziative osservate nel periodo': valueOrDash(metrics.n_jobs_observed),
-      'Tasso di arrivo (lambda)': estimableValue(metrics.lambda, ' iniziative/giorno'),
-      'Tasso di servizio (mu)': estimableValue(metrics.mu, ' iniziative/giorno/operatore'),
+      // M9, fix del 2026-08-20 (segnalato da Marco: due numeri quasi
+      // uguali ma diversi in due pannelli diversi, "Nuove iniziative
+      // osservate" in Flusso del lavoro conta CASI unici, questo conta
+      // VISITE - un caso con 2 rientri nella finestra ne aggiunge 3 qui
+      // ma 1 solo li'. Etichetta corretta per non sembrare un doppione
+      // con un numero sbagliato.
+      'Visite osservate nel periodo (con rientri)': valueOrDash(metrics.n_jobs_observed),
+      'Tasso di arrivo (lambda)': estimableValue(metrics.lambda, ' visite/giorno'),
+      'Tasso di servizio (mu)': estimableValue(metrics.mu, ' visite/giorno/operatore'),
       'Utilizzo (rho)': nullablePercent(metrics.rho, true),
       'Tempo medio di servizio (E[S])': estimableValue(metrics.E_S, ' giorni'),
       'Variabilita\' del servizio (Cv^2)': estimableValue(metrics.Cs2),
@@ -2002,16 +2008,16 @@
     renderDl('advanced-mm1-metrics', {
       'Attesa in coda (Wq)': estimableValue(mm1.Wq, ' giorni'),
       'Tempo totale nel sistema (W)': estimableValue(mm1.W, ' giorni'),
-      'Iniziative in coda (Lq)': estimableValue(mm1.Lq),
-      'Iniziative nel sistema (L)': estimableValue(mm1.L)
+      'Visite in coda (Lq)': estimableValue(mm1.Lq),
+      'Visite nel sistema (L)': estimableValue(mm1.L)
     });
 
     var mg1 = metrics.MG1 || {};
     renderDl('advanced-mg1-metrics', {
       'Attesa in coda (Wq)': estimableValue(mg1.Wq, ' giorni'),
       'Tempo totale nel sistema (W)': estimableValue(mg1.W, ' giorni'),
-      'Iniziative in coda (Lq)': estimableValue(mg1.Lq),
-      'Iniziative nel sistema (L)': estimableValue(mg1.L)
+      'Visite in coda (Lq)': estimableValue(mg1.Lq),
+      'Visite nel sistema (L)': estimableValue(mg1.L)
     });
 
     var rework = metrics.rework || {};

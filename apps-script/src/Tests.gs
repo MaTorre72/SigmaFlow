@@ -307,8 +307,8 @@ function runAllTests() {
     testBuildSystemStateSumsWaitTimeByType,
     testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
     testDelayProfileNullBelowMinimumSamples,
-    testDelayProfileComputesAlphaAndKernelFromDeliveredThenReentered,
-    testDelayProfileAlphaCountsAllDeliveriesNotOnlyReentered,
+    testDelayProfileComputesAlphaAndKernelFromRealReentries,
+    testDelayProfileAlphaCountsAllClosedVisitsNotOnlyReentered,
     testBuildSystemStateExposesDelayProfileInSystemState,
     testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus,
     testCalculateMetricsE_S0E_S1NullWhenNoSamples,
@@ -2079,13 +2079,19 @@ function testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries() {
   assertEquals_(1, state.latentBacklogMetrics.count, 'solo la consegna non chiusa e mai rientrata conta come esposizione futura');
 }
 
-// M7 (DESIGN_dashboard.md, §4.2): profilo di ritardo (Cap. 13) - alpha e
-// il kernel k[m] devono restare null sotto la soglia minima di campioni
-// (5 rientri osservati), coerente con enoughCompleted altrove.
+// M7 (DESIGN_dashboard.md, §4.2), fix del 2026-08-20 (segnalato da
+// Marco: 0 campioni su dati reali con 8-9 rientri veri, perche' un
+// rientro a SigmaFlow quasi mai passa da consegna_ts - vedi la nota
+// "estensione deliberata" su delayProfile_, Model.gs): un rientro e'
+// qualunque visita con rientro_ts valorizzato, D_i e' il tempo di
+// attesa reale accumulato (t_cliente_d+t_ente_d+t_interno_d), non
+// rientro_ts - consegna_ts. Alpha e kernel restano null sotto la
+// soglia minima di campioni (5 rientri osservati), coerente con
+// enoughCompleted altrove.
 function testDelayProfileNullBelowMinimumSamples() {
   var visite = [
-    { job_id: 'JOB-1', numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00', rientro_ts: '2026-01-05T09:00:00+02:00' },
-    { job_id: 'JOB-2', numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00' }
+    { job_id: 'JOB-1', numero_visita: 2, rientro_ts: '2026-01-05T09:00:00+02:00', t_cliente_d: 4 },
+    { job_id: 'JOB-2', numero_visita: 1, start_ts: '2026-01-01T09:00:00+02:00', consegna_ts: '2026-01-01T09:00:00+02:00' }
   ];
 
   var profile = delayProfile_(visite);
@@ -2095,45 +2101,50 @@ function testDelayProfileNullBelowMinimumSamples() {
   assertEquals_(null, profile.kernel, 'kernel non stimabile sotto la soglia minima');
 }
 
-// Riproduce l'esempio del capitolo: 5 rientri, tutti entro la prima
-// settimana (bin 0) - k[0] deve valere 1 (100%), gli altri bin 0.
-// alpha = 5 rientri / 5 consegne = 1.
-function testDelayProfileComputesAlphaAndKernelFromDeliveredThenReentered() {
+// Riproduce lo scenario reale segnalato da Marco: rientri che chiudono
+// una visita SENZA mai passare da consegna_ts (le colonne di attesa
+// stanno prima di "DA INVIARE/FATTURARE") - 5 rientri, tutti con 3
+// giorni di attesa reale accumulata, tutti entro la prima settimana
+// (bin 0).
+function testDelayProfileComputesAlphaAndKernelFromRealReentries() {
   var visite = [];
   for (var i = 0; i < 5; i++) {
     visite.push({
       job_id: 'JOB-DELAY-' + i,
-      numero_visita: 1,
-      consegna_ts: '2026-01-01T09:00:00+02:00',
-      rientro_ts: '2026-01-03T09:00:00+02:00'
+      numero_visita: 2,
+      rientro_ts: '2026-01-03T09:00:00+02:00',
+      rientro_da: 'wait_client',
+      t_cliente_d: 3,
+      t_ente_d: 0,
+      t_interno_d: 0
     });
   }
 
   var profile = delayProfile_(visite);
 
   assertEquals_(5, profile.sample_size, '5 rientri osservati');
-  assertEquals_(1, profile.alpha, 'alpha = 5 rientri / 5 consegne');
-  assertEquals_(1, profile.kernel[0], 'tutti i rientri nel primo bin (0-6 giorni)');
+  assertEquals_(1, profile.alpha, 'alpha = 5 rientri / 5 visite chiuse (tutte rientrate)');
+  assertEquals_(1, profile.kernel[0], 'tutti i rientri nel primo bin (0-6 giorni di attesa)');
   assertEquals_(0, profile.kernel[1], 'nessun rientro nel secondo bin');
   assertEquals_(1, profile.kernel.reduce(function(sum, share) { return sum + share; }, 0), 'il kernel somma a 1');
 }
 
-// Una consegna senza rientro non produce un campione D_i (§10: "si
-// osservano solo i casi che rientrano"), ma conta comunque come consegna
-// al denominatore di alpha.
-function testDelayProfileAlphaCountsAllDeliveriesNotOnlyReentered() {
+// Una visita consegnata (mai rientrata) non produce un campione D_i, ma
+// conta comunque come "visita chiusa" al denominatore di alpha - stessa
+// nozione di chiusura di visitServiceTimeDays_ (consegnata O rientrata).
+function testDelayProfileAlphaCountsAllClosedVisitsNotOnlyReentered() {
   var visite = [];
   for (var i = 0; i < 5; i++) {
-    visite.push({ job_id: 'JOB-REENTER-' + i, numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00', rientro_ts: '2026-01-03T09:00:00+02:00' });
+    visite.push({ job_id: 'JOB-REENTER-' + i, numero_visita: 2, rientro_ts: '2026-01-03T09:00:00+02:00', t_cliente_d: 2 });
   }
   for (var j = 0; j < 5; j++) {
-    visite.push({ job_id: 'JOB-NO-REENTER-' + j, numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00' });
+    visite.push({ job_id: 'JOB-DELIVERED-' + j, numero_visita: 1, start_ts: '2026-01-01T09:00:00+02:00', consegna_ts: '2026-01-02T09:00:00+02:00' });
   }
 
   var profile = delayProfile_(visite);
 
   assertEquals_(5, profile.sample_size, 'solo le visite rientrate producono un campione D_i');
-  assertEquals_(0.5, profile.alpha, 'alpha = 5 rientri / 10 consegne totali');
+  assertEquals_(0.5, profile.alpha, 'alpha = 5 rientri / 10 visite chiuse in totale (rientrate + consegnate)');
 }
 
 function testBuildSystemStateExposesDelayProfileInSystemState() {
@@ -2141,14 +2152,14 @@ function testBuildSystemStateExposesDelayProfileInSystemState() {
   var jobs = [{ job_id: 'JOB-PROFILE', status: 'backlog', arrival_ts: nowIso_(), visit_number: 2 }];
   var visite = [];
   for (var i = 0; i < 5; i++) {
-    visite.push({ job_id: 'JOB-PROFILE-' + i, numero_visita: 1, consegna_ts: '2026-01-01T09:00:00+02:00', rientro_ts: '2026-01-08T09:00:00+02:00' });
+    visite.push({ job_id: 'JOB-PROFILE-' + i, numero_visita: 2, rientro_ts: '2026-01-08T09:00:00+02:00', t_ente_d: 8 });
   }
 
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
   assertTrue_(Boolean(state.delayProfileMetrics), 'delayProfileMetrics presente in systemState');
   assertEquals_(5, state.delayProfileMetrics.sample_size, 'campione letto da tutta la storia, non solo dalla finestra osservata');
-  assertEquals_(1, state.delayProfileMetrics.kernel[1], 'rientro dopo 7 giorni cade nel secondo bin (7-13 giorni)');
+  assertEquals_(1, state.delayProfileMetrics.kernel[1], 'rientro dopo 8 giorni di attesa cade nel secondo bin (7-13 giorni)');
 }
 
 function testBuildSystemStateStabilityMetricsNullWhenInsufficientData() {
