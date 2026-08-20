@@ -1921,22 +1921,33 @@
     document.getElementById('flow-added-cards').textContent = valueOrDash(points.added_cards);
     document.getElementById('flow-added-points').textContent = metricValue(points.added_points, ' pt');
     document.getElementById('flow-added-rate').textContent = perWeekValue(flow.new_initiatives_per_day, '/settimana');
+    document.getElementById('flow-added-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.added_points, flow.window_days);
     document.getElementById('flow-completed-cards').textContent = valueOrDash(points.completed_cards);
     document.getElementById('flow-completed-points').textContent = metricValue(points.completed_points, ' pt');
     document.getElementById('flow-completed-rate').textContent = perWeekValue(flow.completed_per_day, '/settimana');
+    document.getElementById('flow-completed-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.completed_points, flow.window_days);
     document.getElementById('flow-window-days').textContent = valueOrDash(flow.window_days);
+
+    // Chiesto da Marco (2026-08-20): "passaggi" non e' un termine
+    // chiaro - una visita e' l'unita' reale che il team lavora (un
+    // caso con rientri ne genera piu' d'una), "iniziativa"/"punti"
+    // sono l'unita' del caso. Rinominato in "visite" ovunque, sempre
+    // con l'equivalente stimato in punti (fattore di conversione
+    // avg_points_per_initiative, dimensione media dei casi arrivati
+    // nel periodo) quando possibile.
+    var avgPoints = flow.avg_points_per_initiative;
     renderDl('flow-extra-metrics', {
-      'Capacita disponibile stimata': perWeekValue(flow.estimated_capacity_per_day, ' passaggi/settimana'),
-      'Differenza tra entrate e uscite (alla settimana)': perWeekValue(flow.entry_exit_difference, '/settimana')
+      'Capacita\' disponibile stimata': perWeekValue(flow.estimated_capacity_per_day, ' visite/settimana') + estimatedPointsSuffix_(flow.estimated_capacity_per_day, avgPoints),
+      'Differenza tra entrate e uscite (iniziative/settimana)': perWeekValue(flow.entry_exit_difference, '/settimana')
     });
 
     var rework = system.reworkMetrics || {};
     renderDl('system-rework-metrics', {
       'Iniziative con almeno un rientro': nullablePercent(rework.initiatives_with_rework, true),
       'Rientri medi quando il lavoro rientra': estimableValue(rework.average_reentries_when_reworked),
-      'Passaggi medi per iniziativa': metricValue(rework.average_passages_per_initiative),
-      'Passaggi totali alla settimana': perWeekValue(rework.total_passages_per_day, ''),
-      'Carico aggiuntivo dei rientri (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' passaggi/settimana')
+      'Visite medie per iniziativa': metricValue(rework.average_passages_per_initiative),
+      'Visite totali alla settimana': perWeekValue(rework.total_passages_per_day, ' visite/settimana') + estimatedPointsSuffix_(rework.total_passages_per_day, avgPoints),
+      'Carico aggiuntivo dei rientri (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' visite/settimana') + estimatedPointsSuffix_(rework.additional_passages_from_rework, avgPoints)
     });
 
     var time = system.timeMetrics || {};
@@ -1950,29 +1961,39 @@
     });
     document.getElementById('time-message').textContent = (time.variability_message || '') + ' ' + (time.waiting_message || '');
 
+    // Chiesto da Marco (2026-08-20, punto 3): anche il lavoro presente
+    // sempre in punti oltre che in card - workloadMetrics ora porta
+    // anche i campi _points (Model.gs, currentWorkload_).
     var workload = system.workloadMetrics || {};
+    function cardsAndPoints_(count, points) {
+      return valueOrDash(count) + ' (' + metricValue(points, ' pt') + ')';
+    }
     renderDl('workload-metrics', {
-      'Lavoro pronto': valueOrDash(workload.ready),
-      'In preparazione': valueOrDash(workload.preparing),
-      'Lavoro in corso': valueOrDash(workload.in_progress),
-      'Concluso, non ancora fatturato': valueOrDash(workload.can_return),
-      'Lavoro in attesa (totale)': valueOrDash(workload.blocked),
-      'In attesa di cliente': valueOrDash(workload.waiting_client),
-      'In attesa di enti': valueOrDash(workload.waiting_authority),
-      'Fermi per decisione interna': valueOrDash(workload.waiting_internal)
+      'Lavoro pronto': cardsAndPoints_(workload.ready, workload.ready_points),
+      'In preparazione': cardsAndPoints_(workload.preparing, workload.preparing_points),
+      'Lavoro in corso': cardsAndPoints_(workload.in_progress, workload.in_progress_points),
+      'Concluso, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points),
+      'Lavoro in attesa (totale)': cardsAndPoints_(workload.blocked, workload.blocked_points),
+      'In attesa di cliente': cardsAndPoints_(workload.waiting_client, workload.waiting_client_points),
+      'In attesa di enti': cardsAndPoints_(workload.waiting_authority, workload.waiting_authority_points),
+      'Fermi per decisione interna': cardsAndPoints_(workload.waiting_internal, workload.waiting_internal_points)
     });
 
     var capacity = system.capacityMetrics || {};
     // Chiesto da Marco (2026-08-20): tolta la riga "Capacita teorica
     // giornaliera" quando non configurata (theoretical_capacity_per_day
-    // in config) - non aggiungeva informazione, solo rumore.
-    var capacityDl = { 'Capacita effettiva alla settimana': perWeekValue(capacity.effective_per_day, ' passaggi/settimana') };
+    // in config) - non aggiungeva informazione, solo rumore. "passaggi"
+    // rinominato "visite" (termine ambiguo, segnalato da Marco), con
+    // l'equivalente stimato in punti quando calcolabile.
+    var capacityDl = {
+      'Capacita\' effettiva alla settimana': perWeekValue(capacity.effective_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.effective_per_day, avgPoints)
+    };
     if (capacity.theoretical_per_day !== null) {
-      capacityDl['Capacita teorica alla settimana'] = perWeekValue(capacity.theoretical_per_day, '');
+      capacityDl['Capacita\' teorica alla settimana'] = perWeekValue(capacity.theoretical_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.theoretical_per_day, avgPoints);
     }
-    capacityDl['Assorbita dai nuovi lavori (alla settimana)'] = perWeekValue(capacity.absorbed_by_new_work, ' passaggi/settimana');
-    capacityDl['Assorbita dai rientri (alla settimana)'] = perWeekValue(capacity.absorbed_by_rework, ' passaggi/settimana');
-    capacityDl['Margine residuo (alla settimana)'] = perWeekValue(capacity.residual_per_day, ' passaggi/settimana');
+    capacityDl['Assorbita dai nuovi lavori (alla settimana)'] = perWeekValue(capacity.absorbed_by_new_work, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_new_work, avgPoints);
+    capacityDl['Assorbita dai rientri (alla settimana)'] = perWeekValue(capacity.absorbed_by_rework, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_rework, avgPoints);
+    capacityDl['Margine residuo (alla settimana)'] = perWeekValue(capacity.residual_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.residual_per_day, avgPoints);
     capacityDl['Margine disponibile'] = nullablePercent(capacity.available_share, true);
     renderDl('capacity-metrics', capacityDl);
 
@@ -1985,14 +2006,14 @@
       'Stato': stability ? (stabilityStateLabels[stability.system_state] || stability.system_state) : 'Dato non ancora stimabile'
     });
 
+    // M5, chiesto da Marco (2026-08-20, punto 4): non solo il totale
+    // complessivo, anche occorrenze/media/min/max per tipo - la nuova
+    // forma di waitTimeMetrics (Model.gs, waitStats_) porta gia' tutto.
     var waitTime = system.waitTimeMetrics || {};
-    renderDl('wait-time-metrics', {
-      'Periodo analizzato': metricValue(waitTime.window_days, ' giorni'),
-      'Attesa cliente': metricValue(waitTime.client_days, ' giorni'),
-      'Attesa enti': metricValue(waitTime.authority_days, ' giorni'),
-      'Fermi per decisione interna': metricValue(waitTime.internal_days, ' giorni'),
-      'Totale': metricValue(waitTime.total_days, ' giorni')
-    });
+    renderWaitStatsRow_('wait-client', waitTime.client);
+    renderWaitStatsRow_('wait-authority', waitTime.authority);
+    renderWaitStatsRow_('wait-internal', waitTime.internal);
+    document.getElementById('wait-total-days').textContent = metricValue(waitTime.total_days, ' g');
 
     var latentBacklog = system.latentBacklogMetrics || {};
     renderDl('latent-backlog-metrics', {
@@ -2081,6 +2102,18 @@
   // istogramma?" - prima era una tabella di percentuali, poco leggibile
   // a colpo d'occhio) con un grafico a barre, stesso stile a canvas
   // gia' usato da drawPointsTimeline.
+  // M5, chiesto da Marco (2026-08-20, punto 4): riempie una riga della
+  // tabella "Dove si blocca il lavoro" (totale/occorrenze/media/min/max)
+  // dallo stats object gia' pronto lato server (waitStats_, Model.gs).
+  function renderWaitStatsRow_(prefix, stats) {
+    stats = stats || {};
+    document.getElementById(prefix + '-total').textContent = metricValue(stats.total_days, ' g');
+    document.getElementById(prefix + '-occurrences').textContent = valueOrDash(stats.occurrences);
+    document.getElementById(prefix + '-average').textContent = estimableValue(stats.average_days, ' g');
+    document.getElementById(prefix + '-min').textContent = estimableValue(stats.min_days, ' g');
+    document.getElementById(prefix + '-max').textContent = estimableValue(stats.max_days, ' g');
+  }
+
   function renderDelayProfile(profile) {
     renderDl('delay-profile-metrics', {
       'Rientri osservati (campione)': valueOrDash(profile.sample_size),
@@ -2391,6 +2424,32 @@
       return 'Dato non ancora stimabile';
     }
     return metricValue(Math.round(Number(value) * 700) / 100, suffix);
+  }
+
+  // Chiesto da Marco (2026-08-20, punto 3: "molto piu' aggressivo" nel
+  // dare sempre anche i punti oltre alle iniziative): 'total' e' gia'
+  // un totale sull'intera finestra (windowDays) - qui solo la
+  // conversione a un tasso settimanale, nessun nuovo dato dal server.
+  function pointsPerWeekFromWindowTotal_(total, windowDays) {
+    if (total === null || total === undefined || !windowDays) {
+      return 'Dato non ancora stimabile';
+    }
+    return metricValue(Math.round(Number(total) / windowDays * 7 * 100) / 100, ' pt/settimana');
+  }
+
+  // Stima i punti/settimana equivalenti di un tasso espresso in
+  // visite/giorno, moltiplicando per la dimensione media dei casi
+  // (avgPointsPerInitiative, da Model.gs) - sempre marcata "stimati"
+  // dal chiamante, mai un valore esatto come quello in punti osservati
+  // direttamente. Restituisce una stringa vuota (non "Dato non ancora
+  // stimabile", per non duplicare il messaggio gia' mostrato dal valore
+  // principale a cui questa stringa si affianca) se non calcolabile.
+  function estimatedPointsSuffix_(ratePerDay, avgPointsPerInitiative) {
+    if (ratePerDay === null || ratePerDay === undefined || avgPointsPerInitiative === null || avgPointsPerInitiative === undefined) {
+      return '';
+    }
+    var perWeek = Math.round(Number(ratePerDay) * 7 * Number(avgPointsPerInitiative) * 10) / 10;
+    return ' (~' + String(perWeek).replace('.', ',') + ' pt/settimana stimati)';
   }
 
   function escapeHtml(value) {

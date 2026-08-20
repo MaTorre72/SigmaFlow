@@ -201,17 +201,31 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // attualmente in una colonna stand_by, usando status_since_ts (M0-C,
   // "da quando la card e' nella colonna attuale") - lo stesso campo
   // gia' usato dal badge di invecchiamento sulla board (client.html).
-  var ongoingWaitByField = { t_cliente_d: 0, t_ente_d: 0, t_interno_d: 0 };
+  // Fix del 2026-08-20, parte 2 (segnalato da Marco: i giorni mostrati
+  // sono totali complessivi, non chiaro; utile anche una media e un'idea
+  // di distribuzione, non solo il totale): da una somma unica per tipo a
+  // un campione di singole occorrenze di attesa (una per visita gia'
+  // chiusa con quel tipo di attesa valorizzato, una per ogni job ancora
+  // fermo ora in quel tipo di attesa) - waitStats_ ne deriva totale,
+  // numero di occorrenze, media, minimo, massimo.
+  var waitSamplesByField = { t_cliente_d: [], t_ente_d: [], t_interno_d: [] };
+  observed.forEach(function(visit) {
+    Object.keys(waitSamplesByField).forEach(function(field) {
+      var value = Number(visit[field] || 0);
+      if (value > 0) { waitSamplesByField[field].push(value); }
+    });
+  });
   jobs.forEach(function(job) {
     var column = columnMap[normalizeStatus_(job.status)];
     var field = column ? SIGMAFLOW.WAIT_ACCUMULATOR_FIELDS[column.id] : null;
     if (!field || !job.status_since_ts) { return; }
-    ongoingWaitByField[field] += Number(diffDays(job.status_since_ts, now) || 0);
+    var elapsed = Number(diffDays(job.status_since_ts, now) || 0);
+    if (elapsed > 0) { waitSamplesByField[field].push(elapsed); }
   });
   var waitTime = {
-    client_days: round_(sumVisitField_(observed, 't_cliente_d') + ongoingWaitByField.t_cliente_d),
-    authority_days: round_(sumVisitField_(observed, 't_ente_d') + ongoingWaitByField.t_ente_d),
-    internal_days: round_(sumVisitField_(observed, 't_interno_d') + ongoingWaitByField.t_interno_d)
+    client: waitStats_(waitSamplesByField.t_cliente_d),
+    authority: waitStats_(waitSamplesByField.t_ente_d),
+    internal: waitStats_(waitSamplesByField.t_interno_d)
   };
   // M6 (DESIGN_dashboard.md, §4.2): B_lat(t) (dispensa FSC §10,
   // "esposizione futura a rientri") - consegne recenti (consegna_ts nella
@@ -238,6 +252,17 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var workload = currentWorkload_(jobs, columnMap);
   var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
 
+  // Chiesto da Marco (2026-08-20): mostrare "dove e' possibile" ogni
+  // tasso anche in punti, non solo in iniziative/visite - le
+  // grandezze di teoria delle code (capacita', assorbimento, margine)
+  // sono pero' tassi di VISITE, non di punti (i punti sono un
+  // attributo del caso, non della singola visita). Fattore di
+  // conversione stimato: dimensione media dei casi arrivati nella
+  // finestra osservata (punti aggiunti / iniziative nuove) - un solo
+  // fattore, riusato per ogni conversione lato client, sempre indicato
+  // come stima ("~") mai come valore esatto.
+  var avgPointsPerInitiative = initiativeList.length ? round_(points.added_points / initiativeList.length) : null;
+
   return {
     dataQuality: dataQuality,
     systemStatus: systemStatus,
@@ -248,7 +273,8 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       completed_initiatives: completedList.length,
       completed_per_day: completedList.length ? round_(completedRate) : null,
       estimated_capacity_per_day: effectiveCapacity === null ? null : round_(effectiveCapacity),
-      entry_exit_difference: completedList.length ? round_(newRate - completedRate) : null
+      entry_exit_difference: completedList.length ? round_(newRate - completedRate) : null,
+      avg_points_per_initiative: avgPointsPerInitiative
     },
     reworkMetrics: {
       initiatives_with_rework: reworkShare === null ? null : round_(reworkShare),
@@ -283,10 +309,10 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
     pointsMetrics: points,
     waitTimeMetrics: {
       window_days: windowDays,
-      client_days: waitTime.client_days,
-      authority_days: waitTime.authority_days,
-      internal_days: waitTime.internal_days,
-      total_days: round_(waitTime.client_days + waitTime.authority_days + waitTime.internal_days)
+      client: waitTime.client,
+      authority: waitTime.authority,
+      internal: waitTime.internal,
+      total_days: round_(waitTime.client.total_days + waitTime.authority.total_days + waitTime.internal.total_days)
     },
     latentBacklogMetrics: {
       window_days: windowDays,
@@ -471,27 +497,31 @@ function columnsFromConfig_(config) {
   return normalizeColumns_(config);
 }
 
+// Chiesto da Marco (2026-08-20): anche il lavoro presente in punti, non
+// solo in conteggio card - stesso ciclo, un secondo accumulatore in
+// parallelo (_points per ogni categoria _count esistente).
 function currentWorkload_(jobs, columnMap) {
   var result = {
-    ready: 0,
-    preparing: 0,
-    in_progress: 0,
-    can_return: 0,
-    blocked: 0,
-    waiting_client: 0,
-    waiting_authority: 0,
-    waiting_internal: 0
+    ready: 0, ready_points: 0,
+    preparing: 0, preparing_points: 0,
+    in_progress: 0, in_progress_points: 0,
+    can_return: 0, can_return_points: 0,
+    blocked: 0, blocked_points: 0,
+    waiting_client: 0, waiting_client_points: 0,
+    waiting_authority: 0, waiting_authority_points: 0,
+    waiting_internal: 0, waiting_internal_points: 0
   };
   jobs.forEach(function(job) {
     var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
-    if (column.role === 'backlog') { result.ready++; }
-    if (column.role === 'prep') { result.preparing++; }
-    if (column.role === 'wip') { result.in_progress++; }
-    if (column.role === 'stand_by') { result.blocked++; }
-    if (column.role === 'done' && !coerceBoolean_(job.invoiced)) { result.can_return++; }
-    if (job.status === 'wait_client') { result.waiting_client++; }
-    if (job.status === 'wait_authority') { result.waiting_authority++; }
-    if (job.status === 'wait_internal') { result.waiting_internal++; }
+    var points = jobPoints_(job);
+    if (column.role === 'backlog') { result.ready++; result.ready_points += points; }
+    if (column.role === 'prep') { result.preparing++; result.preparing_points += points; }
+    if (column.role === 'wip') { result.in_progress++; result.in_progress_points += points; }
+    if (column.role === 'stand_by') { result.blocked++; result.blocked_points += points; }
+    if (column.role === 'done' && !coerceBoolean_(job.invoiced)) { result.can_return++; result.can_return_points += points; }
+    if (job.status === 'wait_client') { result.waiting_client++; result.waiting_client_points += points; }
+    if (job.status === 'wait_authority') { result.waiting_authority++; result.waiting_authority_points += points; }
+    if (job.status === 'wait_internal') { result.waiting_internal++; result.waiting_internal_points += points; }
   });
   return result;
 }
@@ -583,6 +613,26 @@ function metricDescriptions_() {
     in_progress: 'Lavori attualmente aperti e gestiti dal team.',
     can_return: 'Lavori conclusi ma non ancora fatturati, ancora esposti a richieste successive.',
     prudent_service_days: 'Tempo medio aumentato della variabilita osservata, usato come riferimento prudenziale.'
+  };
+}
+
+// M5, fix del 2026-08-20 (segnalato da Marco: i totali di "Dove si
+// blocca il lavoro" da soli non bastano - serve anche una media, e
+// un'idea di min/max). 'samples' e' un array di durate positive in
+// giorni, una per occorrenza di attesa (una visita chiusa con quel tipo
+// di attesa, o un job ancora fermo li' ora) - non filtra ne' aggrega
+// altro, il chiamante decide cosa raccogliere.
+function waitStats_(samples) {
+  if (!samples.length) {
+    return { total_days: 0, occurrences: 0, average_days: null, min_days: null, max_days: null };
+  }
+  var total = samples.reduce(function(sum, value) { return sum + value; }, 0);
+  return {
+    total_days: round_(total),
+    occurrences: samples.length,
+    average_days: round_(total / samples.length),
+    min_days: round_(Math.min.apply(null, samples)),
+    max_days: round_(Math.max.apply(null, samples))
   };
 }
 

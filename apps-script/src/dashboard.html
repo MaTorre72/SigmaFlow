@@ -48,24 +48,35 @@
   <article class="panel wide">
     <h2>Flusso e carico</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th></th><th>Iniziative</th><th>Punti</th><th>Alla settimana (iniziative)</th></tr></thead>
+      <thead><tr><th></th><th>Iniziative</th><th>Punti</th><th>Iniziative/settimana</th><th>Punti/settimana</th></tr></thead>
       <tbody>
-        <tr><th>Aperte (ora)</th><td id="flow-open-cards">-</td><td id="flow-open-points">-</td><td>-</td></tr>
-        <tr><th>Aggiunte (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td></tr>
-        <tr><th>Completate (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td></tr>
+        <tr><th>Aperte (ora)</th><td id="flow-open-cards">-</td><td id="flow-open-points">-</td><td>-</td><td>-</td></tr>
+        <tr><th>Aggiunte (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td><td id="flow-added-points-rate">-</td></tr>
+        <tr><th>Completate (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
       </tbody>
     </table></div>
+    <p class="panel-note">Nuove iniziative e visite totali sono misure diverse: i rientri aumentano il carico reale. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
+
+    <h3>Capacita' e bilancio (stimati)</h3>
     <dl id="flow-extra-metrics"></dl>
-    <p class="panel-note">Nuove iniziative e passaggi totali sono misure diverse: i rientri aumentano il carico reale. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
   </article>
 
   <article class="panel wide">
     <h2>Rientri e rework <span class="panel-chapter">Cap. 6, 11, 13</span></h2>
     <dl id="system-rework-metrics"></dl>
-    <p class="panel-note">I passaggi totali al giorno rappresentano il lavoro reale richiesto al gruppo.</p>
+    <p class="panel-note">Le visite totali alla settimana rappresentano il lavoro reale richiesto al gruppo (comprese le rilavorazioni).</p>
 
     <h3>Dove si blocca il lavoro</h3>
-    <dl id="wait-time-metrics"></dl>
+    <p class="panel-note">Totali e medie sul periodo osservato, per tipo di blocco - una card ancora ferma ora conta comunque, con l'attesa maturata finora.</p>
+    <div class="table-scroll"><table class="monthly-load-table">
+      <thead><tr><th></th><th>Totale (giorni)</th><th>Occorrenze</th><th>Media (giorni)</th><th>Min</th><th>Max</th></tr></thead>
+      <tbody>
+        <tr><th>Attesa cliente</th><td id="wait-client-total">-</td><td id="wait-client-occurrences">-</td><td id="wait-client-average">-</td><td id="wait-client-min">-</td><td id="wait-client-max">-</td></tr>
+        <tr><th>Attesa enti</th><td id="wait-authority-total">-</td><td id="wait-authority-occurrences">-</td><td id="wait-authority-average">-</td><td id="wait-authority-min">-</td><td id="wait-authority-max">-</td></tr>
+        <tr><th>Decisione interna</th><td id="wait-internal-total">-</td><td id="wait-internal-occurrences">-</td><td id="wait-internal-average">-</td><td id="wait-internal-min">-</td><td id="wait-internal-max">-</td></tr>
+        <tr><th>Totale</th><td id="wait-total-days">-</td><td colspan="4"></td></tr>
+      </tbody>
+    </table></div>
 
     <h3>Esposizione futura a rientri</h3>
     <dl id="latent-backlog-metrics"></dl>
@@ -85,7 +96,9 @@
 
   <article class="panel">
     <h2>Lavoro presente e capacita'</h2>
+    <h3>Lavoro presente (ora)</h3>
     <dl id="workload-metrics"></dl>
+    <h3>Capacita' (stimata, alla settimana)</h3>
     <dl id="capacity-metrics"></dl>
     <p class="panel-note">La capacita' va confrontata con nuovi lavori e rientri, non solo con i nuovi ingressi.</p>
   </article>

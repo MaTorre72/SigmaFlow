@@ -325,6 +325,10 @@ function runAllTests() {
     testDataQualityThresholds,
     testSystemStateSeparatesFlowFromTimeSamples,
     testSystemStateWorkload,
+    testCurrentWorkloadIncludesPointsAlongsideCounts,
+    testBuildSystemStateComputesAvgPointsPerInitiative,
+    testWaitStatsComputesTotalOccurrencesAverageMinMax,
+    testWaitStatsEmptySamplesReturnsNullAverages,
     testMissingRequiredParam,
     testAddActivityEventMoveValido,
     testAddActivityEventTsFuturo,
@@ -2055,9 +2059,11 @@ function testBuildSystemStateSumsWaitTimeByType() {
 
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
-  assertEquals_(3, state.waitTimeMetrics.client_days, 'attesa cliente sommata dalla visita');
-  assertEquals_(5, state.waitTimeMetrics.authority_days, 'attesa enti sommata dalla visita');
-  assertEquals_(1, state.waitTimeMetrics.internal_days, 'attesa interna sommata dalla visita');
+  assertEquals_(3, state.waitTimeMetrics.client.total_days, 'attesa cliente sommata dalla visita');
+  assertEquals_(1, state.waitTimeMetrics.client.occurrences, 'una sola occorrenza di attesa cliente');
+  assertEquals_(3, state.waitTimeMetrics.client.average_days, 'media = totale su una sola occorrenza');
+  assertEquals_(5, state.waitTimeMetrics.authority.total_days, 'attesa enti sommata dalla visita');
+  assertEquals_(1, state.waitTimeMetrics.internal.total_days, 'attesa interna sommata dalla visita');
   assertEquals_(9, state.waitTimeMetrics.total_days, 'totale = somma dei tre tipi');
 }
 
@@ -2082,7 +2088,8 @@ function testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked() {
 
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
-  assertTrue_(state.waitTimeMetrics.authority_days >= 5, 'l\'attesa in corso (5 giorni, mai ancora chiusa in visite) deve comunque contare');
+  assertTrue_(state.waitTimeMetrics.authority.total_days >= 5, 'l\'attesa in corso (5 giorni, mai ancora chiusa in visite) deve comunque contare');
+  assertEquals_(1, state.waitTimeMetrics.authority.occurrences, 'l\'attesa in corso conta come una occorrenza');
 }
 
 // Un job in una colonna NON di attesa (es. wip) non deve contribuire
@@ -2456,6 +2463,67 @@ function testSystemStateSeparatesFlowFromTimeSamples() {
   assertEquals_(1, state.flowMetrics.completed_initiatives, 'uscite conteggiate anche senza tempo valido');
   assertEquals_(0, state.timeMetrics.completed_samples, 'campioni tempo esclusi se mancanti');
   assertEquals_(null, state.capacityMetrics.effective_per_day, 'capacita non stimabile senza tempi');
+}
+
+// Chiesto da Marco (2026-08-20, punto 5): il lavoro presente anche in
+// punti, non solo in conteggio card.
+function testCurrentWorkloadIncludesPointsAlongsideCounts() {
+  var columnMap = {};
+  SIGMAFLOW.DEFAULT_COLUMNS.forEach(function(column) { columnMap[column.id] = column; });
+  var jobs = [
+    { job_id: 'J1', status: 'backlog', size_class: 'M' },
+    { job_id: 'J2', status: 'wait_client', size_class: 'S' }
+  ];
+
+  var workload = currentWorkload_(jobs, columnMap);
+
+  assertEquals_(1, workload.ready, 'un job pronto');
+  assertEquals_(8, workload.ready_points, 'punti del job pronto (taglia M)');
+  assertEquals_(1, workload.waiting_client, 'un job in attesa cliente');
+  assertEquals_(5, workload.waiting_client_points, 'punti del job in attesa cliente (taglia S)');
+  assertEquals_(1, workload.blocked, 'in attesa cliente conta anche come bloccato');
+  assertEquals_(5, workload.blocked_points, 'punti bloccati coerenti');
+}
+
+// Chiesto da Marco (2026-08-20, punto 3): fattore di conversione per
+// esprimere i tassi di teoria delle code anche in punti stimati.
+function testBuildSystemStateComputesAvgPointsPerInitiative() {
+  var now = new Date();
+  var arrival = nowIso_();
+  var jobs = [
+    { job_id: 'J1', status: 'backlog', arrival_ts: arrival, size_class: 'M', visit_number: 1 },
+    { job_id: 'J2', status: 'backlog', arrival_ts: arrival, size_class: 'L', visit_number: 1 }
+  ];
+  var visite = [
+    { job_id: 'J1', numero_visita: 1, apertura_ts: arrival },
+    { job_id: 'J2', numero_visita: 1, apertura_ts: arrival }
+  ];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(10.5, state.flowMetrics.avg_points_per_initiative, 'media (8+13)/2 = 10,5 (taglie M+L)');
+}
+
+// Chiesto da Marco (2026-08-20, punto 4): totale/occorrenze/media/min/max
+// per il pannello "Dove si blocca il lavoro", non solo il totale.
+function testWaitStatsComputesTotalOccurrencesAverageMinMax() {
+  var stats = waitStats_([2, 4, 9]);
+
+  assertEquals_(15, stats.total_days, 'totale');
+  assertEquals_(3, stats.occurrences, 'tre occorrenze');
+  assertEquals_(5, stats.average_days, 'media 15/3 = 5');
+  assertEquals_(2, stats.min_days, 'minimo');
+  assertEquals_(9, stats.max_days, 'massimo');
+}
+
+function testWaitStatsEmptySamplesReturnsNullAverages() {
+  var stats = waitStats_([]);
+
+  assertEquals_(0, stats.total_days, 'totale zero senza campioni');
+  assertEquals_(0, stats.occurrences, 'zero occorrenze');
+  assertEquals_(null, stats.average_days, 'media non stimabile senza campioni');
+  assertEquals_(null, stats.min_days, 'minimo non stimabile senza campioni');
+  assertEquals_(null, stats.max_days, 'massimo non stimabile senza campioni');
 }
 
 function testSystemStateWorkload() {
