@@ -1,6 +1,58 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-20
 
+## M2 — "Cronologia lenta" diagnosticata e corretta: causa reale trovata (2026-08-20)
+
+Seguito diretto della sezione precedente: Marco ha confermato che il
+rallentamento è **all'apertura della tab Cronologia**, 7-10 secondi.
+
+**Causa reale trovata**: `withEnvironment_` (Utils.gs) prende un lock
+**globale di script** (`LockService.getScriptLock()`) per **ogni**
+chiamata `api()`, anche di sola lettura come `getActivityLog` — non
+solo per le scritture. Il fix del ritardo di 1-2 minuti sulla board
+(sezione precedente, stessa sessione) aveva introdotto un
+`loadBoard(true)` dopo ogni salvataggio in Cronologia: un giro in più
+di lock, e per di più il più pesante (`getBoard()` rilegge `jobs` +
+`visite` per intero), proprio nel percorso più battuto durante un
+collaudo — capace di mettere in coda dietro di sé anche le letture più
+leggere come `getActivityLog`, spiegando perché il sintomo è comparso
+proprio nella stessa sessione in cui quel fix è stato introdotto.
+
+**Corretto** (Kanban.gs): `addActivityEvent`/`updateActivityEvent`/
+`deleteActivityEvent` restituiscono ora il job già aggiornato (status +
+campi di rientro ricalcolati, nuovo helper `attachOpenVisitSummary_`) —
+stesso contratto di risposta già usato da `moveJob` (M0-A2). Il client
+(`applyActivityJobUpdate_` in `client.html`, sostituisce
+`refreshBoardAfterActivityChange_`) aggiorna la card in stato locale
+con il job ricevuto nella stessa risposta, **senza una seconda chiamata
+al server** — niente più giro di lock aggiuntivo, la card si sposta
+comunque subito sulla board (stesso risultato del fix precedente, senza
+il suo costo).
+
+**Test aggiunti** (`Tests.gs`), 3 nuovi:
+`testAddActivityEventReturnsUpdatedJobInResponse`,
+`testUpdateActivityEventReturnsUpdatedJobInResponse`,
+`testDeleteActivityEventReturnsUpdatedJobInResponse` — verificano che
+la risposta includa il job aggiornato (status + `visit_number`).
+**152/152 test passati nell'harness Node** (149 preesistenti + 3
+nuovi, nessuna regressione).
+
+**Verificato nel Browser pane** (stesso server locale di riproduzione,
+network instrumentato per contare le chiamate `/api`): la sequenza
+reale via form Cronologia genera ora **2 chiamate `api()` invece di 3**
+(`addActivityEvent` + `getActivityLog`, non più anche `getBoard`) — la
+card si sposta comunque sulla board reale (contatori di colonna
+corretti), nessun errore in console.
+
+**Push su TEST verificato**: 16/16 file identici.
+
+**Commit**: `1629133` (dopo `475f4b4`/`5298645`).
+
+**Non ancora confermato da Marco**: se il rallentamento reale (7-10s su
+GAS vero, non riproducibile nell'harness Node senza latenza di rete) è
+sceso in modo percepibile dopo questo fix — richiede un nuovo test su
+TEST da parte sua, non verificabile da questa sessione.
+
 ## M2 — bug trovato da Marco in collaudo, corretto: fix del 19/08 incompleto (2026-08-20)
 
 Marco ha segnalato in chat che il fix di M2 (19/08) non era completo,
