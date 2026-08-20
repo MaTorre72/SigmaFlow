@@ -440,8 +440,13 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
 // (BUGFIX_derivazione_gate_dal_log.md). Sovrascrive qualunque riga
 // 'visite' preesistente: i bootstrap minimi creati da L2/L3 per i job
 // toccati prima di questa migrazione sono provvisori, questa e' la
-// ricostruzione autorevole. Solo TEST, mai PROD senza gate umano
-// esplicito separato.
+// ricostruzione autorevole. Via web app/editor "normale" solo TEST — su
+// PROD reale solo tramite migrateVisiteFromHistorySuProd() sotto,
+// eseguita da Marco stesso, mai in automatico (2026-08-20: collaudo di
+// Marco su una copia di PROD ha trovato lo stesso gap su dati reali —
+// 'visite' non rifletteva 7 mesi di rientri veri di un caso, corretto
+// li' da migrateVisiteFromHistoryOnTest(); gate confermato per
+// replicarlo su PROD vero).
 
 // Azione Web App: stesso pattern di migrateToActivityLog.
 function migrateVisiteFromHistory(params) {
@@ -458,6 +463,34 @@ function migrateVisiteFromHistoryOnTest() {
   return withTestSpreadsheet_(function(ss) {
     return migrateVisiteFromHistory_(ss);
   });
+}
+
+// Stesso pattern di sicurezza di allineaSchemaSuProd (Schema.gs): apre
+// SIGMAFLOW.DEFAULT_SPREADSHEET_ID direttamente per id, verifica il nome
+// prima di scrivere, si ferma da sola se non corrisponde. A differenza
+// di setupSigmaFlow(), migrateVisiteFromHistory_(ss) accetta lo
+// spreadsheet esplicitamente — non serve toccare la Script Property
+// condivisa SIGMAFLOW_SPREADSHEET_ID, un rischio in meno rispetto ad
+// allineaSchemaSuProd. DISTRUTTIVA su 'visite' (la svuota e la riscrive
+// per intero, rileggendo activity_log_json — mai jobs_archivio/
+// jobs_cestino, fuori scope di questa funzione) — da eseguire solo su
+// richiesta esplicita di Marco, direttamente da lui dall'editor Apps
+// Script (menu Esegui), mai da codice o gate automatico. Nome senza
+// underscore finale per restare visibile nel menu Esegui, come
+// allineaSchemaSuProd.
+function migrateVisiteFromHistorySuProd() {
+  var ss = SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
+  if (ss.getName() !== 'SigmaFlow Database') {
+    throw new Error('Nome foglio inatteso ("' + ss.getName() + '"), controllo di sicurezza fallito. Nessuna modifica eseguita.');
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return migrateVisiteFromHistory_(ss);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function migrateVisiteFromHistory_(ss) {
