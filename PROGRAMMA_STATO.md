@@ -1,5 +1,87 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-19
+Aggiornato: 2026-08-20
+
+## M2 — bug trovato da Marco in collaudo, corretto: fix del 19/08 incompleto (2026-08-20)
+
+Marco ha segnalato in chat che il fix di M2 (19/08) non era completo,
+con un caso reale riprodotto a mano: card in "ATTESA ENTI", una
+correzione manuale in Cronologia la riporta a "TO DO" (rientro
+corretto), poi un secondo evento manuale "TO DO → WIP" — la card
+restava ferma su TO DO invece di seguire anche il secondo spostamento.
+Marco ha segnalato anche un ritardo di 1-2 minuti nell'aggiornamento
+della board dopo una correzione, e che il render della Cronologia resta
+percepito come lento (quest'ultimo **non ancora indagato**, vedi nota
+in fondo).
+
+**Causa reale**: il fix del 19/08 aggiornava `job.status` **solo** per
+il pattern di rientro (provenienza stand_by/done, destinazione
+backlog/prep, `applyManualReentryIfNeeded_`) — un evento 'move' manuale
+che non fosse un rientro (es. TO DO → WIP, provenienza non stand_by/
+done) non toccava mai `job.status`, lasciando la card ferma
+sull'ultimo rientro anche se l'utente aveva registrato esplicitamente
+uno spostamento successivo.
+
+**Corretto** (Kanban.gs): `applyManualReentryIfNeeded_` rinominata
+`applyManualMoveEffects_` — ora aggiorna sempre `job.status`/
+`status_since_ts` per **qualunque** evento 'move' manuale
+(`addActivityEvent`/`updateActivityEvent`), non solo i rientri. Lo
+split di visita (chiusura + nuova apertura) resta condizionato al vero
+pattern di rientro, invariato. `alignOpenVisitFields_` ora chiamata
+sempre dopo (mai più condizionata da un `if`), dato che
+`ensureOpenVisit_` trova comunque sempre la visita giusta (quella senza
+`rientro_ts`, che dopo uno split è sempre la nuova, mai quella appena
+chiusa — il timore iniziale che giustificava la condizione era
+infondato). `deleteActivityEvent` continua **deliberatamente** a non
+passare `candidate` (comportamento invariato, già documentato nel
+codice): la riallineatura dopo una cancellazione non correlata non deve
+né spostare la card né duplicare una visita.
+
+**Corretto anche il ritardo di 1-2 minuti**: dopo una correzione
+manuale che ora può davvero spostare la card, la board aspettava il
+prossimo giro di polling (fino a 45s, `bindVisibilityPolling_`) per
+accorgersene. `submitActivityPayload_`/`confirmActivityDelete_`
+(`client.html`) ora richiamano subito `loadBoard(true)` dopo un
+salvataggio riuscito in Cronologia — `loadBoard` modificata per
+restituire la propria Promise, cosi' si puo' anche aggiornare
+`state.activeJob` con il job appena rifresh, per la tab Informazioni
+nella stessa sessione del modale.
+
+**Test aggiunti** (`Tests.gs`), 2 nuovi:
+`testAddActivityEventPlainManualMoveUpdatesStatus` (move manuale non di
+rientro sposta comunque la card),
+`testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus`
+(riproduce esattamente lo scenario di Marco: rientro + move successivo
+— la card finisce nella colonna dell'ultimo evento, un solo split di
+visita, non due). **149/149 test passati nell'harness Node** (147
+preesistenti + 2 nuovi, nessuna regressione).
+
+**Verificato nel Browser pane** (server locale di riproduzione,
+`/tmp/sf-scratch/repro-server.js`): sequenza reale via il form
+Cronologia (non solo chiamate dirette all'API) — card creata, spostata
+in ATTESA ENTI, poi un evento manuale verso TO DO inserito dal vero
+form UI. `state.board`/DOM aggiornati entro <1s dal salvataggio (non ai
+prossimi 45s di polling), card visibile in TO DO sulla board reale,
+nessun errore in console.
+
+**Push su TEST — inizialmente bloccato da token OAuth clasp scaduto**
+(`invalid_grant`/`invalid_rapt`, stesso tipo di blocco già capitato in
+altre sessioni), risolto con `clasp login` su richiesta esplicita di
+Marco in chat. Verificato dopo: 16/16 file identici.
+
+**Nota aperta, non indagata in questa sessione**: "il render della
+cronologia è ancora molto lento" — segnalazione di Marco, senza numeri
+o passi di riproduzione specifici. Una causa simile era già stata
+trovata e risolta in una sessione precedente (M0-A2, doppio round-trip
+tra anteprima Informazioni e tab Cronologia) — non è chiaro se questa è
+una recidiva, una causa diversa, o un effetto collaterale dei
+salvataggi ora più pesanti (`applyManualMoveEffects_` legge l'intero
+foglio `visite` per l'idempotenza quando l'evento è un vero rientro).
+**Da chiedere a Marco**: quanti secondi, e se il rallentamento è
+all'apertura della tab Cronologia o al salvataggio di un evento —
+prima di intervenire alla cieca su un problema già indagato una volta.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `475f4b4`.
 
 ## M4-M9 (dashboard) — DONE, programma Fase M completo salvo merge (2026-08-19)
 
