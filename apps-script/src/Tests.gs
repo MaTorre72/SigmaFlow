@@ -328,6 +328,8 @@ function runAllTests() {
     testAddActivityEventManualReentryUpdatesStatusAndOpensVisit,
     testAddActivityEventManualReentryDirectToWipBlocked,
     testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit,
+    testAddActivityEventPlainManualMoveUpdatesStatus,
+    testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus,
     testAddActivityEventColonnaNonTrovata,
     testAddActivityEventReasonObbligatoria,
     testAddActivityEventSequenceWarningsSenzaForce,
@@ -2560,6 +2562,49 @@ function testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit() {
 
     assertTrue_(updated.data.ok === true, 'la modifica della nota dovrebbe riuscire');
     assertEquals_(2, readVisiteForJob_(ss, created.job_id).length, 'nessuna visita duplicata risalvando lo stesso rientro');
+  });
+}
+
+// M2, fix del 2026-08-20 (segnalato da Marco in collaudo): un evento
+// 'move' manuale che NON rappresenta un rientro (qui: backlog -> wip,
+// provenienza non stand_by/done) deve comunque spostare davvero la card
+// - il fix iniziale del 19/08 aggiornava job.status solo per il pattern
+// di rientro, lasciando fermo qualunque altro move manuale.
+function testAddActivityEventPlainManualMoveUpdatesStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Move manuale semplice', size_class: 'M' }).data;
+
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip' });
+
+    assertTrue_(result.data.ok === true, 'il move manuale semplice dovrebbe riuscire');
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'la card deve spostarsi davvero, non solo il diario');
+  });
+}
+
+// Riproduce esattamente lo scenario del collaudo di Marco (2026-08-20):
+// un rientro manuale (wait_client -> backlog) seguito da un secondo move
+// manuale "in avanti" (backlog -> wip) - la card deve finire in WIP, non
+// restare ferma su backlog dopo il solo rientro.
+function testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro poi move in avanti', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var reentry = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'backlog' });
+    assertTrue_(reentry.data.ok === true, 'il rientro manuale dovrebbe riuscire');
+
+    var forward = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip' });
+    assertTrue_(forward.data.ok === true, 'il move successivo dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'la card deve seguire l\'ultimo move registrato, non restare ferma sul rientro');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'il rientro apre comunque la visita 2 (unico split), il move successivo non ne apre una terza');
   });
 }
 

@@ -691,51 +691,61 @@ function applyStructuralAlignment_(job, warnings, candidate) {
     }
   });
 
-  // M2 (DESIGN_dashboard.md, §3, opzione 2): un rientro vero applicato
-  // gia' gestisce da solo status/visita aperta - alignOpenVisitFields_
-  // andrebbe a toccare la visita SBAGLIATA (quella appena chiusa) se
-  // chiamato anche in questo caso.
-  if (!applyManualReentryIfNeeded_(job, candidate)) {
-    alignOpenVisitFields_(job, warnings);
-  }
+  // M2 (DESIGN_dashboard.md, §3, opzione 2). applyManualMoveEffects_ sposta
+  // davvero la card per QUALUNQUE evento 'move' manuale (non solo i
+  // rientri, corretto il 2026-08-20 dopo un collaudo di Marco: il fix
+  // iniziale aggiornava job.status solo per il pattern di rientro
+  // stand_by/done -> backlog/prep, lasciando ferma la card su un
+  // successivo move manuale "in avanti", es. TO DO -> WIP). Se ha aperto
+  // una nuova visita (rientro vero), quella e' ormai la visita aperta:
+  // alignOpenVisitFields_ va comunque chiamata dopo (non prima), cosi'
+  // ensureOpenVisit_ trova sempre la visita giusta (quella senza
+  // rientro_ts, che dopo uno split e' sempre la nuova, mai quella appena
+  // chiusa) e le applica i campi (incarico_ts/prep_ts) pertinenti a
+  // QUESTO stesso candidato.
+  applyManualMoveEffects_(job, candidate);
+  alignOpenVisitFields_(job, warnings);
 }
 
-// M2 (DESIGN_dashboard.md, §3, opzione 2): quando una correzione manuale
-// in Cronologia (addActivityEvent/updateActivityEvent/deleteActivityEvent
-// tramite l'ultimo move rimasto) rappresenta un vero rientro - stessa
-// regola di moveJob (Kanban.gs): provenienza stand_by/done, destinazione
-// backlog/prep - ricalcola job.status e apre/chiude la visita come farebbe
-// il drag-and-drop reale. Applicato "live" sulla visita attualmente
-// aperta, non alla posizione storica dell'evento corretto - stessa
-// convenzione gia' in uso per gli altri campi strutturali, vedi il
-// commento su alignOpenVisitFields_. Il divieto di rientro diretto in WIP
-// e' gia' garantito a monte da validateSequence_ (RIENTRO_DIRETTO_WIP_NON_CONSENTITO):
-// qui si assume che il candidato sia gia' stato validato.
-function applyManualReentryIfNeeded_(job, candidate) {
-  if (!candidate || candidate.type !== 'move' || !candidate.from) {
-    return false;
+// M2 (DESIGN_dashboard.md, §3, opzione 2): una correzione manuale in
+// Cronologia (addActivityEvent/updateActivityEvent) che rappresenta uno
+// spostamento deve spostare davvero la card - non solo registrarlo nel
+// diario. Applicato "live" (sullo stato corrente del job), non alla
+// posizione storica dell'evento corretto - stessa convenzione gia' in
+// uso per gli altri campi strutturali, vedi il commento su
+// alignOpenVisitFields_. Se lo spostamento rappresenta anche un vero
+// rientro (stessa regola di moveJob: provenienza stand_by/done,
+// destinazione backlog/prep) apre/chiude la visita come farebbe il
+// drag-and-drop reale - il divieto di rientro diretto in WIP e' gia'
+// garantito a monte da validateSequence_
+// (RIENTRO_DIRETTO_WIP_NON_CONSENTITO): qui si assume che il candidato
+// sia gia' stato validato.
+function applyManualMoveEffects_(job, candidate) {
+  if (!candidate || candidate.type !== 'move') {
+    return;
   }
 
   var columns = readColumns_();
-  var sourceColumn = findColumn_(columns, candidate.from);
   var targetColumn = findColumn_(columns, candidate.to);
-  if (!sourceColumn || !targetColumn) {
-    return false;
-  }
-
-  var sourceClosesTowardActive = sourceColumn.role === 'stand_by' || sourceColumn.role === 'done';
-  var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
-  if (!closesVisit) {
-    return false;
-  }
-
-  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
-  if (!visiteSheet) {
-    return false;
+  if (!targetColumn) {
+    return;
   }
 
   job.status = candidate.to;
   job.status_since_ts = candidate.ts;
+
+  var sourceColumn = candidate.from ? findColumn_(columns, candidate.from) : null;
+  var sourceClosesTowardActive = Boolean(sourceColumn) && (sourceColumn.role === 'stand_by' || sourceColumn.role === 'done');
+  var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
+  if (!closesVisit) {
+    return;
+  }
+
+  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (!visiteSheet) {
+    return;
+  }
+
   // N2 (DESIGN_archiviazione.md, §8c): stessa regola di moveJob - un
   // rientro reale su un caso gia' marcato "Chiuso" lo rende di nuovo
   // attivo.
@@ -746,10 +756,9 @@ function applyManualReentryIfNeeded_(job, candidate) {
   // Idempotenza: se questo stesso rientro (stesso job, stessa data,
   // stessa provenienza) e' gia' stato registrato in precedenza - es. un
   // secondo salvataggio dello stesso evento via updateActivityEvent senza
-  // cambiare data/colonne - non duplicare la visita. job.status resta
-  // comunque riallineato sopra, a costo zero anche se gia' corretto.
+  // cambiare data/colonne - non duplicare la visita.
   if (reentryAlreadyApplied_(visiteSheet, job.job_id, candidate.ts, sourceColumn.id)) {
-    return true;
+    return;
   }
 
   var opened = ensureOpenVisit_(visiteSheet, job, candidate.ts);
@@ -763,8 +772,8 @@ function applyManualReentryIfNeeded_(job, candidate) {
     job_id: job.job_id,
     numero_visita: Number(activeVisit.numero_visita || 1) + 1,
     apertura_ts: candidate.ts,
-    incarico_ts: targetColumn.role === 'backlog' ? candidate.ts : '',
-    prep_ts: targetColumn.role === 'prep' ? candidate.ts : '',
+    incarico_ts: '',
+    prep_ts: '',
     start_ts: '',
     consegna_ts: '',
     rientro_ts: '',
@@ -774,11 +783,9 @@ function applyManualReentryIfNeeded_(job, candidate) {
     t_interno_d: 0,
     rework_cause: sourceColumn.id
   });
-
-  return true;
 }
 
-// Supporta l'idempotenza di applyManualReentryIfNeeded_: true se esiste
+// Supporta l'idempotenza di applyManualMoveEffects_: true se esiste
 // gia' una visita di questo job chiusa esattamente con questa data e
 // provenienza di rientro.
 function reentryAlreadyApplied_(visiteSheet, jobId, rientroTs, rientroDa) {
@@ -931,10 +938,11 @@ function deleteActivityEvent(params) {
   // (a differenza di addActivityEvent/updateActivityEvent) - lastMove non
   // e' un evento appena inserito dall'utente, e' un evento gia' esistente
   // che la cancellazione ha reso "l'ultimo rimasto": applicargli anche
-  // applyManualReentryIfNeeded_ duplicherebbe la visita ad ogni
-  // cancellazione di un evento successivo non correlato, invece di
-  // limitarsi a riallineare le date. Il rientro vero resta gestito solo
-  // al momento in cui l'evento che lo rappresenta viene inserito/modificato.
+  // applyManualMoveEffects_ risposterebbe la card (e duplicherebbe la
+  // visita, se un rientro) ad ogni cancellazione di un evento successivo
+  // non correlato, invece di limitarsi a riallineare le date. Lo
+  // spostamento vero resta gestito solo al momento in cui l'evento che lo
+  // rappresenta viene inserito/modificato.
   var moves = recalculated.filter(function(event) { return event.type === 'move'; });
   var lastMove = moves.length ? moves[moves.length - 1] : null;
   if (lastMove) {
