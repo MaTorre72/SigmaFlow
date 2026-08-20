@@ -27,31 +27,56 @@
 <summary>Vista dettagliata</summary>
 <section id="metrics-grid" class="metrics-grid dashboard-grid" aria-live="polite">
   <article class="panel wide status-panel">
-    <h2>Stato generale del sistema</h2>
+    <h2>Stato del sistema</h2>
     <div class="status-summary">
       <div id="general-status" class="state-badge">-</div>
       <strong id="general-load">Carico effettivo: -</strong>
     </div>
     <p id="general-message" class="panel-message"></p>
-  </article>
 
-  <article class="panel reliability-panel">
-    <h2>Affidabilita' della lettura</h2>
-    <div id="data-quality-status" class="quality-badge">-</div>
+    <div class="status-summary">
+      <div id="data-quality-status" class="quality-badge">-</div>
+    </div>
     <p id="data-quality-message" class="panel-message"></p>
     <p id="data-quality-sample" class="secondary-text"></p>
+
+    <h3>Margine di stabilita' <span class="panel-chapter">Cap. 15</span></h3>
+    <dl id="stability-metrics"></dl>
+    <p class="panel-note">Quanto siamo lontani dal punto in cui il carico supera la capacita' disponibile.</p>
   </article>
 
-  <article class="panel">
-    <h2>Flusso del lavoro</h2>
-    <dl id="flow-metrics"></dl>
-    <p class="panel-note">Nuove iniziative e passaggi totali sono misure diverse: i rientri aumentano il carico reale.</p>
+  <article class="panel wide">
+    <h2>Flusso e carico</h2>
+    <div class="table-scroll"><table class="monthly-load-table">
+      <thead><tr><th></th><th>Card</th><th>Punti</th><th>Al giorno</th></tr></thead>
+      <tbody>
+        <tr><th>Aperte (ora)</th><td id="flow-open-cards">-</td><td id="flow-open-points">-</td><td>-</td></tr>
+        <tr><th>Aggiunte (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td></tr>
+        <tr><th>Completate (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td></tr>
+      </tbody>
+    </table></div>
+    <dl id="flow-extra-metrics"></dl>
+    <p class="panel-note">Nuove iniziative e passaggi totali sono misure diverse: i rientri aumentano il carico reale. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
   </article>
 
-  <article class="panel">
-    <h2>Rientri e rilavorazioni</h2>
+  <article class="panel wide">
+    <h2>Rientri e rework <span class="panel-chapter">Cap. 6, 11, 13</span></h2>
     <dl id="system-rework-metrics"></dl>
     <p class="panel-note">I passaggi totali al giorno rappresentano il lavoro reale richiesto al gruppo.</p>
+
+    <h3>Dove si blocca il lavoro</h3>
+    <dl id="wait-time-metrics"></dl>
+
+    <h3>Esposizione futura a rientri</h3>
+    <dl id="latent-backlog-metrics"></dl>
+
+    <h3>Profilo di rientro</h3>
+    <dl id="delay-profile-metrics"></dl>
+    <div class="table-scroll"><table class="monthly-load-table">
+      <thead><tr id="delay-profile-header"></tr></thead>
+      <tbody><tr id="delay-profile-body"></tr></tbody>
+    </table></div>
+    <p class="panel-note">Quanto tempo passa in media tra un rientro e l'altro, e con che probabilita' (tempo di attesa reale prima del rientro).</p>
   </article>
 
   <article class="panel">
@@ -61,46 +86,40 @@
   </article>
 
   <article class="panel">
-    <h2>Lavoro presente nel sistema</h2>
+    <h2>Lavoro presente e capacita'</h2>
     <dl id="workload-metrics"></dl>
-  </article>
-
-  <article class="panel">
-    <h2>Capacita' disponibile</h2>
     <dl id="capacity-metrics"></dl>
     <p class="panel-note">La capacita' va confrontata con nuovi lavori e rientri, non solo con i nuovi ingressi.</p>
   </article>
 
-  <article class="panel">
-    <h2>Margine di stabilita' <span class="panel-chapter">Cap. 15</span></h2>
-    <dl id="stability-metrics"></dl>
-    <p class="panel-note">Quanto siamo lontani dal punto in cui il carico supera la capacita' disponibile.</p>
-  </article>
-
-  <article class="panel">
-    <h2>Dove si blocca il lavoro <span class="panel-chapter">Cap. 11</span></h2>
-    <dl id="wait-time-metrics"></dl>
-    <p class="panel-note">Giorni totali di attesa nel periodo osservato, per tipo di blocco.</p>
-  </article>
-
-  <article class="panel">
-    <h2>Esposizione futura a rientri <span class="panel-chapter">Cap. 11</span></h2>
-    <dl id="latent-backlog-metrics"></dl>
-    <p class="panel-note">Consegne recenti non ancora chiuse definitivamente: potrebbero ancora rientrare.</p>
+  <article class="panel wide">
+    <h2>Distribuzione</h2>
+    <div class="distribution-tabs" role="tablist">
+      <button type="button" class="distribution-tab active" data-target="points-by-size" role="tab" aria-selected="true">Per taglia</button>
+      <button type="button" class="distribution-tab" data-target="points-by-assignee" role="tab" aria-selected="false">Per assegnatario</button>
+      <button type="button" class="distribution-tab" data-target="points-by-column" role="tab" aria-selected="false">Per colonna</button>
+    </div>
+    <dl id="points-by-size" class="distribution-panel"></dl>
+    <dl id="points-by-assignee" class="distribution-panel" hidden></dl>
+    <dl id="points-by-column" class="distribution-panel" hidden></dl>
   </article>
 
   <article class="panel wide">
-    <h2>Profilo di rientro <span class="panel-chapter">Cap. 13</span></h2>
-    <dl id="delay-profile-metrics"></dl>
+    <h2>Carico mensile</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr id="delay-profile-header"></tr></thead>
-      <tbody><tr id="delay-profile-body"></tr></tbody>
+      <thead><tr><th>Mese</th><th>Card entrate</th><th>Card completate</th><th>Punti entrati</th><th>Punti completati</th><th>Saldo punti</th><th>Punti aperti</th></tr></thead>
+      <tbody id="monthly-load-body"></tbody>
     </table></div>
-    <p class="panel-note">Quanto tempo passa in media tra un rientro e l'altro, e con che probabilita' (tempo di attesa reale prima del rientro).</p>
   </article>
 
-  <article class="panel wide">
-    <h2>Quadro avanzato (teoria delle code) <span class="panel-chapter">Cap. 3-9</span></h2>
+  <article class="panel wide scenarios-panel">
+    <h2>Scenari futuri - predisposizione</h2>
+    <div id="scenario-list" class="scenario-list"></div>
+    <p id="scenario-message" class="panel-message"></p>
+  </article>
+
+  <details class="panel wide advanced-details">
+    <summary>Quadro avanzato (teoria delle code) <span class="panel-chapter">Cap. 3-9</span></summary>
     <p class="panel-note">Letture di dettaglio gia' calcolate sugli stessi dati, non necessarie per la gestione corrente. I pannelli sopra (margine di stabilita', dove si blocca il lavoro, esposizione futura, profilo di rientro) coprono gia' i Cap. 11-15 — qui il resto della dispensa (Cap. 3-9: code, variabilita', rework di base).</p>
     <h3>Grandezze di base</h3>
     <dl id="advanced-base-metrics"></dl>
@@ -110,32 +129,6 @@
     <dl id="advanced-mg1-metrics"></dl>
     <h3>Rework (Cap. 6)</h3>
     <dl id="advanced-rework-metrics"></dl>
-  </article>
-
-  <article class="panel wide scenarios-panel">
-    <h2>Scenari futuri - predisposizione</h2>
-    <div id="scenario-list" class="scenario-list"></div>
-    <p id="scenario-message" class="panel-message"></p>
-  </article>
-
-  <article class="panel">
-    <h2>Distribuzione per taglia</h2>
-    <dl id="points-by-size"></dl>
-  </article>
-  <article class="panel">
-    <h2>Punti per assegnatario</h2>
-    <dl id="points-by-assignee"></dl>
-  </article>
-  <article class="panel wide">
-    <h2>Punti per colonna</h2>
-    <dl id="points-by-column"></dl>
-  </article>
-  <article class="panel wide">
-    <h2>Carico mensile</h2>
-    <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th>Mese</th><th>Card entrate</th><th>Card completate</th><th>Punti entrati</th><th>Punti completati</th><th>Saldo punti</th><th>Punti aperti</th></tr></thead>
-      <tbody id="monthly-load-body"></tbody>
-    </table></div>
-  </article>
+  </details>
 </section>
 </details>

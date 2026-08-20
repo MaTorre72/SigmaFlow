@@ -49,9 +49,36 @@
     bindToolbar();
     bindModal();
     bindCestinoToolbar();
+    bindDistributionTabs_();
     loadBoard();
     bindVisibilityPolling_();
   });
+
+  // Consolidamento dashboard (segnalato da Marco, 2026-08-20): le tre
+  // tabelle "Distribuzione per taglia/assegnatario/colonna" (stesso
+  // pool di punti, tre viste diverse) diventano tab di un solo
+  // pannello invece di tre pannelli separati. Bind una sola volta
+  // all'avvio (i pannelli .distribution-panel restano nel DOM, si
+  // limita a mostrare/nascondere — renderBreakdown, gia' esistente,
+  // continua a scrivere il contenuto di ciascuno ad ogni loadMetrics
+  // senza sapere quale sia visibile).
+  function bindDistributionTabs_() {
+    var tabs = document.querySelectorAll('.distribution-tab');
+    if (!tabs.length) { return; }
+    tabs.forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        tabs.forEach(function(other) {
+          other.classList.remove('active');
+          other.setAttribute('aria-selected', 'false');
+        });
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        document.querySelectorAll('.distribution-panel').forEach(function(panel) {
+          panel.hidden = panel.id !== tab.dataset.target;
+        });
+      });
+    });
+  }
 
   // Il polling a 45s serviva a tenere la board aggiornata anche a tab
   // in background, ma cosi' facendo continua a rileggere jobs+visite e
@@ -1878,11 +1905,27 @@
     document.getElementById('quick-data-quality').className = 'quick-quality quality-' + (quality.level || 'low');
 
     var flow = system.flowMetrics || {};
-    renderDl('flow-metrics', {
-      'Periodo analizzato': metricValue(flow.window_days, ' giorni'),
-      'Nuove iniziative osservate': valueOrDash(flow.new_initiatives_observed),
-      'Nuove iniziative al giorno': metricValue(flow.new_initiatives_per_day),
-      'Lavori completati al giorno': estimableValue(flow.completed_per_day),
+    var points = system.pointsMetrics || {};
+    // Consolidamento dashboard (segnalato da Marco: pannelli/tabelle
+    // duplicate) - conteggio E punti nella stessa tabella invece di due
+    // pannelli separati (card in "Flusso del lavoro", punti solo in
+    // Vista rapida). "Aperte" non e' finestrata (istantanea di adesso,
+    // come open_points/open_cards); "Aggiunte"/"Completate" sono sulla
+    // finestra di osservazione, stessa fonte (pointsStatistics_) per
+    // card E punti, cosi' i due numeri non rischiano di sembrare un
+    // doppione con un numero leggermente diverso (era successo con
+    // n_jobs_observed/new_initiatives_observed, corretto lo stesso
+    // giorno).
+    document.getElementById('flow-open-cards').textContent = valueOrDash(points.open_cards);
+    document.getElementById('flow-open-points').textContent = metricValue(points.open_points, ' pt');
+    document.getElementById('flow-added-cards').textContent = valueOrDash(points.added_cards);
+    document.getElementById('flow-added-points').textContent = metricValue(points.added_points, ' pt');
+    document.getElementById('flow-added-rate').textContent = metricValue(flow.new_initiatives_per_day, '/giorno');
+    document.getElementById('flow-completed-cards').textContent = valueOrDash(points.completed_cards);
+    document.getElementById('flow-completed-points').textContent = metricValue(points.completed_points, ' pt');
+    document.getElementById('flow-completed-rate').textContent = estimableValue(flow.completed_per_day, '/giorno');
+    document.getElementById('flow-window-days').textContent = valueOrDash(flow.window_days);
+    renderDl('flow-extra-metrics', {
       'Capacita disponibile stimata': estimableValue(flow.estimated_capacity_per_day, ' passaggi/giorno'),
       'Differenza tra entrate e uscite': estimableValue(flow.entry_exit_difference)
     });

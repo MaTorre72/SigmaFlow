@@ -313,6 +313,12 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
     completed_points: sumJobPoints_(completed),
     added_points: sumJobPoints_(added),
     open_cards: openJobs.length,
+    // Consolidamento dashboard (segnalato da Marco, 2026-08-20): il
+    // pannello "Flusso e carico" mostra conteggio E punti nella stessa
+    // tabella, invece di leggerli da due fonti separate — servono i
+    // conteggi anche per aggiunte/completate, non solo per aperte.
+    completed_cards: completed.length,
+    added_cards: added.length,
     timeline: months,
     by_size: pointsBreakdown_(openJobs, 'size_class', ['XS', 'S', 'M', 'L', 'XL']),
     by_column: pointsByColumn_(allJobs, columnMap),
