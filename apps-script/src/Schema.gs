@@ -167,6 +167,23 @@ function setupSigmaFlow() {
   return ok_({ spreadsheetId: ss.getId(), spreadsheetUrl: ss.getUrl() });
 }
 
+// Versione di setupSigmaFlow() eseguibile direttamente dall'editor Apps
+// Script, sicura sull'ambiente TEST — stesso motivo/pattern di
+// migrateActivityLogOnTest/migrateVisiteFromHistoryOnTest (ActivityLog.gs):
+// setupSigmaFlow() da sola userebbe lo spreadsheet puntato al momento
+// dalla Script Property condivisa SIGMAFLOW_SPREADSHEET_ID (oggi
+// potenzialmente PROD, o un valore sporco lasciato da un'esecuzione
+// interrotta — stesso rischio gia' documentato piu' volte in questo
+// progetto), mentre questa risolve sempre e solo lo spreadsheet
+// registrato in SIGMAFLOW_TEST_SPREADSHEET_ID (withTestSpreadsheet_,
+// Tests.gs) — utile anche per allineare lo schema (fogli
+// archivio/cestino inclusi) su una copia di PROD puntata come TEST.
+function setupSigmaFlowOnTest() {
+  return withTestSpreadsheet_(function(ss) {
+    return setupSigmaFlow();
+  });
+}
+
 function ensureCurrentSchema_() {
   var properties = PropertiesService.getScriptProperties();
   if (properties.getProperty(SIGMAFLOW.PROP_SCHEMA_VERSION) === SIGMAFLOW.SCHEMA_VERSION) { return; }
