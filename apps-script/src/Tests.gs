@@ -305,6 +305,8 @@ function runAllTests() {
     testBuildSystemStateExposesStabilityMetrics,
     testBuildSystemStateStabilityMetricsNullWhenInsufficientData,
     testBuildSystemStateSumsWaitTimeByType,
+    testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked,
+    testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn,
     testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
     testDelayProfileNullBelowMinimumSamples,
     testDelayProfileComputesAlphaAndKernelFromRealReentries,
@@ -312,6 +314,7 @@ function runAllTests() {
     testBuildSystemStateExposesDelayProfileInSystemState,
     testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus,
     testCalculateMetricsE_S0E_S1NullWhenNoSamples,
+    testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinIt,
     testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
     testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
     testBuildSystemStateTimelineIncludesArchivedJobs,
@@ -328,6 +331,8 @@ function runAllTests() {
     testAddActivityEventReturnsUpdatedJobInResponse,
     testUpdateActivityEventReturnsUpdatedJobInResponse,
     testDeleteActivityEventReturnsUpdatedJobInResponse,
+    testAddActivityEventManualReentryAccumulatesRealWaitTime,
+    testAddActivityEventManualStandByToStandByAccumulatesWaitWithoutClosingVisit,
     testAddActivityEventManualReentryUpdatesStatusAndOpensVisit,
     testAddActivityEventManualReentryDirectToWipBlocked,
     testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit,
@@ -2056,6 +2061,43 @@ function testBuildSystemStateSumsWaitTimeByType() {
   assertEquals_(9, state.waitTimeMetrics.total_days, 'totale = somma dei tre tipi');
 }
 
+// M5, fix del 2026-08-20 (segnalato da Marco su dati PROD reali: 15
+// card ferme in attesa enti, ma "Attesa enti" mostrava 0,65 giorni in
+// totale). accumulateWaitTime_ scrive t_ente_d solo quando una visita
+// ESCE dalla colonna stand_by - una card ancora ferma li' ora non ha
+// ancora accumulato nulla in 'visite'. waitTimeMetrics deve includere
+// anche l'attesa IN CORSO (status_since_ts -> adesso) per i job
+// attualmente in una colonna stand_by, non solo le attese gia' concluse.
+function testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked() {
+  var now = new Date();
+  var enteredWaitAuthority = Utilities.formatDate(new Date(now.getTime() - 5 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{
+    job_id: 'JOB-STUCK-IN-WAIT',
+    status: 'wait_authority',
+    arrival_ts: enteredWaitAuthority,
+    status_since_ts: enteredWaitAuthority,
+    visit_number: 1
+  }];
+  var visite = [{ job_id: 'JOB-STUCK-IN-WAIT', numero_visita: 1, apertura_ts: enteredWaitAuthority, t_cliente_d: 0, t_ente_d: 0, t_interno_d: 0 }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(state.waitTimeMetrics.authority_days >= 5, 'l\'attesa in corso (5 giorni, mai ancora chiusa in visite) deve comunque contare');
+}
+
+// Un job in una colonna NON di attesa (es. wip) non deve contribuire
+// nulla all'attesa in corso, anche se status_since_ts e' valorizzato.
+function testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn() {
+  var now = new Date();
+  var enteredWip = Utilities.formatDate(new Date(now.getTime() - 5 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-IN-WIP', status: 'wip', arrival_ts: enteredWip, status_since_ts: enteredWip, visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-IN-WIP', numero_visita: 1, apertura_ts: enteredWip, t_cliente_d: 0, t_ente_d: 0, t_interno_d: 0 }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(0, state.waitTimeMetrics.total_days, 'un job in wip non contribuisce ad alcuna attesa');
+}
+
 // M6 (DESIGN_dashboard.md, §4.2): B_lat(t) - consegne recenti la cui
 // visita non e' mai rientrata e il cui caso non e' formalmente chiuso
 // contano come esposizione futura; un caso gia' chiuso o gia' rientrato
@@ -2314,6 +2356,25 @@ function testCalculateMetricsE_S0E_S1NullWhenNoSamples() {
   assertEquals_(null, metrics.E_S1, 'E_S1 non stimabile senza campioni');
 }
 
+// Fix del 2026-08-20 (segnalato da Marco: E[S] in "Quadro avanzato"
+// molto piu' basso di "Tempi e variabilita'" sugli stessi dati reali).
+// Una visita aperta PRIMA della finestra di osservazione ma consegnata
+// DENTRO deve contare per E[S]/lambda/mu - la finestra si applica alla
+// consegna (come in buildSystemState_), non all'apertura.
+function testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinIt() {
+  var now = new Date();
+  var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, { observation_window_days: 90 });
+  var openedLongAgo = Utilities.formatDate(new Date(now.getTime() - 150 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var startedLongAgo = openedLongAgo;
+  var deliveredRecently = Utilities.formatDate(new Date(now.getTime() - 5 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-LONG-VISIT', status: 'done', arrival_ts: openedLongAgo, visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-LONG-VISIT', numero_visita: 1, apertura_ts: openedLongAgo, start_ts: startedLongAgo, consegna_ts: deliveredRecently }];
+
+  var metrics = calculateMetrics_(jobs, visite, config, now);
+
+  assertTrue_(Math.abs(metrics.E_S - 145) < 1, 'la visita, aperta 150 giorni fa e consegnata 5 giorni fa, deve contare (~145 giorni di servizio, non esclusa dalla finestra)');
+}
+
 function testGetMetricsUsesVisiteNotJobFields() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -2552,6 +2613,79 @@ function testDeleteActivityEventReturnsUpdatedJobInResponse() {
 
     assertTrue_(Boolean(result.data.job), 'la risposta deve includere il job aggiornato anche dopo una cancellazione');
     assertEquals_(jobId, result.data.job.job_id, 'il job restituito e\' quello giusto');
+  });
+}
+
+// M2, fix del 2026-08-20 (segnalato da Marco su dati PROD reali: "Dove
+// si blocca il lavoro" quasi sempre a zero, pur con molti rientri veri
+// - causa: applyManualMoveEffects_ spostava la card e apriva/chiudeva
+// la visita, ma non chiamava mai accumulateWaitTime_, a differenza del
+// drag-and-drop reale). Un'attesa registrata interamente a mano in
+// Cronologia (entrata in un'attesa + rientro, nessun moveJob reale nel
+// mezzo - lo scenario tipico dei dati reali di Marco) deve comunque
+// accumulare il tempo di attesa reale sulla visita chiusa.
+// La card nasce con testAddJobWithPastArrival_/correctJobTimestamps non
+// basta qui: quelle correggono solo il campo strutturato arrival_ts, MAI
+// l'evento di creazione dentro activity_log_json (che resta a "adesso")
+// - un'attesa "iniziata 5 giorni fa" finirebbe comunque prima
+// dell'evento di creazione nell'ordine cronologico, producendo un falso
+// COLONNA_DOPPIA. Log seedato direttamente (stesso pattern di
+// testMigrateToActivityLogAlignsOpenVisit) per controllare l'intera
+// sequenza temporale.
+function testAddActivityEventManualReentryAccumulatesRealWaitTime() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro manuale accumula attesa', size_class: 'M' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    var creationTs = testTsMinutesAgo_(10000); // ~7 giorni fa
+    job.arrival_ts = creationTs;
+    job.activity_log_json = JSON.stringify([{ id: 'seed-creation', ts: creationTs, type: 'move', source: 'auto', to: 'backlog', from: null, note: '' }]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var enteredWaitTs = testTsMinutesAgo_(7200); // ~5 giorni fa
+    var reentryTs = testTsMinutesAgo_(0);
+
+    addActivityEvent({ job_id: created.job_id, type: 'move', ts: enteredWaitTs, to: 'wait_client' });
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: reentryTs, to: 'todo' });
+
+    assertTrue_(result.data.ok === true, 'il rientro manuale dovrebbe riuscire');
+    var visite = readVisiteForJob_(ss, created.job_id);
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    assertTrue_(Number(closed.t_cliente_d) >= 4.9, 'il rientro manuale deve accumulare il tempo di attesa reale (~5 giorni), non lasciarlo a zero - ottenuto: ' + closed.t_cliente_d);
+  });
+}
+
+// Uscita da un'attesa SENZA rientro vero (verso un'altra colonna
+// stand_by, es. da attesa cliente ad attesa enti): deve comunque
+// accumulare il tempo di attesa sulla visita ancora aperta, esattamente
+// come fa updateVisiteForMove_ per il drag-and-drop reale - non solo
+// quando l'uscita chiude la visita.
+function testAddActivityEventManualStandByToStandByAccumulatesWaitWithoutClosingVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Attesa a attesa accumula senza chiudere', size_class: 'M' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    var creationTs = testTsMinutesAgo_(10000);
+    job.arrival_ts = creationTs;
+    job.activity_log_json = JSON.stringify([{ id: 'seed-creation', ts: creationTs, type: 'move', source: 'auto', to: 'backlog', from: null, note: '' }]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var enteredWaitTs = testTsMinutesAgo_(4320); // ~3 giorni fa
+    var switchTs = testTsMinutesAgo_(0);
+
+    addActivityEvent({ job_id: created.job_id, type: 'move', ts: enteredWaitTs, to: 'wait_client' });
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: switchTs, to: 'wait_authority' });
+
+    assertTrue_(result.data.ok === true, 'il passaggio tra due attese dovrebbe riuscire');
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'nessuna visita aperta/chiusa: il passaggio tra attese non e\' un rientro');
+    assertTrue_(Number(visite[0].t_cliente_d) >= 2.9, 'l\'attesa cliente (~3 giorni) deve essere accumulata anche senza chiudere la visita');
   });
 }
 

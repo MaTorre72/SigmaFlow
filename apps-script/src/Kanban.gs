@@ -696,7 +696,7 @@ function addActivityEvent(params) {
   // allineano sempre in automatico al valore suggerito dall'evento appena
   // registrato, senza chiedere conferma all'utente. I dettagli di questi
   // campi restano interni: l'utente cura solo la cronologia.
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate);
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, log);
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job);
@@ -704,7 +704,7 @@ function addActivityEvent(params) {
   return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
 }
 
-function applyStructuralAlignment_(job, warnings, candidate) {
+function applyStructuralAlignment_(job, warnings, candidate, log) {
   warnings.forEach(function(warning) {
     if (JOB_HEADERS.indexOf(warning.field) !== -1) {
       job[warning.field] = warning.suggestedValue;
@@ -723,7 +723,7 @@ function applyStructuralAlignment_(job, warnings, candidate) {
   // rientro_ts, che dopo uno split e' sempre la nuova, mai quella appena
   // chiusa) e le applica i campi (incarico_ts/prep_ts) pertinenti a
   // QUESTO stesso candidato.
-  applyManualMoveEffects_(job, candidate);
+  applyManualMoveEffects_(job, candidate, log);
   alignOpenVisitFields_(job, warnings);
 }
 
@@ -740,7 +740,21 @@ function applyStructuralAlignment_(job, warnings, candidate) {
 // garantito a monte da validateSequence_
 // (RIENTRO_DIRETTO_WIP_NON_CONSENTITO): qui si assume che il candidato
 // sia gia' stato validato.
-function applyManualMoveEffects_(job, candidate) {
+//
+// Fix del 2026-08-20 (segnalato da Marco su dati PROD reali: "Dove si
+// blocca il lavoro"/"Profilo di rientro" quasi sempre a zero, pur con
+// molti rientri veri nella storia): il fix iniziale spostava la card e
+// apriva/chiudeva la visita, ma non chiamava MAI accumulateWaitTime_
+// (Kanban.gs, la stessa funzione che updateVisiteForMove_ usa per il
+// drag-and-drop reale) - un'uscita da una colonna stand_by registrata a
+// mano (la maggioranza dei dati reali di Marco: quasi tutta la sua
+// Cronologia e' "source":"manual", non generata dal drag-and-drop) non
+// accumulava mai t_cliente_d/t_ente_d/t_interno_d. Ora lo fa per
+// QUALUNQUE uscita da una colonna stand_by (non solo quelle che
+// chiudono la visita - stessa condizione di updateVisiteForMove_),
+// richiede il log completo (4o parametro, gia' disponibile in
+// addActivityEvent/updateActivityEvent dopo il push del candidato).
+function applyManualMoveEffects_(job, candidate, log) {
   if (!candidate || candidate.type !== 'move') {
     return;
   }
@@ -755,14 +769,30 @@ function applyManualMoveEffects_(job, candidate) {
   job.status_since_ts = candidate.ts;
 
   var sourceColumn = candidate.from ? findColumn_(columns, candidate.from) : null;
-  var sourceClosesTowardActive = Boolean(sourceColumn) && (sourceColumn.role === 'stand_by' || sourceColumn.role === 'done');
-  var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
-  if (!closesVisit) {
+  // Ne' accumulo ne' split sono possibili senza una provenienza
+  // stand_by (stesso vincolo di updateVisiteForMove_/moveJob).
+  if (!sourceColumn || sourceColumn.role !== 'stand_by') {
     return;
   }
 
   var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
   if (!visiteSheet) {
+    return;
+  }
+
+  var opened = ensureOpenVisit_(visiteSheet, job, candidate.ts);
+  var activeVisit = opened.visit;
+
+  if (log) {
+    accumulateWaitTime_(activeVisit, sourceColumn, log, candidate.ts);
+  }
+
+  var closesVisit = targetColumn.role === 'backlog' || targetColumn.role === 'prep';
+  if (!closesVisit) {
+    // Uscita da un'attesa senza rientro vero (es. verso un'altra
+    // colonna stand_by): l'unico effetto e' l'accumulo sopra, gia'
+    // scritto - stessa logica di updateVisiteForMove_.
+    writeVisitToRow_(visiteSheet, opened.row, activeVisit);
     return;
   }
 
@@ -776,13 +806,14 @@ function applyManualMoveEffects_(job, candidate) {
   // Idempotenza: se questo stesso rientro (stesso job, stessa data,
   // stessa provenienza) e' gia' stato registrato in precedenza - es. un
   // secondo salvataggio dello stesso evento via updateActivityEvent senza
-  // cambiare data/colonne - non duplicare la visita.
+  // cambiare data/colonne - non duplicare la visita. L'accumulo sopra
+  // resta pero' non idempotente su una modifica ripetuta dello stesso
+  // evento (limite noto, non risolvibile senza un registro per-evento
+  // dei contributi gia' applicati - fuori scope di questo fix).
   if (reentryAlreadyApplied_(visiteSheet, job.job_id, candidate.ts, sourceColumn.id)) {
+    writeVisitToRow_(visiteSheet, opened.row, activeVisit);
     return;
   }
-
-  var opened = ensureOpenVisit_(visiteSheet, job, candidate.ts);
-  var activeVisit = opened.visit;
 
   activeVisit.rientro_ts = candidate.ts;
   activeVisit.rientro_da = sourceColumn.id;
@@ -914,7 +945,7 @@ function updateActivityEvent(params) {
   remaining.push(candidate);
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate);
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, remaining);
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job);

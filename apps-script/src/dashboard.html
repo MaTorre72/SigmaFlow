@@ -48,7 +48,7 @@
   <article class="panel wide">
     <h2>Flusso e carico</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th></th><th>Card</th><th>Punti</th><th>Al giorno</th></tr></thead>
+      <thead><tr><th></th><th>Iniziative</th><th>Punti</th><th>Alla settimana (iniziative)</th></tr></thead>
       <tbody>
         <tr><th>Aperte (ora)</th><td id="flow-open-cards">-</td><td id="flow-open-points">-</td><td>-</td></tr>
         <tr><th>Aggiunte (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td></tr>
@@ -72,10 +72,8 @@
 
     <h3>Profilo di rientro</h3>
     <dl id="delay-profile-metrics"></dl>
-    <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr id="delay-profile-header"></tr></thead>
-      <tbody><tr id="delay-profile-body"></tr></tbody>
-    </table></div>
+    <canvas id="delay-profile-chart" height="200" aria-label="Istogramma dei tempi di attesa prima del rientro"></canvas>
+    <div id="delay-profile-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
     <p class="panel-note">Quanto tempo passa in media tra un rientro e l'altro, e con che probabilita' (tempo di attesa reale prima del rientro).</p>
   </article>
 

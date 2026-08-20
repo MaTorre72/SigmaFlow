@@ -39,11 +39,24 @@ function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
   var jobsById = indexBy_(jobs, 'job_id');
 
-  var observed = visite.filter(function(visit) {
+  // Fix del 2026-08-20 (segnalato da Marco: "Quadro avanzato" mostrava
+  // E[S]=0,32 giorni mentre "Tempi e variabilita'" (systemState, stessa
+  // finestra, stessi dati) mostrava 46,92 giorni per lo stesso concetto).
+  // Causa: 'completed' filtrava sulle sole visite APERTE nella finestra
+  // (observed, su apertura_ts) che avessero anche consegna_ts - le
+  // visite lunghe aperte PRIMA della finestra ma consegnate dentro
+  // restavano sistematicamente escluse, distorcendo E[S] verso il
+  // basso (bias di sopravvivenza). buildSystemState_ non ha questo
+  // problema: filtra 'completed' sulla consegna (consegna_ts >= since),
+  // indipendentemente da quando la visita si e' aperta - allineato qui
+  // alla stessa definizione, incluso l'archivio (N6) per la stessa
+  // ragione di coerenza gia' applicata li'.
+  var allVisite = visite.concat(visiteArchivio || []);
+  var observed = allVisite.filter(function(visit) {
     return visit.apertura_ts && new Date(visit.apertura_ts) >= since;
   });
-  var completed = observed.filter(function(visit) {
-    return visit.consegna_ts && visitServiceTimeDays_(visit) > 0;
+  var completed = allVisite.filter(function(visit) {
+    return visit.consegna_ts && new Date(visit.consegna_ts) >= since && visitServiceTimeDays_(visit) > 0;
   });
 
   var serviceTimes = completed.map(visitServiceTimeDays_);
@@ -177,10 +190,28 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // che una visita esce da una colonna stand_by, mai finora sommato.
   // Stessa finestra ("observed") gia' usata per flowMetrics/reworkMetrics,
   // per restare coerente con le altre metriche calcolate su periodo.
+  //
+  // Fix del 2026-08-20 (segnalato da Marco: "Attesa enti: 0,65 giorni"
+  // con 15 card ferme in attesa enti in quel momento, palesemente
+  // irragionevole): accumulateWaitTime_ scrive t_*_d solo quando una
+  // visita ESCE da una colonna stand_by - una card ancora ferma lì
+  // ORA non ha ancora accumulato nulla nella tabella 'visite', quindi
+  // sumVisitField_ da sola conta solo le attese gia' concluse, mai
+  // quelle in corso. Aggiunta l'attesa in corso per ogni job
+  // attualmente in una colonna stand_by, usando status_since_ts (M0-C,
+  // "da quando la card e' nella colonna attuale") - lo stesso campo
+  // gia' usato dal badge di invecchiamento sulla board (client.html).
+  var ongoingWaitByField = { t_cliente_d: 0, t_ente_d: 0, t_interno_d: 0 };
+  jobs.forEach(function(job) {
+    var column = columnMap[normalizeStatus_(job.status)];
+    var field = column ? SIGMAFLOW.WAIT_ACCUMULATOR_FIELDS[column.id] : null;
+    if (!field || !job.status_since_ts) { return; }
+    ongoingWaitByField[field] += Number(diffDays(job.status_since_ts, now) || 0);
+  });
   var waitTime = {
-    client_days: round_(sumVisitField_(observed, 't_cliente_d')),
-    authority_days: round_(sumVisitField_(observed, 't_ente_d')),
-    internal_days: round_(sumVisitField_(observed, 't_interno_d'))
+    client_days: round_(sumVisitField_(observed, 't_cliente_d') + ongoingWaitByField.t_cliente_d),
+    authority_days: round_(sumVisitField_(observed, 't_ente_d') + ongoingWaitByField.t_ente_d),
+    internal_days: round_(sumVisitField_(observed, 't_interno_d') + ongoingWaitByField.t_interno_d)
   };
   // M6 (DESIGN_dashboard.md, §4.2): B_lat(t) (dispensa FSC §10,
   // "esposizione futura a rientri") - consegne recenti (consegna_ts nella
