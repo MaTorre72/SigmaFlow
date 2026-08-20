@@ -325,6 +325,9 @@ function runAllTests() {
     testMissingRequiredParam,
     testAddActivityEventMoveValido,
     testAddActivityEventTsFuturo,
+    testAddActivityEventReturnsUpdatedJobInResponse,
+    testUpdateActivityEventReturnsUpdatedJobInResponse,
+    testDeleteActivityEventReturnsUpdatedJobInResponse,
     testAddActivityEventManualReentryUpdatesStatusAndOpensVisit,
     testAddActivityEventManualReentryDirectToWipBlocked,
     testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit,
@@ -2491,6 +2494,56 @@ function testAddActivityEventTsFuturo() {
 // backlog (un vero rientro) - deve ricalcolare job.status e aprire la
 // visita mancante, esattamente come farebbe il drag-and-drop reale
 // (moveJob), non solo registrare l'evento nel log.
+// M2, fix del 2026-08-20 (segnalato da Marco: la Cronologia era lenta -
+// causa reale: ogni chiamata api() prende un lock globale di script, e
+// il fix del ritardo sulla board aveva aggiunto un giro in piu' di
+// lock, un loadBoard(true) dopo ogni salvataggio). addActivityEvent/
+// updateActivityEvent/deleteActivityEvent devono restituire il job gia'
+// aggiornato (status + campi di rientro), stesso contratto di risposta
+// di moveJob - cosi' il client non deve piu' rifare un'intera chiamata
+// getBoard() per riflettere la card aggiornata.
+function testAddActivityEventReturnsUpdatedJobInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Risposta con job aggiornato', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'backlog' });
+
+    assertTrue_(Boolean(result.data.job), 'la risposta deve includere il job aggiornato');
+    assertEquals_('backlog', result.data.job.status, 'il job nella risposta riflette gia\' il nuovo status');
+    assertEquals_(2, result.data.job.visit_number, 'il job nella risposta riflette gia\' il numero di visita aggiornato');
+  });
+}
+
+function testUpdateActivityEventReturnsUpdatedJobInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Update risposta con job', size_class: 'M' }).data;
+    var added = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip' });
+
+    var result = updateActivityEvent({ job_id: created.job_id, event_id: added.data.event.id, note: 'nota aggiornata' });
+
+    assertTrue_(Boolean(result.data.job), 'la risposta deve includere il job aggiornato');
+    assertEquals_('wip', result.data.job.status, 'il job nella risposta riflette lo status corrente');
+  });
+}
+
+function testDeleteActivityEventReturnsUpdatedJobInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Delete risposta con job', size_class: 'M' });
+    var e1 = addActivityEvent({ job_id: jobId, type: 'move', ts: testTsMinutesAgo_(60), to: 'wip' });
+    addActivityEvent({ job_id: jobId, type: 'note', ts: testTsMinutesAgo_(30), note: 'nota' });
+
+    var result = deleteActivityEvent({ job_id: jobId, event_id: e1.data.event.id });
+
+    assertTrue_(Boolean(result.data.job), 'la risposta deve includere il job aggiornato anche dopo una cancellazione');
+    assertEquals_(jobId, result.data.job.job_id, 'il job restituito e\' quello giusto');
+  });
+}
+
 function testAddActivityEventManualReentryUpdatesStatusAndOpensVisit() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);

@@ -520,6 +520,26 @@ function applyVisitSummaryFields_(job, visit) {
   job.done_ts = visit ? (visit.consegna_ts || '') : '';
 }
 
+// M2, fix del 2026-08-20 (segnalato da Marco: la Cronologia e' lenta -
+// causa reale trovata nel meccanismo di lock, non nella lettura in se':
+// withEnvironment_ prende un lock GLOBALE di script per ogni singola
+// chiamata api(), anche di sola lettura - il fix del ritardo di 1-2
+// minuti sulla board (stessa sessione) aveva introdotto un loadBoard(true)
+// dopo ogni salvataggio in Cronologia, un giro in piu' di lock proprio
+// nel percorso piu' usato durante un collaudo). addActivityEvent/
+// updateActivityEvent/deleteActivityEvent restituiscono ora il job gia'
+// aggiornato con i campi di rientro ricalcolati (stesso contratto di
+// risposta di moveJob, M0-A2) - il client aggiorna la card in stato
+// locale invece di rifare un'intera chiamata getBoard() (che oltretutto
+// e' molto piu' pesante di un singolo evento: rilegge jobs+visite
+// per intero).
+function attachOpenVisitSummary_(job) {
+  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  var openRow = visiteSheet ? findOpenVisitRow_(visiteSheet, job.job_id) : -1;
+  applyVisitSummaryFields_(job, openRow > 0 ? readVisitFromRow_(visiteSheet, openRow) : null);
+  return job;
+}
+
 // Sez. 4: durata della permanenza appena conclusa nella colonna stand_by
 // che si sta lasciando, sommata all'accumulatore per tipo corrispondente.
 // L'ingresso in quella colonna si trova ripercorrendo il log all'indietro
@@ -681,7 +701,7 @@ function addActivityEvent(params) {
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ ok: true, job_id: jobId, event: candidate });
+  return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
 }
 
 function applyStructuralAlignment_(job, warnings, candidate) {
@@ -899,7 +919,7 @@ function updateActivityEvent(params) {
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ ok: true, job_id: jobId, event: candidate });
+  return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
 }
 
 function deleteActivityEvent(params) {
@@ -952,7 +972,7 @@ function deleteActivityEvent(params) {
   job.activity_log_json = serializeActivityLog_(recalculated);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ job_id: jobId, event_id: eventId });
+  return ok_({ job_id: jobId, event_id: eventId, job: attachOpenVisitSummary_(job) });
 }
 
 // Non piu' esposta via routeAction_/UI: le correzioni utente passano

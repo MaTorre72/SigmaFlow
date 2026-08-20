@@ -1347,7 +1347,7 @@
       state.activityPending = null;
       closeActivityForm_();
       loadActivityLogForModal_();
-      refreshBoardAfterActivityChange_();
+      applyActivityJobUpdate_(data.job);
     }).catch(function(error) {
       var errorEl = document.getElementById('modal-activity-form-error');
       errorEl.hidden = false;
@@ -1391,31 +1391,47 @@
     if (!eventId || !state.activeJob) { return; }
     callApi('deleteActivityEvent', { job_id: state.activeJob.job_id, event_id: eventId }).then(function(data) {
       loadActivityLogForModal_();
-      refreshBoardAfterActivityChange_();
+      applyActivityJobUpdate_(data.job);
     }).catch(showError);
   }
 
   // M2, fix del 2026-08-20 (segnalato da Marco: la board mostrava lo
   // stato aggiornato con 1-2 minuti di ritardo dopo una correzione in
-  // Cronologia): una correzione manuale puo' ora spostare davvero la
-  // card (job.status) e le visite (applyManualMoveEffects_, Kanban.gs) -
-  // senza questo la board restava allo stato vecchio fino al prossimo
-  // giro di polling (fino a 45s, bindVisibilityPolling_). force=true:
-  // non aspetta il polling ne' rispetta il guard su modale aperto (qui
-  // il modale Cronologia E' aperto per definizione, ma stiamo
-  // aggiornando solo lo stato sottostante, non il DOM del modale).
-  function refreshBoardAfterActivityChange_() {
-    var jobId = state.activeJob ? state.activeJob.job_id : null;
-    loadBoard(true).then(function() {
-      if (!jobId) { return; }
-      var refreshed = (state.jobs || []).filter(function(job) { return job.job_id === jobId; })[0];
-      if (refreshed) {
-        // Cosi' se l'utente torna sulla tab Informazioni nella stessa
-        // sessione del modale vede colonna/stato aggiornati, non quelli
-        // letti all'apertura del modale.
-        state.activeJob = refreshed;
-      }
+  // Cronologia, poi "Cronologia lenta" - causa reale del secondo
+  // sintomo: il primo tentativo di questo fix chiamava loadBoard(true)
+  // dopo ogni salvataggio, un giro in piu' di lock GLOBALE di script
+  // (withEnvironment_, preso da OGNI chiamata api() anche di sola
+  // lettura) proprio nel percorso piu' battuto durante un collaudo).
+  // addActivityEvent/updateActivityEvent/deleteActivityEvent
+  // restituiscono ora il job gia' aggiornato (stesso contratto di
+  // risposta di moveJob, M0-A2/M0-B): aggiorna la card in stato locale,
+  // senza un'altra chiamata al server. removeCardEl_ prima di
+  // placeCardInColumn_ perche' - a differenza del drag-and-drop reale -
+  // qui la card puo' essere cambiata di colonna senza che il DOM lo
+  // sappia ancora.
+  function applyActivityJobUpdate_(job) {
+    if (!job) { return; }
+    var fromStatus = removeJobLocally(job.job_id);
+    if (!state.board[job.status]) { state.board[job.status] = []; }
+    state.board[job.status].push(job);
+    var found = false;
+    state.jobs = (state.jobs || []).map(function(item) {
+      if (item.job_id === job.job_id) { found = true; return job; }
+      return item;
     });
+    if (!found) { state.jobs.push(job); }
+
+    removeCardEl_(job.job_id);
+    placeCardInColumn_(job);
+    if (fromStatus) { updateColumnCounters_(fromStatus); }
+    updateColumnCounters_(job.status);
+
+    // Cosi' se l'utente torna sulla tab Informazioni nella stessa
+    // sessione del modale vede colonna/stato aggiornati, non quelli
+    // letti all'apertura del modale.
+    if (state.activeJob && state.activeJob.job_id === job.job_id) {
+      state.activeJob = job;
+    }
   }
 
   function moveJob(jobId, status) {
