@@ -1,6 +1,63 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-20
 
+## Collaudo pre-deploy su copia di PROD — due gap trovati da Marco, non bug di questa sessione (2026-08-20)
+
+Marco ha fatto una copia esatta dello spreadsheet PROD e l'ha puntata
+come database TEST (`SIGMAFLOW_TEST_SPREADSHEET_ID`), per collaudare il
+deploy prima di eseguirlo davvero su PROD. Due gap trovati, **entrambi
+preesistenti a questa sessione**, non causati da M1-M9 né dai fix di
+Cronologia:
+
+1. **La copia non ha i fogli archivio/cestino** — mai eseguito
+   l'allineamento schema lì (atteso, stessa causa di fondo di M1).
+   **Aggiunta** `setupSigmaFlowOnTest()` (Schema.gs): stesso pattern di
+   `migrateActivityLogOnTest`/`migrateVisiteFromHistoryOnTest`
+   (ActivityLog.gs, già esistenti) — risolve sempre e solo lo
+   spreadsheet in `SIGMAFLOW_TEST_SPREADSHEET_ID`, mai la property
+   condivisa `SIGMAFLOW_SPREADSHEET_ID` (stesso rischio già documentato
+   più volte in questo file). Eseguibile dall'editor Apps Script, menu
+   Esegui.
+
+2. **`visite` non riflette l'intera storia di `activity_log_json`** per
+   almeno un caso reale mostrato da Marco (`JOB-20260707-NZFQ`, 12
+   eventi manuali nel log su 7 mesi, almeno 2 rientri reali visibili —
+   `wait_authority→todo` il 26/06, `wait_client→todo` il 22/07 — ma una
+   sola riga in `visite`, con campi che sembrano un ibrido parziale, non
+   3 righe come atteso). **Non è un bug dei fix di stasera** (che
+   toccano solo il percorso *live*, `addActivityEvent`/`moveJob`) — è
+   la materializzazione storica autorevole (Fase L5,
+   `migrateVisiteFromHistory_`, `DESIGN_modello_caso_visita.md` §7) che
+   non risulta mai stata eseguita per intero su questi dati reali, o
+   eseguita prima che gran parte di questa storia fosse accumulata.
+   **Funzione già esistente per correggerlo**: `migrateVisiteFromHistoryOnTest()`
+   (ActivityLog.gs) — ricostruisce **tutta** la tabella `visite` da
+   zero, rileggendo `activity_log_json` di ogni caso, sullo spreadsheet
+   TEST configurato. **Distruttiva su `visite`** (la svuota e la
+   riscrive per intero) — sicura sulla copia di Marco, mai da eseguire
+   su PROD vero senza una decisione e un gate dedicati (non esiste oggi
+   un equivalente "SuProd" per questa funzione, a differenza di
+   `allineaSchemaSuProd()`).
+
+**Sequenza consigliata per Marco sulla copia**: prima
+`setupSigmaFlowOnTest()` (crea i fogli mancanti), poi
+`migrateVisiteFromHistoryOnTest()` (ricostruisce `visite`), entrambe
+dall'editor Apps Script.
+
+**Implicazione da verificare, non confermata**: se questo gap in
+`visite` è presente anche su altri casi reali di PROD (non solo quello
+mostrato), le metriche di dashboard che leggono da `visite` (flusso,
+rework, tempi, capacità — quasi tutte, calcolate su `visite`, mai su
+`jobs`) potrebbero essere state sottostimate su PROD per tutto questo
+tempo per i casi con una storia simile. **Non ancora quantificato** —
+richiede di eseguire `migrateVisiteFromHistoryOnTest()` sulla copia e
+confrontare i numeri prima/dopo, o un controllo mirato di quanti casi
+reali hanno questo pattern.
+
+**Nessun codice applicativo cambiato per questi due punti** (solo la
+nuova `setupSigmaFlowOnTest()`, di sola comodità) — push su TEST
+verificato, 16/16 file identici. Commit: `74b15cf`.
+
 ## M2 — "Cronologia lenta" diagnosticata e corretta: causa reale trovata (2026-08-20)
 
 Seguito diretto della sezione precedente: Marco ha confermato che il
