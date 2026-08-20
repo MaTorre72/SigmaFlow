@@ -284,6 +284,9 @@ function runAllTests() {
     testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
+    testGetArchivioReturnsEmptyWhenSheetsMissing,
+    testGetCestinoReturnsEmptyWhenSheetsMissing,
+    testGetMetricsReturnsEmptyArchivedDataWhenSheetsMissing,
     testRipristinaJobApiActionRestoresJob,
     testEliminaJobDefinitivamenteRemovesJobAndVisiteFromCestino,
     testEliminaJobDefinitivamenteThrowsWhenJobNotInCestino,
@@ -299,6 +302,19 @@ function runAllTests() {
     testGetMetricsUsesVisiteNotJobFields,
     testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite,
     testSystemStateInsufficientData,
+    testBuildSystemStateExposesStabilityMetrics,
+    testBuildSystemStateStabilityMetricsNullWhenInsufficientData,
+    testBuildSystemStateSumsWaitTimeByType,
+    testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked,
+    testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn,
+    testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
+    testDelayProfileNullBelowMinimumSamples,
+    testDelayProfileComputesAlphaAndKernelFromRealReentries,
+    testDelayProfileAlphaCountsAllClosedVisitsNotOnlyReentered,
+    testBuildSystemStateExposesDelayProfileInSystemState,
+    testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus,
+    testCalculateMetricsE_S0E_S1NullWhenNoSamples,
+    testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinIt,
     testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
     testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
     testBuildSystemStateTimelineIncludesArchivedJobs,
@@ -309,9 +325,23 @@ function runAllTests() {
     testDataQualityThresholds,
     testSystemStateSeparatesFlowFromTimeSamples,
     testSystemStateWorkload,
+    testCurrentWorkloadIncludesPointsAlongsideCounts,
+    testBuildSystemStateComputesAvgPointsPerInitiative,
+    testWaitStatsComputesTotalOccurrencesAverageMinMax,
+    testWaitStatsEmptySamplesReturnsNullAverages,
     testMissingRequiredParam,
     testAddActivityEventMoveValido,
     testAddActivityEventTsFuturo,
+    testAddActivityEventReturnsUpdatedJobInResponse,
+    testUpdateActivityEventReturnsUpdatedJobInResponse,
+    testDeleteActivityEventReturnsUpdatedJobInResponse,
+    testAddActivityEventManualReentryAccumulatesRealWaitTime,
+    testAddActivityEventManualStandByToStandByAccumulatesWaitWithoutClosingVisit,
+    testAddActivityEventManualReentryUpdatesStatusAndOpensVisit,
+    testAddActivityEventManualReentryDirectToWipBlocked,
+    testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit,
+    testAddActivityEventPlainManualMoveUpdatesStatus,
+    testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus,
     testAddActivityEventColonnaNonTrovata,
     testAddActivityEventReasonObbligatoria,
     testAddActivityEventSequenceWarningsSenzaForce,
@@ -1066,12 +1096,18 @@ function testDeleteActivityEventRealignsOpenVisit() {
     var jobId = testAddJobWithPastArrival_({ title: 'Cancellazione allinea visita', size_class: 'M' });
     var columns = readColumns_();
     var wipCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
-    var waitCol = columns.filter(function(c) { return c.role === 'stand_by'; })[0];
+    // M2: una colonna neutrale, non stand_by/done — un rientro diretto da
+    // stand_by/done a WIP e' ora vietato anche via Cronologia manuale
+    // (RIENTRO_DIRETTO_WIP_NON_CONSENTITO), lo stesso vincolo gia'
+    // presente sul drag-and-drop reale (moveJob). Non e' l'oggetto di
+    // questo test (riallineamento dopo cancellazione), quindi si passa da
+    // una colonna neutrale invece che da un'attesa.
+    var neutralCol = columns.filter(function(c) { return c.role === 'neutral'; })[0];
     var t1 = testTsMinutesAgo_(90);
     var t2 = testTsMinutesAgo_(60);
     var t3 = testTsMinutesAgo_(30);
     addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: wipCol.id });
-    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: waitCol.id });
+    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: neutralCol.id });
     addActivityEvent({ job_id: jobId, type: 'move', ts: t3, to: wipCol.id, force: true });
 
     deleteActivityEvent({ job_id: jobId, event_id: e2.data.event.id });
@@ -1636,6 +1672,54 @@ function testGetCestinoReturnsAnagraficaAndVisitCount() {
   });
 }
 
+// M1 (DESIGN_dashboard.md, §2): su PROD i fogli archivio/cestino non
+// esistono ancora (nessuna sessione ha mai eseguito l'allineamento
+// schema li'). Simulato qui cancellando i quattro fogli dopo un setup
+// altrimenti normale - getArchivio_/getCestino_/getMetrics devono
+// comportarsi come "archivio/cestino vuoto", mai lanciare.
+function testGetArchivioReturnsEmptyWhenSheetsMissing() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO));
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+
+    var result = getArchivio();
+    assertTrue_(result.success, 'getArchivio non deve lanciare se i fogli archivio non esistono');
+    assertEquals_(0, result.data.items.length, 'archivio deve risultare vuoto, non un errore');
+  });
+}
+
+function testGetCestinoReturnsEmptyWhenSheetsMissing() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_CESTINO));
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_CESTINO));
+
+    var result = getCestino();
+    assertTrue_(result.success, 'getCestino non deve lanciare se i fogli cestino non esistono');
+    assertEquals_(0, result.data.items.length, 'cestino deve risultare vuoto, non un errore');
+  });
+}
+
+function testGetMetricsReturnsEmptyArchivedDataWhenSheetsMissing() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    ss = SpreadsheetApp.openById(ss.getId());
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO));
+    ss.deleteSheet(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+    addJob({ title: 'Caso attivo, PROD senza archivio', size_class: 'M' });
+
+    var result = getMetrics();
+    assertTrue_(result.success, 'getMetrics non deve lanciare se i fogli archivio non esistono');
+    assertEquals_(8, result.data.systemState.pointsMetrics.open_points, 'i punti aperti restano leggibili anche senza i fogli archivio');
+  });
+}
+
 function testRipristinaJobApiActionRestoresJob() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -1936,6 +2020,206 @@ function testSystemStateInsufficientData() {
   assertEquals_(null, buildSystemState_([], [], SIGMAFLOW.DEFAULT_CONFIG, now).reworkMetrics.initiatives_with_rework, 'rientri non stimabili senza iniziative');
 }
 
+// M4 (DESIGN_dashboard.md, §4.2): stabilityMetrics (Cap. 15) esposta in
+// systemState solo quando ci sono abbastanza campioni di tempo completati
+// (stessa soglia >=5 di enoughCompleted) - stesso schema di 5 visite
+// completate di testSystemStateWorkload.
+function testBuildSystemStateExposesStabilityMetrics() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [];
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    jobs.push({ job_id: 'JOB-STAB-' + i, status: 'done', arrival_ts: arrival, visit_number: 1 });
+    visite.push({ job_id: 'JOB-STAB-' + i, numero_visita: 1, apertura_ts: arrival, start_ts: arrival, consegna_ts: nowIso_() });
+  }
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Boolean(state.stabilityMetrics), 'stabilityMetrics valorizzata con abbastanza campioni');
+  assertTrue_(state.stabilityMetrics.margin !== null, 'margin calcolato');
+  assertTrue_(['stable', 'stressed', 'critical', 'unstable'].indexOf(state.stabilityMetrics.system_state) !== -1, 'system_state e\' uno dei codici noti');
+}
+
+// M5 (DESIGN_dashboard.md, §4.2): T_cliente/T_ente/T_interno - somma di
+// un campo gia' accumulato per visita (accumulateWaitTime_, Kanban.gs)
+// nella finestra osservata, mai finora esposto.
+function testBuildSystemStateSumsWaitTimeByType() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-WAIT-BREAKDOWN', status: 'backlog', arrival_ts: arrival, visit_number: 1 }];
+  var visite = [{
+    job_id: 'JOB-WAIT-BREAKDOWN',
+    numero_visita: 1,
+    apertura_ts: arrival,
+    t_cliente_d: 3,
+    t_ente_d: 5,
+    t_interno_d: 1
+  }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(3, state.waitTimeMetrics.client.total_days, 'attesa cliente sommata dalla visita');
+  assertEquals_(1, state.waitTimeMetrics.client.occurrences, 'una sola occorrenza di attesa cliente');
+  assertEquals_(3, state.waitTimeMetrics.client.average_days, 'media = totale su una sola occorrenza');
+  assertEquals_(5, state.waitTimeMetrics.authority.total_days, 'attesa enti sommata dalla visita');
+  assertEquals_(1, state.waitTimeMetrics.internal.total_days, 'attesa interna sommata dalla visita');
+  assertEquals_(9, state.waitTimeMetrics.total_days, 'totale = somma dei tre tipi');
+}
+
+// M5, fix del 2026-08-20 (segnalato da Marco su dati PROD reali: 15
+// card ferme in attesa enti, ma "Attesa enti" mostrava 0,65 giorni in
+// totale). accumulateWaitTime_ scrive t_ente_d solo quando una visita
+// ESCE dalla colonna stand_by - una card ancora ferma li' ora non ha
+// ancora accumulato nulla in 'visite'. waitTimeMetrics deve includere
+// anche l'attesa IN CORSO (status_since_ts -> adesso) per i job
+// attualmente in una colonna stand_by, non solo le attese gia' concluse.
+function testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked() {
+  var now = new Date();
+  var enteredWaitAuthority = Utilities.formatDate(new Date(now.getTime() - 5 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{
+    job_id: 'JOB-STUCK-IN-WAIT',
+    status: 'wait_authority',
+    arrival_ts: enteredWaitAuthority,
+    status_since_ts: enteredWaitAuthority,
+    visit_number: 1
+  }];
+  var visite = [{ job_id: 'JOB-STUCK-IN-WAIT', numero_visita: 1, apertura_ts: enteredWaitAuthority, t_cliente_d: 0, t_ente_d: 0, t_interno_d: 0 }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(state.waitTimeMetrics.authority.total_days >= 5, 'l\'attesa in corso (5 giorni, mai ancora chiusa in visite) deve comunque contare');
+  assertEquals_(1, state.waitTimeMetrics.authority.occurrences, 'l\'attesa in corso conta come una occorrenza');
+}
+
+// Un job in una colonna NON di attesa (es. wip) non deve contribuire
+// nulla all'attesa in corso, anche se status_since_ts e' valorizzato.
+function testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn() {
+  var now = new Date();
+  var enteredWip = Utilities.formatDate(new Date(now.getTime() - 5 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-IN-WIP', status: 'wip', arrival_ts: enteredWip, status_since_ts: enteredWip, visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-IN-WIP', numero_visita: 1, apertura_ts: enteredWip, t_cliente_d: 0, t_ente_d: 0, t_interno_d: 0 }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(0, state.waitTimeMetrics.total_days, 'un job in wip non contribuisce ad alcuna attesa');
+}
+
+// M6 (DESIGN_dashboard.md, §4.2): B_lat(t) - consegne recenti la cui
+// visita non e' mai rientrata e il cui caso non e' formalmente chiuso
+// contano come esposizione futura; un caso gia' chiuso o gia' rientrato
+// non deve comparire.
+function testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries() {
+  var now = new Date();
+  var jobs = [
+    { job_id: 'JOB-LATENT-OPEN', status: 'done', arrival_ts: nowIso_(), visit_number: 1, incarico_chiuso_ts: '' },
+    { job_id: 'JOB-LATENT-CLOSED', status: 'done', arrival_ts: nowIso_(), visit_number: 1, incarico_chiuso_ts: nowIso_() },
+    { job_id: 'JOB-LATENT-REENTERED', status: 'backlog', arrival_ts: nowIso_(), visit_number: 2, incarico_chiuso_ts: '' }
+  ];
+  var visite = [
+    { job_id: 'JOB-LATENT-OPEN', numero_visita: 1, apertura_ts: nowIso_(), consegna_ts: nowIso_(), rientro_ts: '' },
+    { job_id: 'JOB-LATENT-CLOSED', numero_visita: 1, apertura_ts: nowIso_(), consegna_ts: nowIso_(), rientro_ts: '' },
+    { job_id: 'JOB-LATENT-REENTERED', numero_visita: 1, apertura_ts: nowIso_(), consegna_ts: nowIso_(), rientro_ts: nowIso_() },
+    { job_id: 'JOB-LATENT-REENTERED', numero_visita: 2, apertura_ts: nowIso_() }
+  ];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(1, state.latentBacklogMetrics.count, 'solo la consegna non chiusa e mai rientrata conta come esposizione futura');
+}
+
+// M7 (DESIGN_dashboard.md, §4.2), fix del 2026-08-20 (segnalato da
+// Marco: 0 campioni su dati reali con 8-9 rientri veri, perche' un
+// rientro a SigmaFlow quasi mai passa da consegna_ts - vedi la nota
+// "estensione deliberata" su delayProfile_, Model.gs): un rientro e'
+// qualunque visita con rientro_ts valorizzato, D_i e' il tempo di
+// attesa reale accumulato (t_cliente_d+t_ente_d+t_interno_d), non
+// rientro_ts - consegna_ts. Alpha e kernel restano null sotto la
+// soglia minima di campioni (5 rientri osservati), coerente con
+// enoughCompleted altrove.
+function testDelayProfileNullBelowMinimumSamples() {
+  var visite = [
+    { job_id: 'JOB-1', numero_visita: 2, rientro_ts: '2026-01-05T09:00:00+02:00', t_cliente_d: 4 },
+    { job_id: 'JOB-2', numero_visita: 1, start_ts: '2026-01-01T09:00:00+02:00', consegna_ts: '2026-01-01T09:00:00+02:00' }
+  ];
+
+  var profile = delayProfile_(visite);
+
+  assertEquals_(1, profile.sample_size, 'un solo rientro osservato');
+  assertEquals_(null, profile.alpha, 'alpha non stimabile sotto la soglia minima');
+  assertEquals_(null, profile.kernel, 'kernel non stimabile sotto la soglia minima');
+}
+
+// Riproduce lo scenario reale segnalato da Marco: rientri che chiudono
+// una visita SENZA mai passare da consegna_ts (le colonne di attesa
+// stanno prima di "DA INVIARE/FATTURARE") - 5 rientri, tutti con 3
+// giorni di attesa reale accumulata, tutti entro la prima settimana
+// (bin 0).
+function testDelayProfileComputesAlphaAndKernelFromRealReentries() {
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    visite.push({
+      job_id: 'JOB-DELAY-' + i,
+      numero_visita: 2,
+      rientro_ts: '2026-01-03T09:00:00+02:00',
+      rientro_da: 'wait_client',
+      t_cliente_d: 3,
+      t_ente_d: 0,
+      t_interno_d: 0
+    });
+  }
+
+  var profile = delayProfile_(visite);
+
+  assertEquals_(5, profile.sample_size, '5 rientri osservati');
+  assertEquals_(1, profile.alpha, 'alpha = 5 rientri / 5 visite chiuse (tutte rientrate)');
+  assertEquals_(1, profile.kernel[0], 'tutti i rientri nel primo bin (0-6 giorni di attesa)');
+  assertEquals_(0, profile.kernel[1], 'nessun rientro nel secondo bin');
+  assertEquals_(1, profile.kernel.reduce(function(sum, share) { return sum + share; }, 0), 'il kernel somma a 1');
+}
+
+// Una visita consegnata (mai rientrata) non produce un campione D_i, ma
+// conta comunque come "visita chiusa" al denominatore di alpha - stessa
+// nozione di chiusura di visitServiceTimeDays_ (consegnata O rientrata).
+function testDelayProfileAlphaCountsAllClosedVisitsNotOnlyReentered() {
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    visite.push({ job_id: 'JOB-REENTER-' + i, numero_visita: 2, rientro_ts: '2026-01-03T09:00:00+02:00', t_cliente_d: 2 });
+  }
+  for (var j = 0; j < 5; j++) {
+    visite.push({ job_id: 'JOB-DELIVERED-' + j, numero_visita: 1, start_ts: '2026-01-01T09:00:00+02:00', consegna_ts: '2026-01-02T09:00:00+02:00' });
+  }
+
+  var profile = delayProfile_(visite);
+
+  assertEquals_(5, profile.sample_size, 'solo le visite rientrate producono un campione D_i');
+  assertEquals_(0.5, profile.alpha, 'alpha = 5 rientri / 10 visite chiuse in totale (rientrate + consegnate)');
+}
+
+function testBuildSystemStateExposesDelayProfileInSystemState() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-PROFILE', status: 'backlog', arrival_ts: nowIso_(), visit_number: 2 }];
+  var visite = [];
+  for (var i = 0; i < 5; i++) {
+    visite.push({ job_id: 'JOB-PROFILE-' + i, numero_visita: 2, rientro_ts: '2026-01-08T09:00:00+02:00', t_ente_d: 8 });
+  }
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Boolean(state.delayProfileMetrics), 'delayProfileMetrics presente in systemState');
+  assertEquals_(5, state.delayProfileMetrics.sample_size, 'campione letto da tutta la storia, non solo dalla finestra osservata');
+  assertEquals_(1, state.delayProfileMetrics.kernel[1], 'rientro dopo 8 giorni di attesa cade nel secondo bin (7-13 giorni)');
+}
+
+function testBuildSystemStateStabilityMetricsNullWhenInsufficientData() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-TEST-1', status: 'backlog', arrival_ts: nowIso_(), visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-TEST-1', numero_visita: 1, apertura_ts: nowIso_() }];
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(null, state.stabilityMetrics, 'stabilityMetrics non stimabile senza abbastanza campioni');
+}
+
 // N6 (DESIGN_archiviazione.md, §8/§9): le metriche storiche su una
 // finestra temporale devono includere anche l'Archivio (unione diretta,
 // nessun filtro) — "punti aggiunti"/"punti completati" ne fanno parte
@@ -2052,6 +2336,52 @@ function testGetMetricsNeverReadsCestino() {
 // 'visite' e non piu' dal campo service_time_d su 'jobs' — il job ha un
 // valore "decoy" chiaramente diverso su jobs, il tempo vero (10 giorni)
 // e' solo su visite (start_ts/consegna_ts).
+// M9 (DESIGN_dashboard.md, §4.2): E[S0]/E[S1] (Cap. 6) - tempo medio di
+// servizio separato per prima visita (numero_visita=1) e visite di
+// rework (numero_visita>1), mai calcolato prima di M9 (corretto un
+// errore della ricognizione M3, che lo classificava per sbaglio come
+// "gia' calcolato" insieme a E[K]).
+function testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 20 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-S0S1', status: 'done', arrival_ts: arrival, visit_number: 2 }];
+  var visite = [
+    { job_id: 'JOB-S0S1', numero_visita: 1, apertura_ts: arrival, start_ts: arrival, consegna_ts: Utilities.formatDate(new Date(now.getTime() - 15 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX") },
+    { job_id: 'JOB-S0S1', numero_visita: 2, apertura_ts: nowIso_(), start_ts: Utilities.formatDate(new Date(now.getTime() - 10 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX"), consegna_ts: nowIso_() }
+  ];
+
+  var metrics = calculateMetrics_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(5, metrics.E_S0, 'E_S0 = tempo di servizio della visita 1 (5 giorni)');
+  assertEquals_(10, metrics.E_S1, 'E_S1 = tempo di servizio della visita di rework (10 giorni)');
+}
+
+function testCalculateMetricsE_S0E_S1NullWhenNoSamples() {
+  var metrics = calculateMetrics_([], [], SIGMAFLOW.DEFAULT_CONFIG, new Date());
+
+  assertEquals_(null, metrics.E_S0, 'E_S0 non stimabile senza campioni');
+  assertEquals_(null, metrics.E_S1, 'E_S1 non stimabile senza campioni');
+}
+
+// Fix del 2026-08-20 (segnalato da Marco: E[S] in "Quadro avanzato"
+// molto piu' basso di "Tempi e variabilita'" sugli stessi dati reali).
+// Una visita aperta PRIMA della finestra di osservazione ma consegnata
+// DENTRO deve contare per E[S]/lambda/mu - la finestra si applica alla
+// consegna (come in buildSystemState_), non all'apertura.
+function testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinIt() {
+  var now = new Date();
+  var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, { observation_window_days: 90 });
+  var openedLongAgo = Utilities.formatDate(new Date(now.getTime() - 150 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var startedLongAgo = openedLongAgo;
+  var deliveredRecently = Utilities.formatDate(new Date(now.getTime() - 5 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-LONG-VISIT', status: 'done', arrival_ts: openedLongAgo, visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-LONG-VISIT', numero_visita: 1, apertura_ts: openedLongAgo, start_ts: startedLongAgo, consegna_ts: deliveredRecently }];
+
+  var metrics = calculateMetrics_(jobs, visite, config, now);
+
+  assertTrue_(Math.abs(metrics.E_S - 145) < 1, 'la visita, aperta 150 giorni fa e consegnata 5 giorni fa, deve contare (~145 giorni di servizio, non esclusa dalla finestra)');
+}
+
 function testGetMetricsUsesVisiteNotJobFields() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -2133,6 +2463,67 @@ function testSystemStateSeparatesFlowFromTimeSamples() {
   assertEquals_(1, state.flowMetrics.completed_initiatives, 'uscite conteggiate anche senza tempo valido');
   assertEquals_(0, state.timeMetrics.completed_samples, 'campioni tempo esclusi se mancanti');
   assertEquals_(null, state.capacityMetrics.effective_per_day, 'capacita non stimabile senza tempi');
+}
+
+// Chiesto da Marco (2026-08-20, punto 5): il lavoro presente anche in
+// punti, non solo in conteggio card.
+function testCurrentWorkloadIncludesPointsAlongsideCounts() {
+  var columnMap = {};
+  SIGMAFLOW.DEFAULT_COLUMNS.forEach(function(column) { columnMap[column.id] = column; });
+  var jobs = [
+    { job_id: 'J1', status: 'backlog', size_class: 'M' },
+    { job_id: 'J2', status: 'wait_client', size_class: 'S' }
+  ];
+
+  var workload = currentWorkload_(jobs, columnMap);
+
+  assertEquals_(1, workload.ready, 'un job pronto');
+  assertEquals_(8, workload.ready_points, 'punti del job pronto (taglia M)');
+  assertEquals_(1, workload.waiting_client, 'un job in attesa cliente');
+  assertEquals_(5, workload.waiting_client_points, 'punti del job in attesa cliente (taglia S)');
+  assertEquals_(1, workload.blocked, 'in attesa cliente conta anche come bloccato');
+  assertEquals_(5, workload.blocked_points, 'punti bloccati coerenti');
+}
+
+// Chiesto da Marco (2026-08-20, punto 3): fattore di conversione per
+// esprimere i tassi di teoria delle code anche in punti stimati.
+function testBuildSystemStateComputesAvgPointsPerInitiative() {
+  var now = new Date();
+  var arrival = nowIso_();
+  var jobs = [
+    { job_id: 'J1', status: 'backlog', arrival_ts: arrival, size_class: 'M', visit_number: 1 },
+    { job_id: 'J2', status: 'backlog', arrival_ts: arrival, size_class: 'L', visit_number: 1 }
+  ];
+  var visite = [
+    { job_id: 'J1', numero_visita: 1, apertura_ts: arrival },
+    { job_id: 'J2', numero_visita: 1, apertura_ts: arrival }
+  ];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertEquals_(10.5, state.flowMetrics.avg_points_per_initiative, 'media (8+13)/2 = 10,5 (taglie M+L)');
+}
+
+// Chiesto da Marco (2026-08-20, punto 4): totale/occorrenze/media/min/max
+// per il pannello "Dove si blocca il lavoro", non solo il totale.
+function testWaitStatsComputesTotalOccurrencesAverageMinMax() {
+  var stats = waitStats_([2, 4, 9]);
+
+  assertEquals_(15, stats.total_days, 'totale');
+  assertEquals_(3, stats.occurrences, 'tre occorrenze');
+  assertEquals_(5, stats.average_days, 'media 15/3 = 5');
+  assertEquals_(2, stats.min_days, 'minimo');
+  assertEquals_(9, stats.max_days, 'massimo');
+}
+
+function testWaitStatsEmptySamplesReturnsNullAverages() {
+  var stats = waitStats_([]);
+
+  assertEquals_(0, stats.total_days, 'totale zero senza campioni');
+  assertEquals_(0, stats.occurrences, 'zero occorrenze');
+  assertEquals_(null, stats.average_days, 'media non stimabile senza campioni');
+  assertEquals_(null, stats.min_days, 'minimo non stimabile senza campioni');
+  assertEquals_(null, stats.max_days, 'massimo non stimabile senza campioni');
 }
 
 function testSystemStateWorkload() {
@@ -2234,6 +2625,252 @@ function testAddActivityEventTsFuturo() {
 
     assertTrue_(result.data.ok === false, 'ts nel futuro: ok false');
     assertTrue_(result.data.hardErrors.indexOf('TS_IN_FUTURO') !== -1, 'hardErrors contiene TS_IN_FUTURO');
+  });
+}
+
+// M2 (DESIGN_dashboard.md, §3, opzione 2 — decisione di Marco 2026-08-19):
+// riproduce esattamente lo scenario trovato in collaudo: un caso in
+// un'attesa, un evento 'move' inserito a mano in Cronologia verso
+// backlog (un vero rientro) - deve ricalcolare job.status e aprire la
+// visita mancante, esattamente come farebbe il drag-and-drop reale
+// (moveJob), non solo registrare l'evento nel log.
+// M2, fix del 2026-08-20 (segnalato da Marco: la Cronologia era lenta -
+// causa reale: ogni chiamata api() prende un lock globale di script, e
+// il fix del ritardo sulla board aveva aggiunto un giro in piu' di
+// lock, un loadBoard(true) dopo ogni salvataggio). addActivityEvent/
+// updateActivityEvent/deleteActivityEvent devono restituire il job gia'
+// aggiornato (status + campi di rientro), stesso contratto di risposta
+// di moveJob - cosi' il client non deve piu' rifare un'intera chiamata
+// getBoard() per riflettere la card aggiornata.
+function testAddActivityEventReturnsUpdatedJobInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Risposta con job aggiornato', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'backlog' });
+
+    assertTrue_(Boolean(result.data.job), 'la risposta deve includere il job aggiornato');
+    assertEquals_('backlog', result.data.job.status, 'il job nella risposta riflette gia\' il nuovo status');
+    assertEquals_(2, result.data.job.visit_number, 'il job nella risposta riflette gia\' il numero di visita aggiornato');
+  });
+}
+
+function testUpdateActivityEventReturnsUpdatedJobInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Update risposta con job', size_class: 'M' }).data;
+    var added = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip' });
+
+    var result = updateActivityEvent({ job_id: created.job_id, event_id: added.data.event.id, note: 'nota aggiornata' });
+
+    assertTrue_(Boolean(result.data.job), 'la risposta deve includere il job aggiornato');
+    assertEquals_('wip', result.data.job.status, 'il job nella risposta riflette lo status corrente');
+  });
+}
+
+function testDeleteActivityEventReturnsUpdatedJobInResponse() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Delete risposta con job', size_class: 'M' });
+    var e1 = addActivityEvent({ job_id: jobId, type: 'move', ts: testTsMinutesAgo_(60), to: 'wip' });
+    addActivityEvent({ job_id: jobId, type: 'note', ts: testTsMinutesAgo_(30), note: 'nota' });
+
+    var result = deleteActivityEvent({ job_id: jobId, event_id: e1.data.event.id });
+
+    assertTrue_(Boolean(result.data.job), 'la risposta deve includere il job aggiornato anche dopo una cancellazione');
+    assertEquals_(jobId, result.data.job.job_id, 'il job restituito e\' quello giusto');
+  });
+}
+
+// M2, fix del 2026-08-20 (segnalato da Marco su dati PROD reali: "Dove
+// si blocca il lavoro" quasi sempre a zero, pur con molti rientri veri
+// - causa: applyManualMoveEffects_ spostava la card e apriva/chiudeva
+// la visita, ma non chiamava mai accumulateWaitTime_, a differenza del
+// drag-and-drop reale). Un'attesa registrata interamente a mano in
+// Cronologia (entrata in un'attesa + rientro, nessun moveJob reale nel
+// mezzo - lo scenario tipico dei dati reali di Marco) deve comunque
+// accumulare il tempo di attesa reale sulla visita chiusa.
+// La card nasce con testAddJobWithPastArrival_/correctJobTimestamps non
+// basta qui: quelle correggono solo il campo strutturato arrival_ts, MAI
+// l'evento di creazione dentro activity_log_json (che resta a "adesso")
+// - un'attesa "iniziata 5 giorni fa" finirebbe comunque prima
+// dell'evento di creazione nell'ordine cronologico, producendo un falso
+// COLONNA_DOPPIA. Log seedato direttamente (stesso pattern di
+// testMigrateToActivityLogAlignsOpenVisit) per controllare l'intera
+// sequenza temporale.
+function testAddActivityEventManualReentryAccumulatesRealWaitTime() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro manuale accumula attesa', size_class: 'M' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    var creationTs = testTsMinutesAgo_(10000); // ~7 giorni fa
+    job.arrival_ts = creationTs;
+    job.activity_log_json = JSON.stringify([{ id: 'seed-creation', ts: creationTs, type: 'move', source: 'auto', to: 'backlog', from: null, note: '' }]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var enteredWaitTs = testTsMinutesAgo_(7200); // ~5 giorni fa
+    var reentryTs = testTsMinutesAgo_(0);
+
+    addActivityEvent({ job_id: created.job_id, type: 'move', ts: enteredWaitTs, to: 'wait_client' });
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: reentryTs, to: 'todo' });
+
+    assertTrue_(result.data.ok === true, 'il rientro manuale dovrebbe riuscire');
+    var visite = readVisiteForJob_(ss, created.job_id);
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    assertTrue_(Number(closed.t_cliente_d) >= 4.9, 'il rientro manuale deve accumulare il tempo di attesa reale (~5 giorni), non lasciarlo a zero - ottenuto: ' + closed.t_cliente_d);
+  });
+}
+
+// Uscita da un'attesa SENZA rientro vero (verso un'altra colonna
+// stand_by, es. da attesa cliente ad attesa enti): deve comunque
+// accumulare il tempo di attesa sulla visita ancora aperta, esattamente
+// come fa updateVisiteForMove_ per il drag-and-drop reale - non solo
+// quando l'uscita chiude la visita.
+function testAddActivityEventManualStandByToStandByAccumulatesWaitWithoutClosingVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Attesa a attesa accumula senza chiudere', size_class: 'M' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+    var creationTs = testTsMinutesAgo_(10000);
+    job.arrival_ts = creationTs;
+    job.activity_log_json = JSON.stringify([{ id: 'seed-creation', ts: creationTs, type: 'move', source: 'auto', to: 'backlog', from: null, note: '' }]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var enteredWaitTs = testTsMinutesAgo_(4320); // ~3 giorni fa
+    var switchTs = testTsMinutesAgo_(0);
+
+    addActivityEvent({ job_id: created.job_id, type: 'move', ts: enteredWaitTs, to: 'wait_client' });
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: switchTs, to: 'wait_authority' });
+
+    assertTrue_(result.data.ok === true, 'il passaggio tra due attese dovrebbe riuscire');
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'nessuna visita aperta/chiusa: il passaggio tra attese non e\' un rientro');
+    assertTrue_(Number(visite[0].t_cliente_d) >= 2.9, 'l\'attesa cliente (~3 giorni) deve essere accumulata anche senza chiudere la visita');
+  });
+}
+
+function testAddActivityEventManualReentryUpdatesStatusAndOpensVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro registrato a mano', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    // ts non nel passato (testTsMinutesAgo_(0)): deve ordinarsi DOPO il
+    // move a wait_client appena fatto da moveJob (anch'esso a "adesso"),
+    // altrimenti computeFromForCandidate_ lo collocherebbe prima nella
+    // sequenza e produrrebbe un falso COLONNA_DOPPIA (creazione->backlog
+    // seguito da questo candidato->backlog).
+    var rientroTs = testTsMinutesAgo_(0);
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: rientroTs, to: 'backlog' });
+
+    assertTrue_(result.data.ok === true, 'l\'evento di rientro manuale dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('backlog', job.status, 'la correzione manuale deve spostare davvero la card, non solo il diario');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'il rientro manuale deve aprire una nuova visita, come il drag-and-drop reale');
+    var closed = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    var opened = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
+    assertEquals_(rientroTs, closed.rientro_ts, 'la visita 1 risulta chiusa alla data dell\'evento corretto');
+    assertEquals_('wait_client', closed.rientro_da, 'rientro_da = colonna di provenienza');
+    assertEquals_('wait_client', opened.rework_cause, 'rework_cause della visita 2 = rientro_da della precedente');
+    assertTrue_(Boolean(opened.incarico_ts), 'la visita 2 ha incarico_ts (destinazione backlog)');
+  });
+}
+
+// Stessa regola gia' applicata al drag-and-drop reale (moveJob): un
+// rientro diretto da un'attesa/completato a WIP resta vietato anche
+// quando arriva da una correzione manuale in Cronologia, non solo dalla
+// board — altrimenti la Cronologia potrebbe registrare uno stato che
+// l'interfaccia normale non permetterebbe mai di raggiungere.
+function testAddActivityEventManualReentryDirectToWipBlocked() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro diretto a WIP vietato', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip', force: true });
+
+    assertTrue_(result.data.ok === false, 'rientro diretto a WIP: ok false');
+    assertTrue_(result.data.hardErrors.indexOf('RIENTRO_DIRETTO_WIP_NON_CONSENTITO') !== -1, 'hardErrors contiene RIENTRO_DIRETTO_WIP_NON_CONSENTITO');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(1, visite.length, 'nessuna visita aperta per un evento rifiutato');
+  });
+}
+
+// Un secondo salvataggio dello stesso evento di rientro (es. solo per
+// correggere la nota, senza cambiare data/colonne) non deve duplicare la
+// visita gia' aperta la prima volta.
+function testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro corretto due volte', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var rientroTs = testTsMinutesAgo_(0);
+    var added = addActivityEvent({ job_id: created.job_id, type: 'move', ts: rientroTs, to: 'backlog' });
+    assertEquals_(2, readVisiteForJob_(ss, created.job_id).length, 'precondizione: la prima registrazione ha gia\' aperto la visita 2');
+
+    var updated = updateActivityEvent({ job_id: created.job_id, event_id: added.data.event.id, note: 'correzione della sola nota' });
+
+    assertTrue_(updated.data.ok === true, 'la modifica della nota dovrebbe riuscire');
+    assertEquals_(2, readVisiteForJob_(ss, created.job_id).length, 'nessuna visita duplicata risalvando lo stesso rientro');
+  });
+}
+
+// M2, fix del 2026-08-20 (segnalato da Marco in collaudo): un evento
+// 'move' manuale che NON rappresenta un rientro (qui: backlog -> wip,
+// provenienza non stand_by/done) deve comunque spostare davvero la card
+// - il fix iniziale del 19/08 aggiornava job.status solo per il pattern
+// di rientro, lasciando fermo qualunque altro move manuale.
+function testAddActivityEventPlainManualMoveUpdatesStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Move manuale semplice', size_class: 'M' }).data;
+
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip' });
+
+    assertTrue_(result.data.ok === true, 'il move manuale semplice dovrebbe riuscire');
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'la card deve spostarsi davvero, non solo il diario');
+  });
+}
+
+// Riproduce esattamente lo scenario del collaudo di Marco (2026-08-20):
+// un rientro manuale (wait_client -> backlog) seguito da un secondo move
+// manuale "in avanti" (backlog -> wip) - la card deve finire in WIP, non
+// restare ferma su backlog dopo il solo rientro.
+function testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro poi move in avanti', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var reentry = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'backlog' });
+    assertTrue_(reentry.data.ok === true, 'il rientro manuale dovrebbe riuscire');
+
+    var forward = addActivityEvent({ job_id: created.job_id, type: 'move', ts: testTsMinutesAgo_(0), to: 'wip' });
+    assertTrue_(forward.data.ok === true, 'il move successivo dovrebbe riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'la card deve seguire l\'ultimo move registrato, non restare ferma sul rientro');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'il rientro apre comunque la visita 2 (unico split), il move successivo non ne apre una terza');
   });
 }
 
@@ -2493,12 +3130,16 @@ function testDeleteActivityEventManual() {
     var jobId = testAddJobWithPastArrival_({ title: 'Delete evento manual', size_class: 'M' });
     var columns = readColumns_();
     var todoCol = columns.filter(function(c) { return c.role === 'wip'; })[0];
-    var waitCol = columns.filter(function(c) { return c.role === 'stand_by'; })[0];
+    // M2: colonna neutrale, non stand_by/done — vedi nota in
+    // testDeleteActivityEventRealignsOpenVisit: un rientro diretto da
+    // un'attesa a WIP e' ora vietato anche via Cronologia manuale, non e'
+    // l'oggetto di questo test.
+    var neutralCol = columns.filter(function(c) { return c.role === 'neutral'; })[0];
     var t1 = testTsMinutesAgo_(90);
     var t2 = testTsMinutesAgo_(60);
     var t3 = testTsMinutesAgo_(30);
     addActivityEvent({ job_id: jobId, type: 'move', ts: t1, to: todoCol.id, align_fields: { start_ts: t1 } });
-    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: waitCol.id });
+    var e2 = addActivityEvent({ job_id: jobId, type: 'move', ts: t2, to: neutralCol.id });
     var e3 = addActivityEvent({ job_id: jobId, type: 'move', ts: t3, to: todoCol.id, force: true, align_fields: { start_ts: t3 } });
 
     var del = deleteActivityEvent({ job_id: jobId, event_id: e2.data.event.id });

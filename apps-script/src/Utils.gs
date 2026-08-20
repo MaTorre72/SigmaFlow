@@ -146,6 +146,10 @@ function requireParam_(params, key) {
 }
 
 function readTable_(sheet) {
+  if (!sheet) {
+    return [];
+  }
+
   var values = sheet.getDataRange().getValues();
   if (values.length < 2) {
     return [];

@@ -520,6 +520,26 @@ function applyVisitSummaryFields_(job, visit) {
   job.done_ts = visit ? (visit.consegna_ts || '') : '';
 }
 
+// M2, fix del 2026-08-20 (segnalato da Marco: la Cronologia e' lenta -
+// causa reale trovata nel meccanismo di lock, non nella lettura in se':
+// withEnvironment_ prende un lock GLOBALE di script per ogni singola
+// chiamata api(), anche di sola lettura - il fix del ritardo di 1-2
+// minuti sulla board (stessa sessione) aveva introdotto un loadBoard(true)
+// dopo ogni salvataggio in Cronologia, un giro in piu' di lock proprio
+// nel percorso piu' usato durante un collaudo). addActivityEvent/
+// updateActivityEvent/deleteActivityEvent restituiscono ora il job gia'
+// aggiornato con i campi di rientro ricalcolati (stesso contratto di
+// risposta di moveJob, M0-A2) - il client aggiorna la card in stato
+// locale invece di rifare un'intera chiamata getBoard() (che oltretutto
+// e' molto piu' pesante di un singolo evento: rilegge jobs+visite
+// per intero).
+function attachOpenVisitSummary_(job) {
+  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  var openRow = visiteSheet ? findOpenVisitRow_(visiteSheet, job.job_id) : -1;
+  applyVisitSummaryFields_(job, openRow > 0 ? readVisitFromRow_(visiteSheet, openRow) : null);
+  return job;
+}
+
 // Sez. 4: durata della permanenza appena conclusa nella colonna stand_by
 // che si sta lasciando, sommata all'accumulatore per tipo corrispondente.
 // L'ingresso in quella colonna si trova ripercorrendo il log all'indietro
@@ -676,21 +696,153 @@ function addActivityEvent(params) {
   // allineano sempre in automatico al valore suggerito dall'evento appena
   // registrato, senza chiedere conferma all'utente. I dettagli di questi
   // campi restano interni: l'utente cura solo la cronologia.
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, log);
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ ok: true, job_id: jobId, event: candidate });
+  return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
 }
 
-function applyStructuralAlignment_(job, warnings) {
+function applyStructuralAlignment_(job, warnings, candidate, log) {
   warnings.forEach(function(warning) {
     if (JOB_HEADERS.indexOf(warning.field) !== -1) {
       job[warning.field] = warning.suggestedValue;
     }
   });
+
+  // M2 (DESIGN_dashboard.md, §3, opzione 2). applyManualMoveEffects_ sposta
+  // davvero la card per QUALUNQUE evento 'move' manuale (non solo i
+  // rientri, corretto il 2026-08-20 dopo un collaudo di Marco: il fix
+  // iniziale aggiornava job.status solo per il pattern di rientro
+  // stand_by/done -> backlog/prep, lasciando ferma la card su un
+  // successivo move manuale "in avanti", es. TO DO -> WIP). Se ha aperto
+  // una nuova visita (rientro vero), quella e' ormai la visita aperta:
+  // alignOpenVisitFields_ va comunque chiamata dopo (non prima), cosi'
+  // ensureOpenVisit_ trova sempre la visita giusta (quella senza
+  // rientro_ts, che dopo uno split e' sempre la nuova, mai quella appena
+  // chiusa) e le applica i campi (incarico_ts/prep_ts) pertinenti a
+  // QUESTO stesso candidato.
+  applyManualMoveEffects_(job, candidate, log);
   alignOpenVisitFields_(job, warnings);
+}
+
+// M2 (DESIGN_dashboard.md, §3, opzione 2): una correzione manuale in
+// Cronologia (addActivityEvent/updateActivityEvent) che rappresenta uno
+// spostamento deve spostare davvero la card - non solo registrarlo nel
+// diario. Applicato "live" (sullo stato corrente del job), non alla
+// posizione storica dell'evento corretto - stessa convenzione gia' in
+// uso per gli altri campi strutturali, vedi il commento su
+// alignOpenVisitFields_. Se lo spostamento rappresenta anche un vero
+// rientro (stessa regola di moveJob: provenienza stand_by/done,
+// destinazione backlog/prep) apre/chiude la visita come farebbe il
+// drag-and-drop reale - il divieto di rientro diretto in WIP e' gia'
+// garantito a monte da validateSequence_
+// (RIENTRO_DIRETTO_WIP_NON_CONSENTITO): qui si assume che il candidato
+// sia gia' stato validato.
+//
+// Fix del 2026-08-20 (segnalato da Marco su dati PROD reali: "Dove si
+// blocca il lavoro"/"Profilo di rientro" quasi sempre a zero, pur con
+// molti rientri veri nella storia): il fix iniziale spostava la card e
+// apriva/chiudeva la visita, ma non chiamava MAI accumulateWaitTime_
+// (Kanban.gs, la stessa funzione che updateVisiteForMove_ usa per il
+// drag-and-drop reale) - un'uscita da una colonna stand_by registrata a
+// mano (la maggioranza dei dati reali di Marco: quasi tutta la sua
+// Cronologia e' "source":"manual", non generata dal drag-and-drop) non
+// accumulava mai t_cliente_d/t_ente_d/t_interno_d. Ora lo fa per
+// QUALUNQUE uscita da una colonna stand_by (non solo quelle che
+// chiudono la visita - stessa condizione di updateVisiteForMove_),
+// richiede il log completo (4o parametro, gia' disponibile in
+// addActivityEvent/updateActivityEvent dopo il push del candidato).
+function applyManualMoveEffects_(job, candidate, log) {
+  if (!candidate || candidate.type !== 'move') {
+    return;
+  }
+
+  var columns = readColumns_();
+  var targetColumn = findColumn_(columns, candidate.to);
+  if (!targetColumn) {
+    return;
+  }
+
+  job.status = candidate.to;
+  job.status_since_ts = candidate.ts;
+
+  var sourceColumn = candidate.from ? findColumn_(columns, candidate.from) : null;
+  // Ne' accumulo ne' split sono possibili senza una provenienza
+  // stand_by (stesso vincolo di updateVisiteForMove_/moveJob).
+  if (!sourceColumn || sourceColumn.role !== 'stand_by') {
+    return;
+  }
+
+  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+  if (!visiteSheet) {
+    return;
+  }
+
+  var opened = ensureOpenVisit_(visiteSheet, job, candidate.ts);
+  var activeVisit = opened.visit;
+
+  if (log) {
+    accumulateWaitTime_(activeVisit, sourceColumn, log, candidate.ts);
+  }
+
+  var closesVisit = targetColumn.role === 'backlog' || targetColumn.role === 'prep';
+  if (!closesVisit) {
+    // Uscita da un'attesa senza rientro vero (es. verso un'altra
+    // colonna stand_by): l'unico effetto e' l'accumulo sopra, gia'
+    // scritto - stessa logica di updateVisiteForMove_.
+    writeVisitToRow_(visiteSheet, opened.row, activeVisit);
+    return;
+  }
+
+  // N2 (DESIGN_archiviazione.md, §8c): stessa regola di moveJob - un
+  // rientro reale su un caso gia' marcato "Chiuso" lo rende di nuovo
+  // attivo.
+  if (job.incarico_chiuso_ts) {
+    job.incarico_chiuso_ts = '';
+  }
+
+  // Idempotenza: se questo stesso rientro (stesso job, stessa data,
+  // stessa provenienza) e' gia' stato registrato in precedenza - es. un
+  // secondo salvataggio dello stesso evento via updateActivityEvent senza
+  // cambiare data/colonne - non duplicare la visita. L'accumulo sopra
+  // resta pero' non idempotente su una modifica ripetuta dello stesso
+  // evento (limite noto, non risolvibile senza un registro per-evento
+  // dei contributi gia' applicati - fuori scope di questo fix).
+  if (reentryAlreadyApplied_(visiteSheet, job.job_id, candidate.ts, sourceColumn.id)) {
+    writeVisitToRow_(visiteSheet, opened.row, activeVisit);
+    return;
+  }
+
+  activeVisit.rientro_ts = candidate.ts;
+  activeVisit.rientro_da = sourceColumn.id;
+  writeVisitToRow_(visiteSheet, opened.row, activeVisit);
+
+  appendVisitRow_(visiteSheet, {
+    job_id: job.job_id,
+    numero_visita: Number(activeVisit.numero_visita || 1) + 1,
+    apertura_ts: candidate.ts,
+    incarico_ts: '',
+    prep_ts: '',
+    start_ts: '',
+    consegna_ts: '',
+    rientro_ts: '',
+    rientro_da: '',
+    t_cliente_d: 0,
+    t_ente_d: 0,
+    t_interno_d: 0,
+    rework_cause: sourceColumn.id
+  });
+}
+
+// Supporta l'idempotenza di applyManualMoveEffects_: true se esiste
+// gia' una visita di questo job chiusa esattamente con questa data e
+// provenienza di rientro.
+function reentryAlreadyApplied_(visiteSheet, jobId, rientroTs, rientroDa) {
+  return readTable_(visiteSheet).some(function(visit) {
+    return visit.job_id === jobId && visit.rientro_ts === rientroTs && visit.rientro_da === rientroDa;
+  });
 }
 
 // Fase L3 (DESIGN_modello_caso_visita.md, sez. 11): le correzioni manuali
@@ -793,12 +945,12 @@ function updateActivityEvent(params) {
   remaining.push(candidate);
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, remaining);
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ ok: true, job_id: jobId, event: candidate });
+  return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
 }
 
 function deleteActivityEvent(params) {
@@ -833,6 +985,15 @@ function deleteActivityEvent(params) {
   // dall'evento cancellato non piu' rappresentativo: si riallinea in
   // automatico all'evento move piu' recente rimasto, con lo stesso
   // meccanismo (silenzioso) usato per l'aggiunta/modifica di un evento.
+  // M2 (DESIGN_dashboard.md, §3): candidate NON passato qui di proposito
+  // (a differenza di addActivityEvent/updateActivityEvent) - lastMove non
+  // e' un evento appena inserito dall'utente, e' un evento gia' esistente
+  // che la cancellazione ha reso "l'ultimo rimasto": applicargli anche
+  // applyManualMoveEffects_ risposterebbe la card (e duplicherebbe la
+  // visita, se un rientro) ad ogni cancellazione di un evento successivo
+  // non correlato, invece di limitarsi a riallineare le date. Lo
+  // spostamento vero resta gestito solo al momento in cui l'evento che lo
+  // rappresenta viene inserito/modificato.
   var moves = recalculated.filter(function(event) { return event.type === 'move'; });
   var lastMove = moves.length ? moves[moves.length - 1] : null;
   if (lastMove) {
@@ -842,7 +1003,7 @@ function deleteActivityEvent(params) {
   job.activity_log_json = serializeActivityLog_(recalculated);
   writeJobToRow_(sheet, row, headers, job);
 
-  return ok_({ job_id: jobId, event_id: eventId });
+  return ok_({ job_id: jobId, event_id: eventId, job: attachOpenVisitSummary_(job) });
 }
 
 // Non piu' esposta via routeAction_/UI: le correzioni utente passano

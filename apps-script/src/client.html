@@ -49,9 +49,36 @@
     bindToolbar();
     bindModal();
     bindCestinoToolbar();
+    bindDistributionTabs_();
     loadBoard();
     bindVisibilityPolling_();
   });
+
+  // Consolidamento dashboard (segnalato da Marco, 2026-08-20): le tre
+  // tabelle "Distribuzione per taglia/assegnatario/colonna" (stesso
+  // pool di punti, tre viste diverse) diventano tab di un solo
+  // pannello invece di tre pannelli separati. Bind una sola volta
+  // all'avvio (i pannelli .distribution-panel restano nel DOM, si
+  // limita a mostrare/nascondere — renderBreakdown, gia' esistente,
+  // continua a scrivere il contenuto di ciascuno ad ogni loadMetrics
+  // senza sapere quale sia visibile).
+  function bindDistributionTabs_() {
+    var tabs = document.querySelectorAll('.distribution-tab');
+    if (!tabs.length) { return; }
+    tabs.forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        tabs.forEach(function(other) {
+          other.classList.remove('active');
+          other.setAttribute('aria-selected', 'false');
+        });
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        document.querySelectorAll('.distribution-panel').forEach(function(panel) {
+          panel.hidden = panel.id !== tab.dataset.target;
+        });
+      });
+    });
+  }
 
   // Il polling a 45s serviva a tenere la board aggiornata anche a tab
   // in background, ma cosi' facendo continua a rileggere jobs+visite e
@@ -247,16 +274,39 @@
 
   function loadBoard(force) {
     if (!force && (state.pendingWrites > 0 || document.getElementById('card-modal').open)) {
-      return;
+      return Promise.resolve();
     }
-    callApi('getBoard').then(function(data) {
-      state.board = data.columns || {};
-      state.jobs = data.jobs || [];
-      state.columnMeta = data.column_meta || defaultColumns;
-      state.priorityClasses = data.priority_classes || {};
+    return callApi('getBoard').then(function(data) {
+      var columns = data.columns || {};
+      var jobs = data.jobs || [];
+      var columnMeta = data.column_meta || defaultColumns;
+      var priorityClasses = data.priority_classes || {};
+
+      // M8 (DESIGN_dashboard.md, §4.2): il polling periodico (ogni 45s,
+      // bindVisibilityPolling_) richiama loadBoard(false) anche quando
+      // nulla e' cambiato sul server - ridisegnare comunque l'intera board
+      // (svuota e ricostruisce tutto il DOM, renderBoard) ad ogni giro
+      // costa quanto un caricamento completo, senza alcun beneficio
+      // visibile quando i dati sono identici. Confronto testuale del solo
+      // stato che guida il disegno (non l'intera risposta, che include
+      // anche opzioni/metadati che non cambiano la resa): se identico al
+      // giro precedente e non e' un refresh esplicito (force), si salta
+      // solo il ridisegno - l'orario "Aggiornato alle" si aggiorna
+      // comunque, il poll ha confermato che i dati sono aggiornati.
+      var renderSnapshot = JSON.stringify({ columns: columns, jobs: jobs, columnMeta: columnMeta, priorityClasses: priorityClasses });
+      var unchanged = !force && renderSnapshot === state.lastRenderSnapshot_;
+
+      state.board = columns;
+      state.jobs = jobs;
+      state.columnMeta = columnMeta;
+      state.priorityClasses = priorityClasses;
       state.options = data.options || state.options;
-      renderToolbarFilters();
-      renderBoard();
+
+      if (!unchanged) {
+        state.lastRenderSnapshot_ = renderSnapshot;
+        renderToolbarFilters();
+        renderBoard();
+      }
       updateLastUpdated();
     }).catch(showError);
   }
@@ -1012,7 +1062,8 @@
     COLONNA_NON_TROVATA: 'La colonna selezionata non e\' valida.',
     REASON_OBBLIGATORIA: 'Il motivo della correzione e\' obbligatorio.',
     CAMPO_NON_CORREGGIBILE: 'Il campo selezionato non e\' correggibile da qui.',
-    DATA_NON_VALIDA: 'Il nuovo valore non e\' una data valida.'
+    DATA_NON_VALIDA: 'Il nuovo valore non e\' una data valida.',
+    RIENTRO_DIRETTO_WIP_NON_CONSENTITO: 'Il rientro diretto da una colonna di attesa o da completato a WIP non e\' consentito. Registra prima lo spostamento in TO DO o in una colonna precedente.'
   };
   var SEQUENCE_WARNING_MESSAGES_ = {
     SEQUENZA_MODIFICATA: function(w) {
@@ -1323,6 +1374,7 @@
       state.activityPending = null;
       closeActivityForm_();
       loadActivityLogForModal_();
+      applyActivityJobUpdate_(data.job);
     }).catch(function(error) {
       var errorEl = document.getElementById('modal-activity-form-error');
       errorEl.hidden = false;
@@ -1366,7 +1418,47 @@
     if (!eventId || !state.activeJob) { return; }
     callApi('deleteActivityEvent', { job_id: state.activeJob.job_id, event_id: eventId }).then(function(data) {
       loadActivityLogForModal_();
+      applyActivityJobUpdate_(data.job);
     }).catch(showError);
+  }
+
+  // M2, fix del 2026-08-20 (segnalato da Marco: la board mostrava lo
+  // stato aggiornato con 1-2 minuti di ritardo dopo una correzione in
+  // Cronologia, poi "Cronologia lenta" - causa reale del secondo
+  // sintomo: il primo tentativo di questo fix chiamava loadBoard(true)
+  // dopo ogni salvataggio, un giro in piu' di lock GLOBALE di script
+  // (withEnvironment_, preso da OGNI chiamata api() anche di sola
+  // lettura) proprio nel percorso piu' battuto durante un collaudo).
+  // addActivityEvent/updateActivityEvent/deleteActivityEvent
+  // restituiscono ora il job gia' aggiornato (stesso contratto di
+  // risposta di moveJob, M0-A2/M0-B): aggiorna la card in stato locale,
+  // senza un'altra chiamata al server. removeCardEl_ prima di
+  // placeCardInColumn_ perche' - a differenza del drag-and-drop reale -
+  // qui la card puo' essere cambiata di colonna senza che il DOM lo
+  // sappia ancora.
+  function applyActivityJobUpdate_(job) {
+    if (!job) { return; }
+    var fromStatus = removeJobLocally(job.job_id);
+    if (!state.board[job.status]) { state.board[job.status] = []; }
+    state.board[job.status].push(job);
+    var found = false;
+    state.jobs = (state.jobs || []).map(function(item) {
+      if (item.job_id === job.job_id) { found = true; return job; }
+      return item;
+    });
+    if (!found) { state.jobs.push(job); }
+
+    removeCardEl_(job.job_id);
+    placeCardInColumn_(job);
+    if (fromStatus) { updateColumnCounters_(fromStatus); }
+    updateColumnCounters_(job.status);
+
+    // Cosi' se l'utente torna sulla tab Informazioni nella stessa
+    // sessione del modale vede colonna/stato aggiornati, non quelli
+    // letti all'apertura del modale.
+    if (state.activeJob && state.activeJob.job_id === job.job_id) {
+      state.activeJob = job;
+    }
   }
 
   function moveJob(jobId, status) {
@@ -1813,22 +1905,49 @@
     document.getElementById('quick-data-quality').className = 'quick-quality quality-' + (quality.level || 'low');
 
     var flow = system.flowMetrics || {};
-    renderDl('flow-metrics', {
-      'Periodo analizzato': metricValue(flow.window_days, ' giorni'),
-      'Nuove iniziative osservate': valueOrDash(flow.new_initiatives_observed),
-      'Nuove iniziative al giorno': metricValue(flow.new_initiatives_per_day),
-      'Lavori completati al giorno': estimableValue(flow.completed_per_day),
-      'Capacita disponibile stimata': estimableValue(flow.estimated_capacity_per_day, ' passaggi/giorno'),
-      'Differenza tra entrate e uscite': estimableValue(flow.entry_exit_difference)
+    var points = system.pointsMetrics || {};
+    // Consolidamento dashboard (segnalato da Marco: pannelli/tabelle
+    // duplicate) - conteggio E punti nella stessa tabella invece di due
+    // pannelli separati (card in "Flusso del lavoro", punti solo in
+    // Vista rapida). "Aperte" non e' finestrata (istantanea di adesso,
+    // come open_points/open_cards); "Aggiunte"/"Completate" sono sulla
+    // finestra di osservazione, stessa fonte (pointsStatistics_) per
+    // card E punti, cosi' i due numeri non rischiano di sembrare un
+    // doppione con un numero leggermente diverso (era successo con
+    // n_jobs_observed/new_initiatives_observed, corretto lo stesso
+    // giorno).
+    document.getElementById('flow-open-cards').textContent = valueOrDash(points.open_cards);
+    document.getElementById('flow-open-points').textContent = metricValue(points.open_points, ' pt');
+    document.getElementById('flow-added-cards').textContent = valueOrDash(points.added_cards);
+    document.getElementById('flow-added-points').textContent = metricValue(points.added_points, ' pt');
+    document.getElementById('flow-added-rate').textContent = perWeekValue(flow.new_initiatives_per_day, '/settimana');
+    document.getElementById('flow-added-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.added_points, flow.window_days);
+    document.getElementById('flow-completed-cards').textContent = valueOrDash(points.completed_cards);
+    document.getElementById('flow-completed-points').textContent = metricValue(points.completed_points, ' pt');
+    document.getElementById('flow-completed-rate').textContent = perWeekValue(flow.completed_per_day, '/settimana');
+    document.getElementById('flow-completed-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.completed_points, flow.window_days);
+    document.getElementById('flow-window-days').textContent = valueOrDash(flow.window_days);
+
+    // Chiesto da Marco (2026-08-20): "passaggi" non e' un termine
+    // chiaro - una visita e' l'unita' reale che il team lavora (un
+    // caso con rientri ne genera piu' d'una), "iniziativa"/"punti"
+    // sono l'unita' del caso. Rinominato in "visite" ovunque, sempre
+    // con l'equivalente stimato in punti (fattore di conversione
+    // avg_points_per_initiative, dimensione media dei casi arrivati
+    // nel periodo) quando possibile.
+    var avgPoints = flow.avg_points_per_initiative;
+    renderDl('flow-extra-metrics', {
+      'Capacita\' disponibile stimata': perWeekValue(flow.estimated_capacity_per_day, ' visite/settimana') + estimatedPointsSuffix_(flow.estimated_capacity_per_day, avgPoints),
+      'Differenza tra entrate e uscite (iniziative/settimana)': perWeekValue(flow.entry_exit_difference, '/settimana')
     });
 
     var rework = system.reworkMetrics || {};
     renderDl('system-rework-metrics', {
       'Iniziative con almeno un rientro': nullablePercent(rework.initiatives_with_rework, true),
       'Rientri medi quando il lavoro rientra': estimableValue(rework.average_reentries_when_reworked),
-      'Passaggi medi per iniziativa': metricValue(rework.average_passages_per_initiative),
-      'Passaggi totali al giorno': metricValue(rework.total_passages_per_day),
-      'Carico aggiuntivo dei rientri': estimableValue(rework.additional_passages_from_rework, ' passaggi/giorno')
+      'Visite medie per iniziativa': metricValue(rework.average_passages_per_initiative),
+      'Visite totali alla settimana': perWeekValue(rework.total_passages_per_day, ' visite/settimana') + estimatedPointsSuffix_(rework.total_passages_per_day, avgPoints),
+      'Carico aggiuntivo dei rientri (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' visite/settimana') + estimatedPointsSuffix_(rework.additional_passages_from_rework, avgPoints)
     });
 
     var time = system.timeMetrics || {};
@@ -1842,27 +1961,68 @@
     });
     document.getElementById('time-message').textContent = (time.variability_message || '') + ' ' + (time.waiting_message || '');
 
+    // Chiesto da Marco (2026-08-20, punto 3): anche il lavoro presente
+    // sempre in punti oltre che in card - workloadMetrics ora porta
+    // anche i campi _points (Model.gs, currentWorkload_).
     var workload = system.workloadMetrics || {};
+    function cardsAndPoints_(count, points) {
+      return valueOrDash(count) + ' (' + metricValue(points, ' pt') + ')';
+    }
     renderDl('workload-metrics', {
-      'Lavoro pronto': valueOrDash(workload.ready),
-      'In preparazione': valueOrDash(workload.preparing),
-      'Lavoro in corso': valueOrDash(workload.in_progress),
-      'Concluso, non ancora fatturato': valueOrDash(workload.can_return),
-      'Lavoro in attesa (totale)': valueOrDash(workload.blocked),
-      'In attesa di cliente': valueOrDash(workload.waiting_client),
-      'In attesa di enti': valueOrDash(workload.waiting_authority),
-      'Fermi per decisione interna': valueOrDash(workload.waiting_internal)
+      'Lavoro pronto': cardsAndPoints_(workload.ready, workload.ready_points),
+      'In preparazione': cardsAndPoints_(workload.preparing, workload.preparing_points),
+      'Lavoro in corso': cardsAndPoints_(workload.in_progress, workload.in_progress_points),
+      'Concluso, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points),
+      'Lavoro in attesa (totale)': cardsAndPoints_(workload.blocked, workload.blocked_points),
+      'In attesa di cliente': cardsAndPoints_(workload.waiting_client, workload.waiting_client_points),
+      'In attesa di enti': cardsAndPoints_(workload.waiting_authority, workload.waiting_authority_points),
+      'Fermi per decisione interna': cardsAndPoints_(workload.waiting_internal, workload.waiting_internal_points)
     });
 
     var capacity = system.capacityMetrics || {};
-    renderDl('capacity-metrics', {
-      'Capacita teorica giornaliera': capacity.theoretical_per_day === null ? 'Non configurata' : metricValue(capacity.theoretical_per_day),
-      'Capacita effettiva giornaliera': estimableValue(capacity.effective_per_day, ' passaggi/giorno'),
-      'Assorbita dai nuovi lavori': metricValue(capacity.absorbed_by_new_work, ' passaggi/giorno'),
-      'Assorbita dai rientri': estimableValue(capacity.absorbed_by_rework, ' passaggi/giorno'),
-      'Margine residuo': estimableValue(capacity.residual_per_day, ' passaggi/giorno'),
-      'Margine disponibile': nullablePercent(capacity.available_share, true)
+    // Chiesto da Marco (2026-08-20): tolta la riga "Capacita teorica
+    // giornaliera" quando non configurata (theoretical_capacity_per_day
+    // in config) - non aggiungeva informazione, solo rumore. "passaggi"
+    // rinominato "visite" (termine ambiguo, segnalato da Marco), con
+    // l'equivalente stimato in punti quando calcolabile.
+    var capacityDl = {
+      'Capacita\' effettiva alla settimana': perWeekValue(capacity.effective_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.effective_per_day, avgPoints)
+    };
+    if (capacity.theoretical_per_day !== null) {
+      capacityDl['Capacita\' teorica alla settimana'] = perWeekValue(capacity.theoretical_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.theoretical_per_day, avgPoints);
+    }
+    capacityDl['Assorbita dai nuovi lavori (alla settimana)'] = perWeekValue(capacity.absorbed_by_new_work, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_new_work, avgPoints);
+    capacityDl['Assorbita dai rientri (alla settimana)'] = perWeekValue(capacity.absorbed_by_rework, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_rework, avgPoints);
+    capacityDl['Margine residuo (alla settimana)'] = perWeekValue(capacity.residual_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.residual_per_day, avgPoints);
+    capacityDl['Margine disponibile'] = nullablePercent(capacity.available_share, true);
+    renderDl('capacity-metrics', capacityDl);
+
+    var stability = system.stabilityMetrics || null;
+    var stabilityStateLabels = { stable: 'STABILE', stressed: 'SOTTO PRESSIONE', critical: 'CRITICO', unstable: 'INSTABILE' };
+    renderDl('stability-metrics', {
+      'Margine rispetto alla saturazione': stability ? nullablePercent(stability.margin, true) : 'Dato non ancora stimabile',
+      'Fattore di congestione': stability && stability.congestion_factor !== null ? metricValue(stability.congestion_factor) : 'Dato non ancora stimabile',
+      'Fattore di variabilita\'': stability ? metricValue(stability.variability_factor) : 'Dato non ancora stimabile',
+      'Stato': stability ? (stabilityStateLabels[stability.system_state] || stability.system_state) : 'Dato non ancora stimabile'
     });
+
+    // M5, chiesto da Marco (2026-08-20, punto 4): non solo il totale
+    // complessivo, anche occorrenze/media/min/max per tipo - la nuova
+    // forma di waitTimeMetrics (Model.gs, waitStats_) porta gia' tutto.
+    var waitTime = system.waitTimeMetrics || {};
+    renderWaitStatsRow_('wait-client', waitTime.client);
+    renderWaitStatsRow_('wait-authority', waitTime.authority);
+    renderWaitStatsRow_('wait-internal', waitTime.internal);
+    document.getElementById('wait-total-days').textContent = metricValue(waitTime.total_days, ' g');
+
+    var latentBacklog = system.latentBacklogMetrics || {};
+    renderDl('latent-backlog-metrics', {
+      'Periodo analizzato': metricValue(latentBacklog.window_days, ' giorni'),
+      'Consegne non ancora chiuse': valueOrDash(latentBacklog.count)
+    });
+
+    renderDelayProfile(system.delayProfileMetrics || {});
+    renderAdvancedMetrics(metrics);
 
     renderScenarios(system.scenarioReadiness || {});
     renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
@@ -1886,6 +2046,139 @@
     root.className = 'gauge gauge-' + tone;
     root.style.setProperty('--gauge-value', Math.round(ratio * 100) + '%');
     label.textContent = Math.round(Number(value) * 100) + '%';
+  }
+
+  // M9 (DESIGN_dashboard.md, §4.2): 'metrics' e' l'oggetto completo
+  // restituito da getMetrics - a differenza di tutto il resto di
+  // renderMetrics, che legge solo metrics.systemState, qui si leggono i
+  // campi top-level (lambda/mu/rho/MM1/MG1/rework/Cs2/E_S0/E_S1) gia'
+  // calcolati da calculateMetrics_ ma mai renderizzati prima di M9
+  // (verificato in M3).
+  function renderAdvancedMetrics(metrics) {
+    renderDl('advanced-base-metrics', {
+      // M9, fix del 2026-08-20 (segnalato da Marco: due numeri quasi
+      // uguali ma diversi in due pannelli diversi, "Nuove iniziative
+      // osservate" in Flusso del lavoro conta CASI unici, questo conta
+      // VISITE - un caso con 2 rientri nella finestra ne aggiunge 3 qui
+      // ma 1 solo li'. Etichetta corretta per non sembrare un doppione
+      // con un numero sbagliato.
+      'Visite osservate nel periodo (con rientri)': valueOrDash(metrics.n_jobs_observed),
+      'Tasso di arrivo (lambda)': perWeekValue(metrics.lambda, ' visite/settimana'),
+      'Tasso di servizio (mu)': perWeekValue(metrics.mu, ' visite/settimana/operatore'),
+      'Utilizzo (rho)': nullablePercent(metrics.rho, true),
+      'Tempo medio di servizio (E[S])': estimableValue(metrics.E_S, ' giorni'),
+      'Variabilita\' del servizio (Cv^2)': estimableValue(metrics.Cs2),
+      'Tempo medio prima visita (E[S0])': estimableValue(metrics.E_S0, ' giorni'),
+      'Tempo medio visita di rework (E[S1])': estimableValue(metrics.E_S1, ' giorni')
+    });
+
+    var mm1 = metrics.MM1 || {};
+    renderDl('advanced-mm1-metrics', {
+      'Attesa in coda (Wq)': estimableValue(mm1.Wq, ' giorni'),
+      'Tempo totale nel sistema (W)': estimableValue(mm1.W, ' giorni'),
+      'Visite in coda (Lq)': estimableValue(mm1.Lq),
+      'Visite nel sistema (L)': estimableValue(mm1.L)
+    });
+
+    var mg1 = metrics.MG1 || {};
+    renderDl('advanced-mg1-metrics', {
+      'Attesa in coda (Wq)': estimableValue(mg1.Wq, ' giorni'),
+      'Tempo totale nel sistema (W)': estimableValue(mg1.W, ' giorni'),
+      'Visite in coda (Lq)': estimableValue(mg1.Lq),
+      'Visite nel sistema (L)': estimableValue(mg1.L)
+    });
+
+    var rework = metrics.rework || {};
+    renderDl('advanced-rework-metrics', {
+      'Quota di visite di rework (p1)': nullablePercent(rework.p1, true),
+      'Rientri medi quando c\'e\' rework (r)': estimableValue(rework.r),
+      'Numero atteso di visite per iniziativa (E[K])': estimableValue(rework.E_K),
+      'Tasso di arrivo effettivo (lambda_effective)': perWeekValue(rework.lambda_effective, ' visite/settimana'),
+      'Utilizzo effettivo (rho_effective)': nullablePercent(rework.rho_effective, true)
+    });
+  }
+
+  // Sostituito il 2026-08-20 (chiesto da Marco: "si puo' fare un
+  // istogramma?" - prima era una tabella di percentuali, poco leggibile
+  // a colpo d'occhio) con un grafico a barre, stesso stile a canvas
+  // gia' usato da drawPointsTimeline.
+  // M5, chiesto da Marco (2026-08-20, punto 4): riempie una riga della
+  // tabella "Dove si blocca il lavoro" (totale/occorrenze/media/min/max)
+  // dallo stats object gia' pronto lato server (waitStats_, Model.gs).
+  function renderWaitStatsRow_(prefix, stats) {
+    stats = stats || {};
+    document.getElementById(prefix + '-total').textContent = metricValue(stats.total_days, ' g');
+    document.getElementById(prefix + '-occurrences').textContent = valueOrDash(stats.occurrences);
+    document.getElementById(prefix + '-average').textContent = estimableValue(stats.average_days, ' g');
+    document.getElementById(prefix + '-min').textContent = estimableValue(stats.min_days, ' g');
+    document.getElementById(prefix + '-max').textContent = estimableValue(stats.max_days, ' g');
+  }
+
+  function renderDelayProfile(profile) {
+    renderDl('delay-profile-metrics', {
+      'Rientri osservati (campione)': valueOrDash(profile.sample_size),
+      'Rientri medi per consegna (alpha)': estimableValue(profile.alpha)
+    });
+    drawDelayHistogram_(profile.kernel, profile.bin_days || 7);
+  }
+
+  function drawDelayHistogram_(kernel, binDays) {
+    var canvas = document.getElementById('delay-profile-chart');
+    var empty = document.getElementById('delay-profile-chart-empty');
+    if (!kernel) {
+      canvas.hidden = true;
+      empty.hidden = false;
+      empty.textContent = 'Dato non ancora stimabile (servono almeno 5 rientri osservati)';
+      return;
+    }
+    canvas.hidden = false;
+    empty.hidden = true;
+
+    var width = Math.max(420, canvas.parentElement.clientWidth - 32);
+    var height = 200;
+    var ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(ratio, ratio);
+    ctx.clearRect(0, 0, width, height);
+
+    var pad = { left: 34, right: 12, top: 12, bottom: 34 };
+    var plotWidth = width - pad.left - pad.right;
+    var plotHeight = height - pad.top - pad.bottom;
+    var max = Math.max.apply(null, kernel.concat([0.01]));
+    var barGap = 6;
+    var barWidth = (plotWidth - barGap * (kernel.length - 1)) / kernel.length;
+
+    ctx.font = '11px Arial';
+    ctx.strokeStyle = '#d8dee8';
+    ctx.fillStyle = '#627184';
+    for (var g = 0; g <= 4; g++) {
+      var gy = pad.top + plotHeight * g / 4;
+      ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(width - pad.right, gy); ctx.stroke();
+      ctx.fillText(Math.round(max * (1 - g / 4) * 100) + '%', 2, gy + 4);
+    }
+
+    kernel.forEach(function(share, index) {
+      var x = pad.left + index * (barWidth + barGap);
+      var barHeight = plotHeight * (share / max);
+      var y = pad.top + plotHeight - barHeight;
+      ctx.fillStyle = '#2F6B9A';
+      ctx.fillRect(x, y, barWidth, barHeight);
+
+      ctx.fillStyle = '#627184';
+      ctx.textAlign = 'center';
+      var label = index < kernel.length - 1
+        ? (index * binDays) + '-' + ((index + 1) * binDays - 1) + 'g'
+        : (index * binDays) + 'g+';
+      ctx.fillText(label, x + barWidth / 2, height - 18);
+      if (share > 0) {
+        ctx.fillText(formatPercent(share), x + barWidth / 2, Math.max(y - 4, pad.top + 10));
+      }
+      ctx.textAlign = 'left';
+    });
   }
 
   function renderPointsMetrics(points) {
@@ -2118,6 +2411,45 @@
       return 'Dato non ancora stimabile';
     }
     return String(value).replace('.', ',') + (suffix || '');
+  }
+
+  // Chiesto da Marco (2026-08-20): i tassi "al giorno" sono spesso
+  // frazioni difficili da leggere a colpo d'occhio (es. "0,42/giorno") -
+  // convertiti in "alla settimana" (x7) ovunque nella dashboard, dato
+  // gia' calcolato/arrotondato al giorno lato server (Model.gs, formule
+  // di teoria delle code legate tra loro) - la conversione resta solo
+  // di presentazione, nessun ricalcolo server.
+  function perWeekValue(value, suffix) {
+    if (value === null || value === undefined || value === '') {
+      return 'Dato non ancora stimabile';
+    }
+    return metricValue(Math.round(Number(value) * 700) / 100, suffix);
+  }
+
+  // Chiesto da Marco (2026-08-20, punto 3: "molto piu' aggressivo" nel
+  // dare sempre anche i punti oltre alle iniziative): 'total' e' gia'
+  // un totale sull'intera finestra (windowDays) - qui solo la
+  // conversione a un tasso settimanale, nessun nuovo dato dal server.
+  function pointsPerWeekFromWindowTotal_(total, windowDays) {
+    if (total === null || total === undefined || !windowDays) {
+      return 'Dato non ancora stimabile';
+    }
+    return metricValue(Math.round(Number(total) / windowDays * 7 * 100) / 100, ' pt/settimana');
+  }
+
+  // Stima i punti/settimana equivalenti di un tasso espresso in
+  // visite/giorno, moltiplicando per la dimensione media dei casi
+  // (avgPointsPerInitiative, da Model.gs) - sempre marcata "stimati"
+  // dal chiamante, mai un valore esatto come quello in punti osservati
+  // direttamente. Restituisce una stringa vuota (non "Dato non ancora
+  // stimabile", per non duplicare il messaggio gia' mostrato dal valore
+  // principale a cui questa stringa si affianca) se non calcolabile.
+  function estimatedPointsSuffix_(ratePerDay, avgPointsPerInitiative) {
+    if (ratePerDay === null || ratePerDay === undefined || avgPointsPerInitiative === null || avgPointsPerInitiative === undefined) {
+      return '';
+    }
+    var perWeek = Math.round(Number(ratePerDay) * 7 * Number(avgPointsPerInitiative) * 10) / 10;
+    return ' (~' + String(perWeek).replace('.', ',') + ' pt/settimana stimati)';
   }
 
   function escapeHtml(value) {

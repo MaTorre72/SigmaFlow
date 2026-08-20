@@ -1009,6 +1009,55 @@
     border-top: 4px solid var(--accent);
   }
 
+  .status-panel h3 {
+    border-top: 1px solid var(--line);
+    font-size: 14px;
+    margin: 14px 0 10px;
+    padding-top: 14px;
+  }
+
+  .panel h3 {
+    font-size: 14px;
+    margin: 16px 0 10px;
+  }
+
+  .panel h3:first-of-type {
+    margin-top: 10px;
+  }
+
+  .distribution-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .distribution-tab {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 6px 14px;
+  }
+
+  .distribution-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .advanced-details > summary {
+    cursor: pointer;
+    font-weight: 700;
+    list-style: revert;
+  }
+
+  .advanced-details[open] > summary {
+    margin-bottom: 10px;
+  }
+
   .status-summary {
     align-items: center;
     display: flex;
@@ -1028,6 +1077,12 @@
     border-top: 1px solid var(--line);
     font-size: 12px;
     padding-top: 10px;
+  }
+
+  .panel-chapter {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 400;
   }
 
   .quality-badge {

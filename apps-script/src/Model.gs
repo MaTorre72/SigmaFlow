@@ -39,11 +39,24 @@ function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
   var jobsById = indexBy_(jobs, 'job_id');
 
-  var observed = visite.filter(function(visit) {
+  // Fix del 2026-08-20 (segnalato da Marco: "Quadro avanzato" mostrava
+  // E[S]=0,32 giorni mentre "Tempi e variabilita'" (systemState, stessa
+  // finestra, stessi dati) mostrava 46,92 giorni per lo stesso concetto).
+  // Causa: 'completed' filtrava sulle sole visite APERTE nella finestra
+  // (observed, su apertura_ts) che avessero anche consegna_ts - le
+  // visite lunghe aperte PRIMA della finestra ma consegnate dentro
+  // restavano sistematicamente escluse, distorcendo E[S] verso il
+  // basso (bias di sopravvivenza). buildSystemState_ non ha questo
+  // problema: filtra 'completed' sulla consegna (consegna_ts >= since),
+  // indipendentemente da quando la visita si e' aperta - allineato qui
+  // alla stessa definizione, incluso l'archivio (N6) per la stessa
+  // ragione di coerenza gia' applicata li'.
+  var allVisite = visite.concat(visiteArchivio || []);
+  var observed = allVisite.filter(function(visit) {
     return visit.apertura_ts && new Date(visit.apertura_ts) >= since;
   });
-  var completed = observed.filter(function(visit) {
-    return visit.consegna_ts && visitServiceTimeDays_(visit) > 0;
+  var completed = allVisite.filter(function(visit) {
+    return visit.consegna_ts && new Date(visit.consegna_ts) >= since && visitServiceTimeDays_(visit) > 0;
   });
 
   var serviceTimes = completed.map(visitServiceTimeDays_);
@@ -58,6 +71,17 @@ function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var mg1 = queueMG1_(lambda, rho, stats.mean, stats.secondMoment);
   var rework = reworkMetrics_(completed, lambda, teamSize, mu, stats.secondMoment);
   var stability = stabilityMetrics_(rho, rework.rho_effective, stats.cs2);
+  // M9 (DESIGN_dashboard.md, §4.2): E[S0]/E[S1] (dispensa FSC, Cap. 6) -
+  // tempo medio di servizio separato per prima visita (numero_visita=1)
+  // e visite di rework (numero_visita>1), sullo stesso campione
+  // 'completed' gia' usato per E_S/E_S2/Cs2 sopra. A differenza degli
+  // altri campi di questo risultato, non era mai stato calcolato prima
+  // (la ricognizione M3 lo aveva erroneamente classificato come "gia'
+  // calcolato" insieme a E_K - corretto qui, non solo esposto).
+  var firstPassServiceTimes = completed.filter(function(visit) { return Number(visit.numero_visita || 1) === 1; }).map(visitServiceTimeDays_);
+  var reworkServiceTimes = completed.filter(function(visit) { return Number(visit.numero_visita || 1) > 1; }).map(visitServiceTimeDays_);
+  var statsS0 = sampleStats_(firstPassServiceTimes);
+  var statsS1 = sampleStats_(reworkServiceTimes);
 
   var result = {
     window_days: windowDays,
@@ -69,6 +93,8 @@ function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchiv
     E_S2: round_(stats.secondMoment),
     Var_S: round_(stats.variance),
     Cs2: round_(stats.cs2),
+    E_S0: firstPassServiceTimes.length ? round_(statsS0.mean) : null,
+    E_S1: reworkServiceTimes.length ? round_(statsS1.mean) : null,
     MM1: mm1,
     MG1: mg1,
     rework: rework,
@@ -147,8 +173,95 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var mg1 = enoughCompleted && effectiveLoad < 1
     ? queueMG1_(totalPassageRate, effectiveLoad, stats.mean, stats.secondMoment)
     : unstableQueue_();
+  // M4 (DESIGN_dashboard.md, §4.2): stabilityMetrics_ era gia' calcolata in
+  // calculateMetrics_ (Cap. 15 della dispensa FSC) ma mai passata a
+  // systemState, quindi mai renderizzata (vedi ricognizione M3) - qui si
+  // ricalcola con gli stessi ingredienti gia' in scope di buildSystemState_
+  // (nessun nuovo dato raccolto): rho "grezzo" (solo lavoro nuovo, senza
+  // rientri) = newRate/effectiveCapacity, rho effettivo (con rientri) =
+  // effectiveLoad gia' calcolato sopra, variabilita' = stats.cs2.
+  var rawRho = enoughCompleted && effectiveCapacity ? newRate / effectiveCapacity : null;
+  var stability = rawRho === null || effectiveLoad === null
+    ? null
+    : stabilityMetrics_(rawRho, effectiveLoad, stats.cs2);
+  // M5 (DESIGN_dashboard.md, §4.2): T_cliente/T_ente/T_interno (dispensa
+  // FSC §10, "dove si blocca il lavoro") - somma di un campo gia'
+  // accumulato per ogni visita (accumulateWaitTime_, Kanban.gs) ogni volta
+  // che una visita esce da una colonna stand_by, mai finora sommato.
+  // Stessa finestra ("observed") gia' usata per flowMetrics/reworkMetrics,
+  // per restare coerente con le altre metriche calcolate su periodo.
+  //
+  // Fix del 2026-08-20 (segnalato da Marco: "Attesa enti: 0,65 giorni"
+  // con 15 card ferme in attesa enti in quel momento, palesemente
+  // irragionevole): accumulateWaitTime_ scrive t_*_d solo quando una
+  // visita ESCE da una colonna stand_by - una card ancora ferma lì
+  // ORA non ha ancora accumulato nulla nella tabella 'visite', quindi
+  // sumVisitField_ da sola conta solo le attese gia' concluse, mai
+  // quelle in corso. Aggiunta l'attesa in corso per ogni job
+  // attualmente in una colonna stand_by, usando status_since_ts (M0-C,
+  // "da quando la card e' nella colonna attuale") - lo stesso campo
+  // gia' usato dal badge di invecchiamento sulla board (client.html).
+  // Fix del 2026-08-20, parte 2 (segnalato da Marco: i giorni mostrati
+  // sono totali complessivi, non chiaro; utile anche una media e un'idea
+  // di distribuzione, non solo il totale): da una somma unica per tipo a
+  // un campione di singole occorrenze di attesa (una per visita gia'
+  // chiusa con quel tipo di attesa valorizzato, una per ogni job ancora
+  // fermo ora in quel tipo di attesa) - waitStats_ ne deriva totale,
+  // numero di occorrenze, media, minimo, massimo.
+  var waitSamplesByField = { t_cliente_d: [], t_ente_d: [], t_interno_d: [] };
+  observed.forEach(function(visit) {
+    Object.keys(waitSamplesByField).forEach(function(field) {
+      var value = Number(visit[field] || 0);
+      if (value > 0) { waitSamplesByField[field].push(value); }
+    });
+  });
+  jobs.forEach(function(job) {
+    var column = columnMap[normalizeStatus_(job.status)];
+    var field = column ? SIGMAFLOW.WAIT_ACCUMULATOR_FIELDS[column.id] : null;
+    if (!field || !job.status_since_ts) { return; }
+    var elapsed = Number(diffDays(job.status_since_ts, now) || 0);
+    if (elapsed > 0) { waitSamplesByField[field].push(elapsed); }
+  });
+  var waitTime = {
+    client: waitStats_(waitSamplesByField.t_cliente_d),
+    authority: waitStats_(waitSamplesByField.t_ente_d),
+    internal: waitStats_(waitSamplesByField.t_interno_d)
+  };
+  // M6 (DESIGN_dashboard.md, §4.2): B_lat(t) (dispensa FSC §10,
+  // "esposizione futura a rientri") - consegne recenti (consegna_ts nella
+  // finestra osservata) la cui visita non e' mai rientrata (rientro_ts
+  // vuoto: e' ancora "l'ultima visita del caso", DESIGN_modello_caso_visita.md
+  // §8) e il cui caso non e' ancora formalmente chiuso
+  // (incarico_chiuso_ts vuoto). Solo jobs attivi: un caso archiviato ha
+  // per costruzione incarico_chiuso_ts valorizzato (archiveJob_ lo
+  // richiede), quindi non puo' mai comparire qui.
+  var jobsById = indexBy_(jobs, 'job_id');
+  var latentBacklogCount = completed.filter(function(visit) {
+    if (visit.rientro_ts) { return false; }
+    var job = jobsById[visit.job_id];
+    return Boolean(job) && !job.incarico_chiuso_ts;
+  }).length;
+  // M7 (DESIGN_dashboard.md, §4.2, decisione di Marco 2026-08-19): profilo
+  // di ritardo (Cap. 13 della dispensa FSC, "quanto e quando rientra il
+  // lavoro") - a differenza di M4-M6 richiede tutta la storia disponibile
+  // (allVisite, non filtrata sulla finestra di osservazione: una stima
+  // statistica beneficia di piu' campioni, e il documento tratta la
+  // finestra "flusso" e il profilo di ritardo come due concetti distinti),
+  // non solo un'aggregazione su periodo.
+  var delayProfile = delayProfile_(allVisite);
   var workload = currentWorkload_(jobs, columnMap);
   var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
+
+  // Chiesto da Marco (2026-08-20): mostrare "dove e' possibile" ogni
+  // tasso anche in punti, non solo in iniziative/visite - le
+  // grandezze di teoria delle code (capacita', assorbimento, margine)
+  // sono pero' tassi di VISITE, non di punti (i punti sono un
+  // attributo del caso, non della singola visita). Fattore di
+  // conversione stimato: dimensione media dei casi arrivati nella
+  // finestra osservata (punti aggiunti / iniziative nuove) - un solo
+  // fattore, riusato per ogni conversione lato client, sempre indicato
+  // come stima ("~") mai come valore esatto.
+  var avgPointsPerInitiative = initiativeList.length ? round_(points.added_points / initiativeList.length) : null;
 
   return {
     dataQuality: dataQuality,
@@ -160,7 +273,8 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       completed_initiatives: completedList.length,
       completed_per_day: completedList.length ? round_(completedRate) : null,
       estimated_capacity_per_day: effectiveCapacity === null ? null : round_(effectiveCapacity),
-      entry_exit_difference: completedList.length ? round_(newRate - completedRate) : null
+      entry_exit_difference: completedList.length ? round_(newRate - completedRate) : null,
+      avg_points_per_initiative: avgPointsPerInitiative
     },
     reworkMetrics: {
       initiatives_with_rework: reworkShare === null ? null : round_(reworkShare),
@@ -193,6 +307,24 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       safety_margin: availableShare === null ? null : round_(availableShare)
     },
     pointsMetrics: points,
+    waitTimeMetrics: {
+      window_days: windowDays,
+      client: waitTime.client,
+      authority: waitTime.authority,
+      internal: waitTime.internal,
+      total_days: round_(waitTime.client.total_days + waitTime.authority.total_days + waitTime.internal.total_days)
+    },
+    latentBacklogMetrics: {
+      window_days: windowDays,
+      count: latentBacklogCount
+    },
+    delayProfileMetrics: delayProfile,
+    stabilityMetrics: stability === null ? null : {
+      margin: stability.margin,
+      congestion_factor: stability.congestion_factor,
+      variability_factor: stability.variability_factor,
+      system_state: stability.system_state
+    },
     scenarioReadiness: {
       active: false,
       message: 'La simulazione non e ancora attiva. La struttura e pronta per confrontare scenari futuri.',
@@ -238,6 +370,12 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
     completed_points: sumJobPoints_(completed),
     added_points: sumJobPoints_(added),
     open_cards: openJobs.length,
+    // Consolidamento dashboard (segnalato da Marco, 2026-08-20): il
+    // pannello "Flusso e carico" mostra conteggio E punti nella stessa
+    // tabella, invece di leggerli da due fonti separate — servono i
+    // conteggi anche per aggiunte/completate, non solo per aperte.
+    completed_cards: completed.length,
+    added_cards: added.length,
     timeline: months,
     by_size: pointsBreakdown_(openJobs, 'size_class', ['XS', 'S', 'M', 'L', 'XL']),
     by_column: pointsByColumn_(allJobs, columnMap),
@@ -324,6 +462,13 @@ function sumJobPoints_(jobs) {
   return jobs.reduce(function(sum, job) { return sum + jobPoints_(job); }, 0);
 }
 
+// M5 (DESIGN_dashboard.md, §4.2): somma un accumulatore t_*_d su un
+// insieme di visite - il campo resta 0 finche' la visita non e' mai
+// uscita dalla colonna stand_by corrispondente (accumulateWaitTime_).
+function sumVisitField_(visite, field) {
+  return visite.reduce(function(sum, visit) { return sum + Number(visit[field] || 0); }, 0);
+}
+
 function jobPoints_(job) {
   var stored = Number(job.size_points);
   if (stored > 0) { return stored; }
@@ -352,27 +497,31 @@ function columnsFromConfig_(config) {
   return normalizeColumns_(config);
 }
 
+// Chiesto da Marco (2026-08-20): anche il lavoro presente in punti, non
+// solo in conteggio card - stesso ciclo, un secondo accumulatore in
+// parallelo (_points per ogni categoria _count esistente).
 function currentWorkload_(jobs, columnMap) {
   var result = {
-    ready: 0,
-    preparing: 0,
-    in_progress: 0,
-    can_return: 0,
-    blocked: 0,
-    waiting_client: 0,
-    waiting_authority: 0,
-    waiting_internal: 0
+    ready: 0, ready_points: 0,
+    preparing: 0, preparing_points: 0,
+    in_progress: 0, in_progress_points: 0,
+    can_return: 0, can_return_points: 0,
+    blocked: 0, blocked_points: 0,
+    waiting_client: 0, waiting_client_points: 0,
+    waiting_authority: 0, waiting_authority_points: 0,
+    waiting_internal: 0, waiting_internal_points: 0
   };
   jobs.forEach(function(job) {
     var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
-    if (column.role === 'backlog') { result.ready++; }
-    if (column.role === 'prep') { result.preparing++; }
-    if (column.role === 'wip') { result.in_progress++; }
-    if (column.role === 'stand_by') { result.blocked++; }
-    if (column.role === 'done' && !coerceBoolean_(job.invoiced)) { result.can_return++; }
-    if (job.status === 'wait_client') { result.waiting_client++; }
-    if (job.status === 'wait_authority') { result.waiting_authority++; }
-    if (job.status === 'wait_internal') { result.waiting_internal++; }
+    var points = jobPoints_(job);
+    if (column.role === 'backlog') { result.ready++; result.ready_points += points; }
+    if (column.role === 'prep') { result.preparing++; result.preparing_points += points; }
+    if (column.role === 'wip') { result.in_progress++; result.in_progress_points += points; }
+    if (column.role === 'stand_by') { result.blocked++; result.blocked_points += points; }
+    if (column.role === 'done' && !coerceBoolean_(job.invoiced)) { result.can_return++; result.can_return_points += points; }
+    if (job.status === 'wait_client') { result.waiting_client++; result.waiting_client_points += points; }
+    if (job.status === 'wait_authority') { result.waiting_authority++; result.waiting_authority_points += points; }
+    if (job.status === 'wait_internal') { result.waiting_internal++; result.waiting_internal_points += points; }
   });
   return result;
 }
@@ -467,6 +616,26 @@ function metricDescriptions_() {
   };
 }
 
+// M5, fix del 2026-08-20 (segnalato da Marco: i totali di "Dove si
+// blocca il lavoro" da soli non bastano - serve anche una media, e
+// un'idea di min/max). 'samples' e' un array di durate positive in
+// giorni, una per occorrenza di attesa (una visita chiusa con quel tipo
+// di attesa, o un job ancora fermo li' ora) - non filtra ne' aggrega
+// altro, il chiamante decide cosa raccogliere.
+function waitStats_(samples) {
+  if (!samples.length) {
+    return { total_days: 0, occurrences: 0, average_days: null, min_days: null, max_days: null };
+  }
+  var total = samples.reduce(function(sum, value) { return sum + value; }, 0);
+  return {
+    total_days: round_(total),
+    occurrences: samples.length,
+    average_days: round_(total / samples.length),
+    min_days: round_(Math.min.apply(null, samples)),
+    max_days: round_(Math.max.apply(null, samples))
+  };
+}
+
 function sampleStats_(values) {
   if (!values.length) {
     return { mean: 0, secondMoment: 0, variance: 0, cs2: 0 };
@@ -558,6 +727,68 @@ function stabilityMetrics_(rho, rhoEffective, cs2) {
     congestion_factor: rho >= 1 ? null : round_(rho / (1 - rho)),
     variability_factor: round_((1 + cs2) / 2),
     system_state: state
+  };
+}
+
+// M7 (DESIGN_dashboard.md, §4.2): profilo di ritardo (dispensa FSC, Cap.
+// 13). Definizione originaria del capitolo: D_i = rientro_ts -
+// consegna_ts, "si osservano solo i casi che rientrano DOPO una
+// consegna". Corretto il 2026-08-20 (segnalato da Marco: 0 campioni su
+// dati reali con 8-9 rientri veri) - quella definizione stretta non e'
+// applicabile a SigmaFlow, dove le colonne di attesa stanno PRIMA di
+// "DA INVIARE/FATTURARE" (DESIGN_modello_caso_visita.md §1, nota di
+// fedelta' al modello): un rientro tipico qui chiude la visita SENZA
+// mai passare da consegna_ts, quindi il campione restava quasi sempre
+// vuoto. Stessa estensione deliberata gia' adottata per p1/r in
+// reworkMetrics_ ("qualunque riapertura", non solo dopo consegna_ts,
+// §1 della stessa nota: "due letture possibili... Cap. 11 esteso,
+// adottato"): un rientro e' qualunque visita con rientro_ts
+// valorizzato, a prescindere da consegna_ts. D_i diventa il tempo di
+// attesa REALE accumulato in quella visita prima del rientro
+// (t_cliente_d + t_ente_d + t_interno_d, gia' calcolato da
+// accumulateWaitTime_ — lo stesso dato gia' esposto in "Dove si blocca
+// il lavoro", M5) invece di rientro_ts - consegna_ts (quasi sempre non
+// calcolabile su dati reali). alpha = rientri osservati / visite
+// "chiuse" in qualche modo (consegnate o rientrate - stessa nozione di
+// "chiusura" gia' usata da visitServiceTimeDays_ per il tempo di
+// servizio). k[m] = istogramma discretizzato di {D_i} su bin di 7
+// giorni (Delta, l'esempio esplicito del capitolo: "spesso sufficiente
+// e piu' semplice da stimare/aggiornare" della KDE continua),
+// normalizzato a somma 1; l'ultimo bin raccoglie la coda (>= bin_days *
+// (bin_count-1)) per restare un array di dimensione fissa. Nessuna
+// correzione per censura a destra (il capitolo la introduce come
+// raffinamento successivo, non come requisito minimo) - documentato
+// come limite noto, non un bug.
+function delayProfile_(visite) {
+  var MIN_SAMPLES = 5;
+  var BIN_DAYS = 7;
+  var BIN_COUNT = 8;
+
+  var reentries = visite.filter(function(visit) { return Boolean(visit.rientro_ts); });
+  var closedVisits = visite.filter(function(visit) {
+    return visitServiceTimeDays_(visit) > 0 || Boolean(visit.rientro_ts);
+  });
+  var delays = reentries
+    .map(function(visit) {
+      return Number(visit.t_cliente_d || 0) + Number(visit.t_ente_d || 0) + Number(visit.t_interno_d || 0);
+    })
+    .filter(function(days) { return days >= 0; });
+
+  if (delays.length < MIN_SAMPLES) {
+    return { sample_size: delays.length, alpha: null, bin_days: BIN_DAYS, kernel: null };
+  }
+
+  var kernelCounts = new Array(BIN_COUNT).fill(0);
+  delays.forEach(function(days) {
+    var bin = Math.min(Math.floor(days / BIN_DAYS), BIN_COUNT - 1);
+    kernelCounts[bin]++;
+  });
+
+  return {
+    sample_size: delays.length,
+    alpha: closedVisits.length ? round_(reentries.length / closedVisits.length) : null,
+    bin_days: BIN_DAYS,
+    kernel: kernelCounts.map(function(count) { return round_(count / delays.length); })
   };
 }
 

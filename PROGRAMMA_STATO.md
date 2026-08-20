@@ -1,5 +1,491 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-19
+Aggiornato: 2026-08-20
+
+## Collaudo pre-deploy su copia di PROD — due gap trovati da Marco, non bug di questa sessione (2026-08-20)
+
+Marco ha fatto una copia esatta dello spreadsheet PROD e l'ha puntata
+come database TEST (`SIGMAFLOW_TEST_SPREADSHEET_ID`), per collaudare il
+deploy prima di eseguirlo davvero su PROD. Due gap trovati, **entrambi
+preesistenti a questa sessione**, non causati da M1-M9 né dai fix di
+Cronologia:
+
+1. **La copia non ha i fogli archivio/cestino** — mai eseguito
+   l'allineamento schema lì (atteso, stessa causa di fondo di M1).
+   **Aggiunta** `setupSigmaFlowOnTest()` (Schema.gs): stesso pattern di
+   `migrateActivityLogOnTest`/`migrateVisiteFromHistoryOnTest`
+   (ActivityLog.gs, già esistenti) — risolve sempre e solo lo
+   spreadsheet in `SIGMAFLOW_TEST_SPREADSHEET_ID`, mai la property
+   condivisa `SIGMAFLOW_SPREADSHEET_ID` (stesso rischio già documentato
+   più volte in questo file). Eseguibile dall'editor Apps Script, menu
+   Esegui.
+
+2. **`visite` non riflette l'intera storia di `activity_log_json`** per
+   almeno un caso reale mostrato da Marco (`JOB-20260707-NZFQ`, 12
+   eventi manuali nel log su 7 mesi, almeno 2 rientri reali visibili —
+   `wait_authority→todo` il 26/06, `wait_client→todo` il 22/07 — ma una
+   sola riga in `visite`, con campi che sembrano un ibrido parziale, non
+   3 righe come atteso). **Non è un bug dei fix di stasera** (che
+   toccano solo il percorso *live*, `addActivityEvent`/`moveJob`) — è
+   la materializzazione storica autorevole (Fase L5,
+   `migrateVisiteFromHistory_`, `DESIGN_modello_caso_visita.md` §7) che
+   non risulta mai stata eseguita per intero su questi dati reali, o
+   eseguita prima che gran parte di questa storia fosse accumulata.
+   **Funzione già esistente per correggerlo**: `migrateVisiteFromHistoryOnTest()`
+   (ActivityLog.gs) — ricostruisce **tutta** la tabella `visite` da
+   zero, rileggendo `activity_log_json` di ogni caso, sullo spreadsheet
+   TEST configurato. **Distruttiva su `visite`** (la svuota e la
+   riscrive per intero) — sicura sulla copia di Marco, mai da eseguire
+   su PROD vero senza una decisione e un gate dedicati (non esiste oggi
+   un equivalente "SuProd" per questa funzione, a differenza di
+   `allineaSchemaSuProd()`).
+
+**Sequenza consigliata per Marco sulla copia**: prima
+`setupSigmaFlowOnTest()` (crea i fogli mancanti), poi
+`migrateVisiteFromHistoryOnTest()` (ricostruisce `visite`), entrambe
+dall'editor Apps Script.
+
+**Implicazione da verificare, non confermata**: se questo gap in
+`visite` è presente anche su altri casi reali di PROD (non solo quello
+mostrato), le metriche di dashboard che leggono da `visite` (flusso,
+rework, tempi, capacità — quasi tutte, calcolate su `visite`, mai su
+`jobs`) potrebbero essere state sottostimate su PROD per tutto questo
+tempo per i casi con una storia simile. **Non ancora quantificato** —
+richiede di eseguire `migrateVisiteFromHistoryOnTest()` sulla copia e
+confrontare i numeri prima/dopo, o un controllo mirato di quanti casi
+reali hanno questo pattern.
+
+**Nessun codice applicativo cambiato per questi due punti** (solo la
+nuova `setupSigmaFlowOnTest()`, di sola comodità) — push su TEST
+verificato, 16/16 file identici. Commit: `74b15cf`.
+
+## M2 — "Cronologia lenta" diagnosticata e corretta: causa reale trovata (2026-08-20)
+
+Seguito diretto della sezione precedente: Marco ha confermato che il
+rallentamento è **all'apertura della tab Cronologia**, 7-10 secondi.
+
+**Causa reale trovata**: `withEnvironment_` (Utils.gs) prende un lock
+**globale di script** (`LockService.getScriptLock()`) per **ogni**
+chiamata `api()`, anche di sola lettura come `getActivityLog` — non
+solo per le scritture. Il fix del ritardo di 1-2 minuti sulla board
+(sezione precedente, stessa sessione) aveva introdotto un
+`loadBoard(true)` dopo ogni salvataggio in Cronologia: un giro in più
+di lock, e per di più il più pesante (`getBoard()` rilegge `jobs` +
+`visite` per intero), proprio nel percorso più battuto durante un
+collaudo — capace di mettere in coda dietro di sé anche le letture più
+leggere come `getActivityLog`, spiegando perché il sintomo è comparso
+proprio nella stessa sessione in cui quel fix è stato introdotto.
+
+**Corretto** (Kanban.gs): `addActivityEvent`/`updateActivityEvent`/
+`deleteActivityEvent` restituiscono ora il job già aggiornato (status +
+campi di rientro ricalcolati, nuovo helper `attachOpenVisitSummary_`) —
+stesso contratto di risposta già usato da `moveJob` (M0-A2). Il client
+(`applyActivityJobUpdate_` in `client.html`, sostituisce
+`refreshBoardAfterActivityChange_`) aggiorna la card in stato locale
+con il job ricevuto nella stessa risposta, **senza una seconda chiamata
+al server** — niente più giro di lock aggiuntivo, la card si sposta
+comunque subito sulla board (stesso risultato del fix precedente, senza
+il suo costo).
+
+**Test aggiunti** (`Tests.gs`), 3 nuovi:
+`testAddActivityEventReturnsUpdatedJobInResponse`,
+`testUpdateActivityEventReturnsUpdatedJobInResponse`,
+`testDeleteActivityEventReturnsUpdatedJobInResponse` — verificano che
+la risposta includa il job aggiornato (status + `visit_number`).
+**152/152 test passati nell'harness Node** (149 preesistenti + 3
+nuovi, nessuna regressione).
+
+**Verificato nel Browser pane** (stesso server locale di riproduzione,
+network instrumentato per contare le chiamate `/api`): la sequenza
+reale via form Cronologia genera ora **2 chiamate `api()` invece di 3**
+(`addActivityEvent` + `getActivityLog`, non più anche `getBoard`) — la
+card si sposta comunque sulla board reale (contatori di colonna
+corretti), nessun errore in console.
+
+**Push su TEST verificato**: 16/16 file identici.
+
+**Commit**: `1629133` (dopo `475f4b4`/`5298645`).
+
+**Non ancora confermato da Marco**: se il rallentamento reale (7-10s su
+GAS vero, non riproducibile nell'harness Node senza latenza di rete) è
+sceso in modo percepibile dopo questo fix — richiede un nuovo test su
+TEST da parte sua, non verificabile da questa sessione.
+
+## M2 — bug trovato da Marco in collaudo, corretto: fix del 19/08 incompleto (2026-08-20)
+
+Marco ha segnalato in chat che il fix di M2 (19/08) non era completo,
+con un caso reale riprodotto a mano: card in "ATTESA ENTI", una
+correzione manuale in Cronologia la riporta a "TO DO" (rientro
+corretto), poi un secondo evento manuale "TO DO → WIP" — la card
+restava ferma su TO DO invece di seguire anche il secondo spostamento.
+Marco ha segnalato anche un ritardo di 1-2 minuti nell'aggiornamento
+della board dopo una correzione, e che il render della Cronologia resta
+percepito come lento (quest'ultimo **non ancora indagato**, vedi nota
+in fondo).
+
+**Causa reale**: il fix del 19/08 aggiornava `job.status` **solo** per
+il pattern di rientro (provenienza stand_by/done, destinazione
+backlog/prep, `applyManualReentryIfNeeded_`) — un evento 'move' manuale
+che non fosse un rientro (es. TO DO → WIP, provenienza non stand_by/
+done) non toccava mai `job.status`, lasciando la card ferma
+sull'ultimo rientro anche se l'utente aveva registrato esplicitamente
+uno spostamento successivo.
+
+**Corretto** (Kanban.gs): `applyManualReentryIfNeeded_` rinominata
+`applyManualMoveEffects_` — ora aggiorna sempre `job.status`/
+`status_since_ts` per **qualunque** evento 'move' manuale
+(`addActivityEvent`/`updateActivityEvent`), non solo i rientri. Lo
+split di visita (chiusura + nuova apertura) resta condizionato al vero
+pattern di rientro, invariato. `alignOpenVisitFields_` ora chiamata
+sempre dopo (mai più condizionata da un `if`), dato che
+`ensureOpenVisit_` trova comunque sempre la visita giusta (quella senza
+`rientro_ts`, che dopo uno split è sempre la nuova, mai quella appena
+chiusa — il timore iniziale che giustificava la condizione era
+infondato). `deleteActivityEvent` continua **deliberatamente** a non
+passare `candidate` (comportamento invariato, già documentato nel
+codice): la riallineatura dopo una cancellazione non correlata non deve
+né spostare la card né duplicare una visita.
+
+**Corretto anche il ritardo di 1-2 minuti**: dopo una correzione
+manuale che ora può davvero spostare la card, la board aspettava il
+prossimo giro di polling (fino a 45s, `bindVisibilityPolling_`) per
+accorgersene. `submitActivityPayload_`/`confirmActivityDelete_`
+(`client.html`) ora richiamano subito `loadBoard(true)` dopo un
+salvataggio riuscito in Cronologia — `loadBoard` modificata per
+restituire la propria Promise, cosi' si puo' anche aggiornare
+`state.activeJob` con il job appena rifresh, per la tab Informazioni
+nella stessa sessione del modale.
+
+**Test aggiunti** (`Tests.gs`), 2 nuovi:
+`testAddActivityEventPlainManualMoveUpdatesStatus` (move manuale non di
+rientro sposta comunque la card),
+`testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus`
+(riproduce esattamente lo scenario di Marco: rientro + move successivo
+— la card finisce nella colonna dell'ultimo evento, un solo split di
+visita, non due). **149/149 test passati nell'harness Node** (147
+preesistenti + 2 nuovi, nessuna regressione).
+
+**Verificato nel Browser pane** (server locale di riproduzione,
+`/tmp/sf-scratch/repro-server.js`): sequenza reale via il form
+Cronologia (non solo chiamate dirette all'API) — card creata, spostata
+in ATTESA ENTI, poi un evento manuale verso TO DO inserito dal vero
+form UI. `state.board`/DOM aggiornati entro <1s dal salvataggio (non ai
+prossimi 45s di polling), card visibile in TO DO sulla board reale,
+nessun errore in console.
+
+**Push su TEST — inizialmente bloccato da token OAuth clasp scaduto**
+(`invalid_grant`/`invalid_rapt`, stesso tipo di blocco già capitato in
+altre sessioni), risolto con `clasp login` su richiesta esplicita di
+Marco in chat. Verificato dopo: 16/16 file identici.
+
+**Nota aperta, non indagata in questa sessione**: "il render della
+cronologia è ancora molto lento" — segnalazione di Marco, senza numeri
+o passi di riproduzione specifici. Una causa simile era già stata
+trovata e risolta in una sessione precedente (M0-A2, doppio round-trip
+tra anteprima Informazioni e tab Cronologia) — non è chiaro se questa è
+una recidiva, una causa diversa, o un effetto collaterale dei
+salvataggi ora più pesanti (`applyManualMoveEffects_` legge l'intero
+foglio `visite` per l'idempotenza quando l'evento è un vero rientro).
+**Da chiedere a Marco**: quanti secondi, e se il rallentamento è
+all'apertura della tab Cronologia o al salvataggio di un evento —
+prima di intervenire alla cieca su un problema già indagato una volta.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `475f4b4`.
+
+## M4-M9 (dashboard) — DONE, programma Fase M completo salvo merge (2026-08-19)
+
+Eseguite in sequenza subito dopo la conferma del gate M3 (nessun gate
+intermedio tra una sotto-fase e la successiva, come da runbook).
+Riferimento: [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §4.2.
+
+**M4 — Margine di stabilità (Cap. 15)**: `stabilityMetrics_`
+(`Model.gs`) era già calcolata in `calculateMetrics_` ma mai passata a
+`systemState` (trovato in M3). Ora collegata dentro `buildSystemState_`
+con gli stessi ingredienti già in scope (rho grezzo = newRate/
+effectiveCapacity, rho effettivo = effectiveLoad, variabilità =
+stats.cs2) — zero nuovo dato raccolto. Nuovo pannello "Margine di
+stabilità" (`dashboard.html`/`client.html`). Null sotto la soglia
+minima di campioni (stessa soglia >=5 di `enoughCompleted`).
+
+**M5 — Dove si blocca il lavoro (T_cliente/T_ente/T_interno)**: somma
+di `t_cliente_d`/`t_ente_d`/`t_interno_d` (già accumulati per visita da
+`accumulateWaitTime_`, Kanban.gs, mai sommati) sulla stessa finestra
+"observed" di flowMetrics/reworkMetrics. Nuovo helper `sumVisitField_`
+(Model.gs), nuovo pannello "Dove si blocca il lavoro".
+
+**M6 — Esposizione futura a rientri (B_lat(t))**: conta le visite con
+`consegna_ts` nella finestra osservata, mai rientrate (`rientro_ts`
+vuoto — "ultima visita del caso") il cui job non è formalmente chiuso
+(`incarico_chiuso_ts` vuoto). Un caso archiviato non può mai comparire
+(`archiveJob_` richiede `incarico_chiuso_ts` valorizzato per
+costruzione). Nuovo pannello "Esposizione futura a rientri".
+
+**M7 — Profilo di ritardo, α e kernel k[m] (Cap. 13)**: letto il
+capitolo della dispensa FSC (`docs/fsc.md`) per implementare
+correttamente la definizione, non inventata. $D_i$ = `rientro_ts` −
+`consegna_ts` per ogni visita consegnata e poi rientrata (**su tutta la
+storia disponibile**, non solo la finestra di osservazione — una stima
+statistica beneficia di più campioni, scelta deliberata diversa dalle
+altre metriche di questa fase). α = rientri osservati / consegne
+osservate. k[m] = istogramma discretizzato di {D_i} su bin di 7 giorni
+(l'esempio esplicito del capitolo), normalizzato a somma 1, coda
+raccolta nell'ultimo bin. **Nessuna correzione per censura a destra**
+(raffinamento del capitolo, non requisito minimo) — limite noto,
+documentato nel codice (`delayProfile_`, Model.gs). Null sotto soglia
+(5 campioni). Nuovo pannello "Profilo di rientro" (tabella dei bin +
+α).
+
+**M8 — Ottimizzazioni frontend (salta il ridisegno del polling)**:
+`loadBoard()` (`client.html`) confronta un'istantanea testuale dello
+stato che guida il disegno (columns/jobs/columnMeta/priorityClasses)
+con quella del giro precedente — se identica e non è un refresh
+esplicito (`force`), salta `renderBoard()`/`renderToolbarFilters()`,
+non l'aggiornamento dell'orario. Il percorso drag-and-drop
+(`moveJob`/`deleteJob`) evitava già un `renderBoard()` completo dal M0-B
+precedente; questo completa lo stesso principio sul polling periodico
+(45s), l'unico rimasto a ridisegnare incondizionatamente. **Verificato
+nel Browser pane** con un server locale di riproduzione (markup reale +
+`routeAction_` via l'harness Node, `/tmp/sf-scratch/repro-server.js`,
+rimosso a fine verifica): un marcatore su un nodo DOM di card sopravvive
+a un poll con dati invariati (nessun ridisegno) e sparisce dopo un poll
+successivo a una modifica reale sul server (ridisegno avvenuto, nuova
+card visibile) — nessun errore in console in nessuno dei due casi.
+**Deliberatamente fuori scope**: caching lato server delle letture
+`getDataRange().getValues()` — stessa classe di rischio (stato
+condiviso che può disallinearsi) dei due incidenti già documentati in
+questo file (`PROP_SCHEMA_VERSION`, `SIGMAFLOW_SPREADSHEET_ID`) su un
+tool in produzione con scritture concorrenti reali — da riprendere solo
+se una latenza misurata lo giustifica.
+
+**M9 — Pannello "quadro avanzato" (Cap. 3-9)**: espone λ/μ/ρ/E[S]/Cv²,
+M/M/1 e M/G/1 (Wq/W/Lq/L), rework (p1/r/E[K]/lambda_effective/
+rho_effective) — tutti già calcolati in `calculateMetrics_` ma mai
+renderizzati (`client.html` leggeva solo `metrics.systemState`, mai i
+campi top-level — confermato in M3). **Corretto un errore della
+ricognizione M3**: E[S0]/E[S1] (tempo medio di servizio di prima visita
+vs rework, Cap. 6) erano stati classificati per sbaglio come "già
+calcolati" insieme a E[K] — in realtà mai implementati. Aggiunta la
+separazione mancante in `calculateMetrics_` (GROUP BY `numero_visita` =
+1 vs > 1 sullo stesso campione già usato per E_S/E_S2/Cs2).
+
+**Test aggiunti attraverso M4-M9** (`Tests.gs`, harness Node), 13
+nuovi: `testBuildSystemStateExposesStabilityMetrics`,
+`testBuildSystemStateStabilityMetricsNullWhenInsufficientData`,
+`testBuildSystemStateSumsWaitTimeByType`,
+`testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries`,
+`testDelayProfileNullBelowMinimumSamples`,
+`testDelayProfileComputesAlphaAndKernelFromDeliveredThenReentered`,
+`testDelayProfileAlphaCountsAllDeliveriesNotOnlyReentered`,
+`testBuildSystemStateExposesDelayProfileInSystemState`,
+`testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus`,
+`testCalculateMetricsE_S0E_S1NullWhenNoSamples` (M8 non ha test
+nell'harness — cambia solo comportamento client, verificato nel
+Browser pane come sopra). **147/147 test passati nell'harness Node**
+(134 dopo M2 + 13 nuovi, nessuna regressione), verificati ad ogni
+sotto-fase, non solo alla fine.
+
+**Push su TEST verificato ad ogni sotto-fase**:
+`bash apps-script/test-harness/push-and-verify.sh` (16/16 file
+identici, sempre).
+
+**Verifica UI reale**: server locale di riproduzione (stessa tecnica di
+N4/N5/N6/N-B2), seed con due card attive. Tutti i nuovi pannelli (M4,
+M5, M6, M7, M9) renderizzati correttamente con placeholder "Dato non
+ancora stimabile" sotto soglia dati, nessun errore in console.
+
+**Criteri di accettazione**: nessun elenco dedicato in
+`DESIGN_dashboard.md` per M4-M9 (proposte durante M3, non nella
+struttura a caselle di M1/M2) — verificati per via del Definition of
+Done del runbook (test, push, questo aggiornamento) invece che da una
+lista di spunta nel documento di design.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `dd27edf` (M4-M6), `d9f2a96` (M7), `93cd790` (M9), `b155e37`
+(M8) — dopo `f9b2a05` (M3).
+
+**Programma Fase M — completo salvo un solo passo**: tutte le
+sotto-fasi M1-M9 di `docs/DESIGN_dashboard.md` sono DONE. **Unico gate
+rimasto**: §6 del design doc, "fusione del fix in `main`" — prassi
+ordinaria (mai push diretto su `main`), riservata a Marco tramite pull
+request, non un gate di design. Nessuna sotto-fase residua da eseguire
+in autonomia.
+
+## M3 (dashboard) — Ricognizione completata, GATE 🔴 UMANO in attesa (2026-08-19)
+
+Riferimento: [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §4.
+Nessun codice toccato — solo lettura/inventario, come da contenuto
+previsto per M3.
+
+**Risultato** (dettaglio completo in §4.1 del design doc): tutto
+quanto oggi in `systemState` (`Model.gs`/`dashboard.html`) è
+effettivamente renderizzato, nessun campo morto lì — a differenza dei
+campi legacy top-level di `calculateMetrics_` (`MM1`/`MG1`/`lambda`/
+`rework`/`stability`/`distributions`), mai passati a `systemState`,
+quindi mai mostrati (già noto da N6, riconfermato). Confrontato con
+`DESIGN_modello_caso_visita.md` §10 (Cap. 11-15): mancano ancora
+$T_{cliente}$/$T_{ente}$/$T_{interno}$ (mai sommati/esposti),
+$B_{lat}(t)$ (mai calcolato), $\alpha$/kernel Cap. 13 (mai stimato);
+il margine di stabilità (Cap. 15) è invece **già calcolato**
+(`stabilityMetrics_`) ma mai collegato a `systemState` — solo da
+esporre, non da ricalcolare.
+
+**Piano proposto** (§4.2 del design doc), in attesa di conferma:
+- **M4**: collegare `stability` (già calcolato) a `systemState` +
+  pannello dedicato — zero nuovo calcolo.
+- **M5**: $T_{cliente}$/$T_{ente}$/$T_{interno}$ — somma di un campo
+  già raccolto per ogni visita, mai aggregato.
+- **M6**: $B_{lat}(t)$ — stessa categoria di M5, dato già presente,
+  solo mai aggregato in questo modo.
+- **M7**: $\alpha$/kernel (Cap. 13) — **raccomandato fuori scope**,
+  richiede una vera stima statistica, non solo un aggregato; da
+  riprendere con un documento dedicato quando serve davvero.
+- **M8**: ottimizzazioni frontend residue (`renderBoard()` DOM
+  completo, letture integrali dei fogli) — confermate ancora presenti
+  nel codice, nessuna misura reale raccolta in questa sessione (nessun
+  accesso al deployment). Inclusione **non raccomandata di default**,
+  decisione esplicita di Marco.
+- Non deciso dalla ricognizione: se aggiungere un pannello "quadro
+  avanzato" per le metriche di Cap. 3-9 già calcolate ma mai esposte
+  ($\lambda$/$\mu$/$\rho$/$C_v^2$/Pollaczek-Khinchine/
+  $E[S_0]$/$E[S_1]$/$E[K]$).
+
+**GATE 🔴 UMANO (§3 e §6 del design doc) — IN ATTESA**: come da
+runbook, questa sessione si ferma qui. Serve una conferma esplicita di
+Marco su: (1) includere M4-M6 come proposto, (2) lasciare M7 fuori
+scope come raccomandato, (3) includere o no M8, (4) aggiungere o no un
+pannello "quadro avanzato" per Cap. 3-9. Nessuna sotto-fase M4+
+iniziata.
+
+## M2 (dashboard) — DONE, gate confermato da Marco (2026-08-19)
+
+Proseguita subito dopo la conferma del gate (nessuna nuova richiesta di
+Marco necessaria per procedere all'implementazione, come da CLAUDE.md).
+Riferimento: [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §3.
+
+**Decisione presa da Marco: opzione 2** — un evento 'move' inserito a
+mano in Cronologia che rappresenta un vero rientro deve ricalcolare
+`job.status` e creare la visita mancante, rispettando le stesse regole
+di validazione del drag-and-drop reale.
+
+**Codice**:
+- `ActivityLog.gs` (`validateSequence_`): nuovo hard error
+  `RIENTRO_DIRETTO_WIP_NON_CONSENTITO` — un evento 'move' manuale la cui
+  provenienza (`candidate.from`, già calcolato da
+  `computeFromForCandidate_`) è un'attesa/completato e la cui
+  destinazione è WIP viene rifiutato, **anche con `force: true`** (è un
+  hard error, non un warning superabile) — stessa regola già applicata
+  al drag-and-drop reale in `moveJob` (Kanban.gs), ora estesa alla
+  Cronologia manuale: prima non c'era, la Cronologia poteva registrare
+  uno stato che l'interfaccia normale non avrebbe mai permesso di
+  raggiungere.
+- `Kanban.gs`: nuova `applyManualReentryIfNeeded_(job, candidate)`,
+  chiamata da `applyStructuralAlignment_` (ora con un terzo parametro
+  `candidate`) **solo** dai percorsi `addActivityEvent`/
+  `updateActivityEvent` — quando il candidato rappresenta un rientro
+  vero (provenienza stand_by/done, destinazione backlog/prep, stessa
+  regola di `moveJob`), aggiorna `job.status`/`status_since_ts`,
+  azzera `incarico_chiuso_ts` se valorizzato (stessa regola N2, §8c),
+  chiude la visita aperta (`rientro_ts`/`rientro_da`) e ne apre una
+  nuova — stesso meccanismo di `updateVisiteForMove_`, applicato "live"
+  sulla visita attualmente aperta (non alla posizione storica
+  dell'evento corretto, stessa convenzione già in uso per gli altri
+  campi strutturali). **Idempotente**: `reentryAlreadyApplied_` verifica
+  se questo stesso rientro (job + `rientro_ts` + `rientro_da`) è già
+  stato registrato, per non duplicare la visita se lo stesso evento
+  viene risalvato (es. solo per correggere la nota).
+  **Deliberatamente non applicata** a `deleteActivityEvent` (la
+  riallineatura dell'ultimo move rimasto dopo una cancellazione non
+  correlata duplicherebbe una visita già aperta) né alla migrazione
+  storica Fase F (`migrateSingleJobActivityLog_`, già autorevole via la
+  materializzazione L5) — entrambe continuano a chiamare
+  `applyStructuralAlignment_` senza il terzo parametro, comportamento
+  invariato.
+- `client.html`: messaggio utente per il nuovo hard error
+  (`HARD_ERROR_MESSAGES_`).
+
+**Test aggiunti** (`Tests.gs`, harness Node), 3 nuovi:
+`testAddActivityEventManualReentryUpdatesStatusAndOpensVisit`
+(riproduce lo scenario esatto del 19/08: caso in attesa, correzione
+manuale verso backlog — `job.status` diventa `backlog`, 2 visite,
+`rientro_ts`/`rientro_da`/`rework_cause` corretti),
+`testAddActivityEventManualReentryDirectToWipBlocked` (stesso divieto
+di `moveJob`, anche con `force: true`),
+`testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit`
+(risalvare lo stesso evento senza cambiare data/colonne non duplica la
+visita). **137/137 test passati nell'harness Node** (134 preesistenti
++ 3 nuovi, nessuna regressione) — **due test preesistenti aggiustati**
+(`testDeleteActivityEventRealignsOpenVisit`,
+`testDeleteActivityEventManual`): usavano un rientro diretto a WIP via
+Cronologia manuale solo come sequenza di comodo per testare la
+cancellazione, ora vietato per lo stesso motivo — cambiata la colonna
+intermedia da un'attesa a una colonna neutrale, nessun cambiamento
+all'intento originale dei due test.
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(16/16 file identici).
+
+**Criteri di accettazione §3 di `docs/DESIGN_dashboard.md` — tutti
+[x]**, aggiornati direttamente nel documento di design.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `be41198` (dopo `b5f4b60`/`e3a908b` di M1).
+
+**Prossima sotto-fase**: M3 (Ricognizione — inventario di quanto esiste
+in dashboard oggi, confronto con la dispensa FSC), §4 di
+`docs/DESIGN_dashboard.md`. Nessun gate su M3 stessa, ma produce le
+sotto-fasi M4..Mn che **hanno** un gate 🔴 Umano (conferma del piano
+prima di iniziare M4) — quindi M3 può procedere in autonomia, la
+sessione si fermerà solo dopo aver prodotto il piano M4..Mn, per la
+conferma di Marco.
+
+## M1 (dashboard) — DONE, nessun gate di design (2026-08-19)
+
+Sessione autonoma (`docs/RUNBOOK_esecuzione_autonoma.md`), prima
+sotto-fase di [docs/DESIGN_dashboard.md](docs/DESIGN_dashboard.md) §2 —
+lo stesso bug null su PROD già registrato sul branch (non unito)
+`docs/nota-bug-archivio-prod-null`, ora risolto qui invece che solo
+documentato.
+
+**Codice** (`apps-script/src/Utils.gs`): `readTable_(sheet)` ricade su
+`[]` quando `sheet` è `null`, un solo punto — nessun controllo
+aggiuntivo necessario nei due chiamanti (`readArchivedList_` in
+Kanban.gs dietro `getArchivio`/`getCestino`,
+`loadJobsWithVisitSummaryFrom_` dietro
+`loadArchivedJobsWithVisitSummary_`/`getMetrics`): entrambi passano
+sempre `ss.getSheetByName(...)` a `readTable_`, quindi il fallback a
+monte li copre già senza modifiche loro.
+
+**Test aggiunti** (`Tests.gs`, harness Node), 3 nuovi — ognuno cancella
+i fogli archivio/cestino dopo un `setupSigmaFlow()` altrimenti normale,
+per simulare lo schema reale di PROD (mai allineato lì):
+`testGetArchivioReturnsEmptyWhenSheetsMissing`,
+`testGetCestinoReturnsEmptyWhenSheetsMissing`,
+`testGetMetricsReturnsEmptyArchivedDataWhenSheetsMissing` (un caso
+attivo resta leggibile nei punti aperti anche senza i fogli archivio).
+**134/134 test passati nell'harness Node** (131 preesistenti + 3
+nuovi, nessuna regressione).
+
+**Push su TEST verificato**: `bash apps-script/test-harness/push-and-verify.sh`
+(16/16 file identici).
+
+**Criteri di accettazione §2 di `docs/DESIGN_dashboard.md` — tutti
+[x]**, aggiornati direttamente nel documento di design.
+
+**Commit** su `fix/m1-null-sheet-archivio` (locale, non unito a
+`main`): `b5f4b60`. Nessun gate di design su M1 stessa (§6: il solo
+"gate" elencato è la prassi ordinaria di unire tramite PR, mai push
+diretto su `main` — non un gate di design da confermare). Nota
+separata dal design (non richiesta per chiudere M1): l'allineamento
+schema vero e proprio su PROD, per creare davvero i quattro fogli lì,
+resta una decisione di Marco, riservata a lui, quando vorrà — M1 rende
+PROD stabile anche senza quel passo (niente più errore, solo viste
+vuote).
+
+**Prossima sotto-fase, al momento della chiusura di M1**: M2
+(Cronologia — chiudere il buco "correzione manuale non aggiorna lo
+stato derivato"), §3 di `docs/DESIGN_dashboard.md` — gate 🔴 Umano
+confermato da Marco nella stessa sessione, vedi sezione M2 sopra
+(opzione 2 scelta, implementazione completata subito dopo).
 
 ## Incidente — property ambientale bloccata su TEST, PROD mostrava dati di TEST (2026-08-19)
 
