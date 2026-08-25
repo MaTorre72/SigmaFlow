@@ -162,7 +162,22 @@ function setupSigmaFlow() {
   seedAgingDaysForStandByColumns_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
   backfillStatusSinceTs_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
   migrateJobDefaults_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-  PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+  // Bugfix 2026-08-25: non sovrascrive piu' incondizionatamente la
+  // Script Property condivisa PROP_SPREADSHEET_ID con ss.getId() - 'ss'
+  // qui sopra e' gia' stato risolto da getSpreadsheet_() leggendo quella
+  // stessa property (o il fallback), quindi riscriverla era quasi
+  // sempre un no-op silenzioso: l'unico effetto reale era, quando la
+  // property si trovava gia' sporca (puntata su TEST) per un motivo
+  // esterno a questa funzione, RINFORZARE quello stato invece di
+  // limitarsi al vero scopo di questa riga - il bootstrap iniziale
+  // (nessuna property, nessun DEFAULT_SPREADSHEET_ID ancora
+  // configurato), quando serve "ricordarsi" a quale foglio ci si e'
+  // appena legati. Ora scrive solo se la property e' vuota - mai piu'
+  // un chiamante involontario di setupSigmaFlow() puo' confermare uno
+  // stato sporco preesistente.
+  if (!PropertiesService.getScriptProperties().getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID)) {
+    PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+  }
   PropertiesService.getScriptProperties().setProperty(SIGMAFLOW.PROP_SCHEMA_VERSION, SIGMAFLOW.SCHEMA_VERSION);
   return ok_({ spreadsheetId: ss.getId(), spreadsheetUrl: ss.getUrl() });
 }

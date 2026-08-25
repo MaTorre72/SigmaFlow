@@ -53,6 +53,36 @@ class Range {
     });
   }
   setValue(value) { this.sheet._set(this.row - 1, this.col - 1, value); }
+  getRow() { return this.row; }
+  // O3 (DESIGN_performance.md): mock minimale della vera TextFinder API
+  // (Range.createTextFinder), usata da findOpenVisitRow_ (Kanban.gs) al
+  // posto di una scansione manuale in JS di tutta la colonna job_id.
+  createTextFinder(text) { return new TextFinder(this, text); }
+}
+
+class TextFinder {
+  constructor(range, text) {
+    this.range = range;
+    this.text = String(text);
+    this._matchEntireCell = false;
+  }
+  matchEntireCell(value) { this._matchEntireCell = Boolean(value); return this; }
+  findAll() {
+    const values = this.range.getValues();
+    const results = [];
+    for (let r = 0; r < values.length; r++) {
+      for (let c = 0; c < values[r].length; c++) {
+        const cell = values[r][c];
+        const matched = this._matchEntireCell
+          ? String(cell) === this.text
+          : String(cell).indexOf(this.text) !== -1;
+        if (matched) {
+          results.push(new Range(this.range.sheet, this.range.row + r, this.range.col + c, 1, 1));
+        }
+      }
+    }
+    return results;
+  }
 }
 
 class MockSheet {

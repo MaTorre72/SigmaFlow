@@ -160,9 +160,18 @@
         if (view === 'dashboard') {
           loadMetrics();
         } else if (view === 'archivio') {
-          loadArchivio();
+          // Bugfix 2026-08-25 (segnalato da Marco): Archivio/Cestino
+          // sono viste consultate raramente (N4: cache per non
+          // ricaricarle ad ogni apertura tab), ma con un job appena
+          // archiviato/cestinato la cache diventava visibilmente
+          // stantia proprio quando serviva vederla aggiornata. Forzato
+          // un refresh ad ogni apertura del tab (non piu' solo alla
+          // primissima volta) - resta comunque pigro rispetto al
+          // caricamento pagina (nessuna chiamata finche' l'utente non
+          // apre il tab almeno una volta).
+          loadArchivio(true);
         } else if (view === 'cestino') {
-          loadCestino();
+          loadCestino(true);
         }
       });
     });
@@ -748,17 +757,20 @@
     document.getElementById('card-modal').showModal();
   }
 
-  // §4.1: eleggibile solo con incarico_chiuso_ts valorizzato sul caso
-  // aperto nel modale — stessa regola applicata lato server in
-  // archiveJob_ (Kanban.gs), qui solo per riflettere lo stato nel
-  // bottone (il server resta l'unica fonte di verita').
+  // Bugfix 2026-08-25 (decisione esplicita di Marco): il bottone
+  // "Archivia" deve essere sempre disponibile per qualunque card
+  // esistente, in qualunque stato — nessun vincolo su incarico_chiuso_ts
+  // ("Chiuso"), ne' qui ne' lato server (archiveJob_, Kanban.gs). Resta
+  // disabilitato solo quando non c'e' nessun job attivo nel modale (una
+  // card nuova, non ancora creata — updateArchiveButtonState_(null) da
+  // openNewJobModal — non ha un job_id da archiviare).
   function updateArchiveButtonState_(job) {
-    document.getElementById('modal-archive-button').disabled = !(job && job.incarico_chiuso_ts);
+    document.getElementById('modal-archive-button').disabled = !job;
   }
 
   function archiveJobFromModal() {
     var job = state.activeJob;
-    if (!job || !job.incarico_chiuso_ts) { return; }
+    if (!job) { return; }
     if (!confirm('Archiviare "' + (job.title || job.job_id) + '"? Il caso lascera\' la board e finira\' nella vista Archivio.')) {
       return;
     }

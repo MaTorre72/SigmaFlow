@@ -22,27 +22,22 @@ Uno Spreadsheet separato, stessi tab creati automaticamente da `setupSigmaFlow()
 
 ID di default (`DEFAULT_TEST_SPREADSHEET_ID` in Constants.gs): `1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU`.
 
-Può essere sovrascritto con la Script Property:
+**[Aggiornato 2026-08-25]** La Script Property `SIGMAFLOW_TEST_SPREADSHEET_ID`
+non è più necessaria — `withTestSpreadsheet_` (Tests.gs) ricade
+sull'id fisso sopra se assente, stesso principio del fix su
+`getSpreadsheetForEnv_`/PROD (vedi `PROGRAMMA_STATO.md`, incidente
+2026-08-25). Resta comunque disponibile come **override facoltativo**,
+se un giorno serve puntare test/migrazioni a uno spreadsheet TEST
+diverso da quello di default:
 
 ```text
-SIGMAFLOW_TEST_SPREADSHEET_ID = <id spreadsheet test>
+SIGMAFLOW_TEST_SPREADSHEET_ID = <id spreadsheet test alternativo>
 ```
 
-I test in `Tests.gs` usano solo questo ID (o il default se la property
-non è impostata). Se nessuno dei due risolve uno spreadsheet valido, i
-test si fermano.
-
-Per configurare la Script Property dall'editor Apps Script, eseguire:
-
-```text
-configureTestEnvironment
-```
-
-Poi eseguire:
-
-```text
-runAllTestsAndLog
-```
+`configureTestEnvironment` (che scrive questa property, oggi puntandola
+comunque al default) non è più un passo obbligatorio prima di
+`runAllTestsAndLog` — resta utile solo se si vuole davvero puntare a
+uno spreadsheet diverso da quello di default.
 
 ### Harness Node (senza editor Apps Script)
 
