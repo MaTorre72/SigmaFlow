@@ -1,5 +1,592 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-20
+Aggiornato: 2026-08-25
+
+## Incidente di sessione — checkout locale disallineato da `origin/main`, riconciliazione (2026-08-25)
+
+**Cosa è successo**: la sessione di oggi (Fase O, poi i bugfix a
+seguire — tutti descritti più sotto in questo file) è partita da un
+checkout locale di `main` **indietro di 22 commit** rispetto a
+`origin/main` su GitHub — mai verificato con `git fetch`/`git status`
+prima di iniziare a lavorare. Quei 22 commit (uniti il 19-20 agosto,
+PR #10) includevano lavoro **già live su PROD prima di oggi**
+(confermato da Marco): consolidamento dashboard (M3-M9), la feature
+"Cronologia diventa fonte di verità per lo stato derivato" (M2 +
+fix, **più completa** della reimplementazione scritta oggi più sotto —
+gestisce qualunque move manuale, non solo l'ultimo evento), un fix di
+performance sul giro di lock extra della Cronologia, `setupSigmaFlowOnTest`,
+un fix di sicurezza su `readTable_` (foglio null → `[]`).
+
+**Conseguenza**: ogni `clasp push` di oggi (dalla primissima, per la
+Fase O) ha sostituito l'intero progetto Apps Script con una versione
+mancante di quei 22 commit — e dato che nel corso della sessione Marco
+ha ripubblicato il deployment PROD (per portare live il fix
+dell'incidente sulla property ambientale, sezione sotto), **anche PROD
+è stato temporaneamente privato di quel lavoro**, non solo TEST.
+
+**Riconciliazione eseguita**: creato un branch dedicato
+(`fix/reconcile-fase-o-2026-08-25`) da `origin/main` vero e aggiornato.
+Confrontata **funzione per funzione** ogni modifica di oggi con il
+codice reale, non un merge automatico:
+
+- **Tenute e riapplicate sul codice vero** (genuinamente nuove, non
+  presenti in `origin/main`): O1/O2/O3 (performance `moveJob`/
+  `findOpenVisitRow_`/`updateVisiteForMove_`/scrittura parziale
+  `writeJobToRow_`, riapplicate senza toccare la logica M2 già
+  presente), il fix sulla property ambientale PROD/TEST
+  (`getSpreadsheetForEnv_`/`withTestSpreadsheet_`), il bottone
+  "Archivia" sempre disponibile (`archiveJob_`/client.html/board.html),
+  il refresh forzato di Archivio/Cestino all'apertura del tab.
+- **Scartate perché superate da una versione migliore già presente**:
+  la reimplementazione odierna di "Cronologia sposta la card"
+  (`computeStatusTransitionFromLog_`/`applyStatusTransition_` e le
+  relative funzioni client `applyJobUpdateFromServer_`/
+  `mergeJobIntoStateWithColumnMove_`) — la versione già in `main`
+  (`applyManualMoveEffects_`, M2) gestisce correttamente **qualunque**
+  move manuale (non solo l'ultimo evento del log), l'idempotenza sui
+  rientri, e l'accumulo del tempo di attesa sulle mosse manuali (bug
+  reale trovato da Marco su dati PROD, corretto il 20/08) — tutte cose
+  che la versione di oggi non copriva. Le sezioni più sotto in questo
+  file che descrivono quella reimplementazione restano come registro
+  storico di cosa è stato fatto **nella sessione**, non di cosa è
+  **live**: il codice realmente in uso è quello di M2, invariato da
+  oggi.
+- **Non riapplicato** (bug trovato oggi ma non più presente nel codice
+  reale): il fix a `placeCardInColumn_`/`mergeJobIntoState` per la
+  card "duplicata" — verificato che i percorsi reali del codice vero
+  (`moveJob`, `applyActivityJobUpdate_`) non espongono questo bug
+  (evitato per costruzione: `applyActivityJobUpdate_` chiama già
+  `removeCardEl_` prima di `placeCardInColumn_`), quindi il fix era
+  necessario solo per la reimplementazione scartata sopra, non per il
+  codice reale.
+
+**Verificato di nuovo, sul codice riconciliato**: 163/163 test
+nell'harness Node. Verifica end-to-end nel Browser pane (server locale
+di riproduzione) su tutti e quattro i punti tenuti: bottone Archivia
+sempre attivo su una card mai chiusa, correzione manuale in Cronologia
+sposta la card (logica M2, non quella scartata), drag-and-drop senza
+card duplicate, Archivio aggiornato subito dopo l'apertura del tab
+senza refresh di pagina. Push su TEST verificato: 16/16 file identici.
+`origin/main` (GitHub) non era mai stato toccato dall'errore — la
+riconciliazione è avvenuta su un branch dedicato, mai su `main`.
+
+
+## Estensione — anche la property TEST può restare assente a riposo (2026-08-25)
+
+Dopo aver chiuso l'incidente PROD (sotto), Marco ha chiesto se poteva
+eliminare anche `SIGMAFLOW_TEST_SPREADSHEET_ID` (property separata, mai
+coinvolta nell'incidente — un suo valore sbagliato non può far
+trapelare nulla su PROD, la separazione resta quella di
+`getSpreadsheetForEnv_`). Prima del fix però `withTestSpreadsheet_`
+(Tests.gs — usata da `runAllTestsAndLog`, `migrateActivityLogOnTest`,
+`migrateVisiteFromHistoryOnTest` e da tutta la suite quando eseguita
+dall'editor) **richiedeva esplicitamente** quella property e lanciava
+`Script Property mancante` se assente — a differenza di
+`getSpreadsheetForEnv_('test')` (Utils.gs), che già ricadeva su
+`DEFAULT_TEST_SPREADSHEET_ID` se la property mancava.
+
+**Corretto**: `withTestSpreadsheet_` ora ricade anch'essa su
+`SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID` quando la property è assente,
+stesso principio del fix su PROD. La property resta un **override
+facoltativo** (documentato in `docs/testing-and-security.md`, aggiornato)
+per chi volesse un giorno puntare test/migrazioni a uno spreadsheet TEST
+diverso dal default — non più un requisito.
+
+**Test aggiunto**: `testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent`
+(Tests.gs) — verifica che, con la property esplicitamente assente,
+`withTestSpreadsheet_` risolva `DEFAULT_TEST_SPREADSHEET_ID` invece di
+lanciare un errore. **138/138 test nell'harness Node** (137 + 1 nuovo,
+nessuna regressione). Push su TEST verificato: 16/16 file identici.
+
+Marco può ora eliminare anche `SIGMAFLOW_TEST_SPREADSHEET_ID` dalle
+Proprietà script se vuole — nessun impatto su test/migrazioni/uso
+normale della vista TEST del web app.
+
+## Incidente RICORRENTE — property ambientale sporca, PROD mostra ancora dati di TEST — CHIUSO (2026-08-25)
+
+Marco ha segnalato che PROD mostrava di nuovo dati di TEST — stesso
+sintomo dell'incidente del 2026-08-19 (vedi sezione storica sotto),
+**mai davvero chiuso alla radice**: quel fix aveva blindato solo il
+trigger di archiviazione (`archiveEligibleJobs_`), non il percorso
+generale usato da ogni richiesta web.
+
+**Causa reale, trovata leggendo il codice** (non solo ipotizzata):
+`getSpreadsheetForEnv_('prod')` (Utils.gs) — usata da `withEnvironment_`,
+quindi da **ogni singola chiamata** di `api()` per l'ambiente di
+default (qualunque richiesta senza `env=test` esplicito) — delegava a
+`getSpreadsheet_()`, che legge **prima** la Script Property condivisa
+`SIGMAFLOW_SPREADSHEET_ID` (mutabile, la stessa che l'incidente
+precedente aveva già dimostrato fragile) e solo se vuota ricade
+sull'id fisso di PROD (`DEFAULT_SPREADSHEET_ID`). Con la property
+sporca (puntata su TEST, per qualunque motivo — un'esecuzione
+interrotta, un test lanciato a mano dall'editor), **ogni richiesta
+prod la eredita silenziosamente** e la **ripersiste** nel proprio
+`finally` (che restituisce "il valore precedente", cioè quello sporco)
+— un ciclo che si auto-perpetua finché qualcuno non pulisce la property
+a mano, esattamente il comportamento osservato due volte.
+
+**Corretto** (Utils.gs, `getSpreadsheetForEnv_`): il ramo `'prod'` ora
+risolve **sempre** `SIGMAFLOW.DEFAULT_SPREADSHEET_ID` esplicitamente,
+esattamente come il ramo `'test'` risolve già il proprio id fisso — mai
+più la property ambientale. Il fallback a `getSpreadsheet_()` resta
+solo per un bootstrap teorico (nessun `DEFAULT_SPREADSHEET_ID`
+configurato), caso che oggi non si presenta in pratica.
+
+**Difesa aggiuntiva** (Schema.gs, `setupSigmaFlow()`): la scrittura
+incondizionata `PropertiesService...setProperty(PROP_SPREADSHEET_ID,
+ss.getId())` (nessun try/finally, nessun "valore precedente" da
+ripristinare) poteva *rinforzare* una property già sporca invece di
+limitarsi al proprio scopo reale (il bootstrap iniziale). Ora scrive
+solo se la property è vuota.
+
+**Verificato concretamente, non solo a occhio**: script isolato che
+confronta la vecchia logica (`getSpreadsheet_()` ambientale) con la
+nuova (`getSpreadsheetForEnv_('prod')`) a parità di property sporca —
+la vecchia risolve l'id sporco (riproduce l'incidente), la nuova
+risolve sempre il vero id di PROD. Nuovo test
+`testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty`
+(Tests.gs) — verifica sia `getSpreadsheetForEnv_('prod')` sia l'ambiente
+implicito (nessun `env` passato, il caso reale di un browser puntato
+sul deployment pubblico senza `?env=test`). Solo `SpreadsheetApp.openById(...).getId()`
+— nessuna lettura/scrittura di dati, sicuro anche se eseguito per
+errore sul vero progetto. **137/137 test nell'harness Node** (136 +
+1 nuovo, nessuna regressione). Push su TEST verificato: 16/16 file
+identici.
+
+**IMPORTANTE — il fix non è ancora live su PROD**: il codice è
+corretto e verificato su TEST, ma il deployment pubblico di PROD resta
+fissato alla versione precedente finché Marco non lo ripubblica
+esplicitamente (Distribuisci → Gestisci distribuzioni → distribuzione
+PROD → Modifica → Nuova versione → Distribuisci) — stessa regola di
+sempre, nessuna scrittura al deployment PROD eseguita da Claude.
+**Rimedio immediato dato a Marco**: eliminare subito
+`SIGMAFLOW_SPREADSHEET_ID` da Impostazioni progetto → Proprietà script
+per fermare il sintomo visibile, mentre pianifica il redeploy. Con il
+fix in codice, una property assente risolve comunque PROD in automatico
+per qualunque richiesta prod — non serve nemmeno riscriverla con l'id
+corretto.
+
+**Redeploy eseguito da Marco il 2026-08-25 — confermato ("problema
+risolto")**: il fix è ora live sul deployment pubblico di PROD. Nessuna
+sotto-fase residua su questo incidente.
+
+**Domanda di Marco, per chiarezza futura**: come cambiare l'indirizzo
+del foglio PROD in futuro, se mai servisse — risposta data: una sola
+riga, la costante `SIGMAFLOW.DEFAULT_SPREADSHEET_ID` (Constants.gs),
+unica fonte di verità usata da `getSpreadsheetForEnv_`/`backupProd_`/
+`allineaSchemaSuProd`/`eseguiMigrazioneCompletaSuProd` — cambiarla
+richiede comunque `clasp push` + un nuovo redeploy PROD eseguito da
+Marco, mai un'azione autonoma.
+
+## Bugfix — vista Archivio (e Cestino) non si aggiornava riaprendo il tab (2026-08-25)
+
+Segnalato da Marco dopo aver archiviato una card col nuovo bottone
+sempre attivo: la tabella Archivio non mostrava la card appena
+archiviata finché non ricaricava l'intera pagina. Causa: `loadArchivio()`/
+`loadCestino()` (client.html, N4) usano una cache in sessione
+(`state.archivioLoaded`/`state.cestinoLoaded`) pensata per non
+ricaricare ad ogni apertura tab una vista "consultata molto raramente"
+— corretta come idea, ma il caso reale (appena creato qualcosa che
+dovrebbe comparirci) non era coperto: bastava aprire il tab una volta
+per bloccare qualunque aggiornamento successivo nella stessa sessione.
+
+**Corretto**: il click sul tab "Archivio"/"Cestino" ora passa sempre
+`force: true` a `loadArchivio`/`loadCestino` — un refresh dal server ad
+ogni apertura, non solo la primissima. Resta comunque pigro rispetto al
+caricamento pagina (nessuna chiamata finché l'utente non apre il tab
+almeno una volta) — non ricaricato ogni N secondi, solo ad ogni
+apertura esplicita, coerente con "consultata raramente".
+
+**Verificato nel Browser pane** (spia su `callApi('getArchivio', ...)`):
+1 chiamata alla prima apertura del tab, **2 chiamate su 2 aperture**
+tornando alla board e riaprendo Archivio senza refresh di pagina —
+prima del fix sarebbe rimasta a 1 (cache mai invalidata). 136/136 test
+nell'harness Node (nessuna regressione — cambio puramente client, non
+coperto da test backend). Push su TEST verificato: 16/16 file identici.
+
+## Decisione di prodotto — bottone "Archivia" sempre disponibile, nessun vincolo (2026-08-25)
+
+Marco ha segnalato il bottone "Archivia" grigio/disattivato e chiesto
+come archiviare una card. Causa: la regola di eleggibilità originale
+(N2, `docs/DESIGN_archiviazione.md` §2/§4.1) — il bottone si abilitava
+solo con `incarico_chiuso_ts` valorizzato (spunta "Chiuso"), verificato
+sia lato client sia lato server (`archiveJob_` rifiutava altrimenti).
+Un primo tentativo di correggerlo (far salvare subito la spunta
+"Chiuso" per riattivare il bottone senza dover chiudere/riaprire la
+card) è stato **scartato in corsa** dopo la sua richiesta esplicita,
+più radicale: **"il tasto archivia deve essere sempre aperto,
+funzionante, sempre in ogni stato"** — nessun vincolo, né client né
+server.
+
+**Implementato**:
+- `archiveJob_` (Kanban.gs): rimossa la verifica `!job.incarico_chiuso_ts`
+  → throw. Qualunque job, chiuso o no, viene spostato in
+  `jobs_archivio`. **L'archiviazione *automatica* notturna
+  (`archiveEligibleJobs_`) resta invariata**: seleziona da sola, prima
+  di chiamare `archiveJob_`, solo i casi con `incarico_chiuso_ts`
+  valorizzato e oltre soglia — non dipende dal controllo appena
+  rimosso, quindi il trigger giornaliero continua ad archiviare solo
+  chiusure vere come da design originale.
+- `updateArchiveButtonState_`/`archiveJobFromModal` (client.html):
+  bottone disabilitato solo quando non c'è un job attivo nel modale
+  (card nuova non ancora creata) — non più legato a `incarico_chiuso_ts`.
+  Tooltip aggiornato (board.html).
+- `docs/DESIGN_archiviazione.md`: §2/§4.1 annotati con la decisione
+  rivista (non riscritti da zero — la motivazione originale resta
+  valida per l'automatico), criterio di accettazione corrispondente
+  barrato con nota.
+- **Test**: `testArchiveJobRejectsCaseNotClosed`/
+  `testArchiveJobApiActionRejectsCaseNotClosed` (asserivano il rifiuto)
+  sostituiti con `testArchiveJobSucceedsOnCaseNotClosed`/
+  `testArchiveJobApiActionSucceedsOnCaseNotClosed` (asseriscono il
+  successo). Nessun altro test toccato — `testArchiveEligibleJobsSkipsCasesNeverClosed`
+  (automatico) resta verde invariato, confermando che l'automatico non
+  è stato toccato.
+
+**Verificato end-to-end nel Browser pane**: card mai chiusa (`invoiced:
+false`) → bottone "Archivia" attivo (`disabled: false`) → click →
+archiviazione riuscita, card sparita dalla board. **136/136 test**
+nell'harness Node. Push su TEST verificato: 16/16 file identici.
+
+## Bugfix — la card corretta in Cronologia si spostava solo dopo "Salva e chiudi" o un refresh (2026-08-25)
+
+Segnalato da Marco subito dopo il collaudo della feature "Cronologia
+fonte di verita'" (vedi sezione sotto): la card si spostava
+visivamente, ma **tornava alla colonna vecchia** appena chiudeva il
+modale con la sola X o comunque senza un refresh completo — capiva solo
+di aver fatto la mossa giusta salvando anche dal tab Informazioni
+("Salva e chiudi") o ricaricando la board a mano.
+
+**Causa reale, confermata riproducendo il bug** (non solo letta dal
+codice): `applyJobUpdateFromServer_` (client.html, introdotta dal
+bugfix precedente) chiamava `mergeJobIntoState(job)` — funzione che
+sostituisce l'oggetto job **sul posto**, in qualunque array di
+`state.board` si trovi gia' oggi, ma **non lo sposta mai** tra gli
+array delle colonne. Per `moveJob` (drag&drop) questo va bene, perche'
+`moveJobLocally` ha gia' spostato la card tra gli array PRIMA che
+arrivi la risposta server — `mergeJobIntoState` trova la card gia' nel
+posto giusto, sostituisce solo l'oggetto. Ma per un'azione di
+Cronologia (nessun equivalente di `moveJobLocally` prima), la card
+restava "intrappolata" nell'array `state.board[colonnaVECCHIA]`, con un
+campo `status` che pero' punta alla colonna nuova: `placeCardInColumn_`
+sistema subito il singolo nodo DOM (per questo lo spostamento SEMBRA
+funzionare appena salvato), ma il primo `renderBoard()` completo
+successivo — che ricostruisce tutto il DOM da `state.board`, non dal
+DOM esistente — trova ancora la card nell'array della colonna vecchia e
+la rimette li'. "Salva e chiudi" e il refresh "risolvevano" solo perche'
+rifanno un giro che (per vie diverse) riallinea lo stato, non perche'
+la correzione in Cronologia da sola bastasse.
+
+**Riprodotto concretamente** con lo stesso server locale delle sessioni
+precedenti: card in "Attesa enti" → corretta in Cronologia a "Attesa
+clienti" → chiusa con la X (non "Salva e chiudi") → **prima del fix**,
+un `renderBoard()` forzato (senza refresh dati, solo redraw da
+`state.board`) rimetteva la card in "Attesa enti"; **dopo il fix**,
+resta correttamente in "Attesa clienti" anche dopo il redraw completo —
+verificato leggendo direttamente `state.board.wait_authority`/
+`state.board.wait_client` (non solo il DOM): l'array della colonna
+vecchia e' vuoto, quello della nuova contiene la card.
+
+**Corretto**: nuova `mergeJobIntoStateWithColumnMove_(job)` (client.html)
+— rimuove prima la card da OGNI array di `state.board`, poi la
+reinserisce in quello della colonna corrente (`job.status`), stesso
+principio gia' corretto in `moveJobLocally`. `applyJobUpdateFromServer_`
+ora la usa al posto di `mergeJobIntoState` (la vecchia funzione resta
+invariata e in uso per `moveJob`, dove va gia' bene cosi').
+
+**136/136 test nell'harness Node** (nessuna regressione — il bug era
+solo nello stato client, non coperto dai test backend). Push su TEST
+verificato: 16/16 file identici.
+
+## O3 (performance backend) — DONE, programma Fase O completo (2026-08-25)
+
+Su richiesta esplicita di Marco, dopo aver confermato O1/O2 funzionanti
+su TEST ("provato su TEST e funziona"). Riferimento:
+[docs/DESIGN_performance.md](docs/DESIGN_performance.md), §4 — la
+sotto-fase, inizialmente proposta come "indice vero, da progettare a
+parte" dietro un gate 🔴, e' stata **riprogettata prima di scriverla**:
+un indice posizionale (job → numero di riga) e' stato scartato perche'
+diventerebbe silenziosamente sbagliato ad ogni `deleteRow` su `visite`
+fatto per ALTRI job (archiviazione/cestino/ripristino spostano righe di
+job diversi da quello cercato, facendo scivolare gli indici di riga
+sottostanti) — rischio reale, non teorico, dato che `moveJobToSheet_`
+cancella righe `visite` di continuo. **Approccio scelto**: `TextFinder`
+(ricerca server-side sulla colonna `job_id`, `matchEntireCell(true)`),
+mai una posizione cacheata — la ricerca resta sempre dal vivo, ma il
+costo passa da "proporzionale al numero totale di visite di tutto il
+sistema" a "proporzionale a quante volte il job cercato compare" (1-3
+righe tipiche, mai l'intera tabella).
+
+**Codice** (`findOpenVisitRow_`, Kanban.gs): `sheet.getRange(2,
+headers.job_id, lastRow-1, 1).createTextFinder(String(jobId))
+.matchEntireCell(true).findAll()` individua le righe con quel job_id;
+`rientro_ts` viene letto **solo** per quelle righe trovate (non piu'
+l'intera colonna, come faceva ancora O2). Nessun'altra funzione toccata:
+stesso contratto di input/output.
+
+**Harness Node esteso** (`gas-harness.js`): mock minimale della vera API
+`Range.createTextFinder`/`TextFinder` (`matchEntireCell`/`findAll`,
+restituisce `Range[]` con `getRow()`) — nessuna funzione precedente la
+usava, aggiunta da zero per questa sotto-fase.
+
+**Verifica caso limite** (piu' visite con lo stesso `job_id`, una chiusa
+e una aperta): coperto dal test gia' esistente
+`testAutomaticReworkFromStandBy` (rientro da stand_by, visita 1 chiusa +
+visita 2 aperta) — passato senza modifiche, confermando che `TextFinder`
++ filtro su `rientro_ts` sceglie sempre la riga giusta anche con righe
+duplicate per job_id. Nessun test nuovo scritto apposta (il caso era
+gia' coperto).
+
+**136/136 test passati nell'harness Node** (nessuna regressione). Push
+su TEST verificato: 16/16 file identici.
+
+**Programma Fase O (performance backend) — completo.** O1, O2, O3 tutti
+DONE, nessuna sotto-fase residua in `docs/DESIGN_performance.md` §4.
+Tutti i criteri di accettazione §6 verificati TRUE.
+
+## Feature — la Cronologia diventa fonte di verita' anche per lo stato derivato (2026-08-25)
+
+Chiude il "buco" documentato il 2026-08-19 (vedi sezione storica sotto):
+Marco ha corretto a mano, in Cronologia, la colonna dell'ultimo evento
+di una card ("Attesa enti" → "Attesa clienti") e la card e' rimasta
+ferma in "Attesa enti" — comportamento confermato come bug (non
+voluto), con decisione esplicita di Marco su come correggerlo:
+**"aggiorna anche la card"**, replicando le stesse regole di `moveJob`
+(incluso il divieto di rientro diretto in WIP), non limitarsi a
+correggere il testo del form o lasciare la Cronologia come solo
+racconto storico.
+
+**Backend** (Kanban.gs): due nuove funzioni pure/separate —
+`computeStatusTransitionFromLog_(job, log)` (nessuna scrittura: solo
+lettura di `readColumns_()`) determina se l'evento 'move' PIU' RECENTE
+del log (per posizione nell'array, che e' gia' ordinato per ts con sort
+stabile — **non** un confronto diretto sui ts, vedi bug trovato sotto)
+dichiara una colonna diversa da `job.status`, e se si', calcola la
+transizione (sourceColumn = colonna ATTUALE della card, targetColumn =
+quella dichiarata dall'evento, closesVisit secondo la stessa regola di
+moveJob) o restituisce `{ hardError: 'RIENTRO_DIRETTO_VIETATO' }` se
+implicherebbe un rientro diretto in WIP da stand_by/done, stessa regola
+gia' in vigore per gli spostamenti reali. `applyStatusTransition_(job,
+log, transition)` applica la transizione gia' calcolata (status +
+status_since_ts + `updateVisiteForMove_`, la stessa funzione che
+`moveJob` usa per aprire/chiudere le visite) — separata dal calcolo
+apposta, cosi' il chiamante puo' verificare un eventuale hardError e
+rifiutare l'intera richiesta **prima** di qualunque scrittura (compresa
+quella che `applyStructuralAlignment_` fa su `visite` per l'allineamento
+dei campi data — altrimenti resterebbe non annullabile anche quando il
+resto della richiesta viene respinto).
+
+Collegate in `addActivityEvent`/`updateActivityEvent` (bloccanti: un
+hardError rifiuta l'intero salvataggio, stesso pattern gia' in uso per
+`validateSequence_`) e in `deleteActivityEvent` (**asimmetrico apposta**:
+non blocca mai la cancellazione, gia' confermata dall'utente con una
+conferma pesante in UI — se lo stato implicito violerebbe la regola,
+la transizione semplicemente non si applica, il log resta comunque
+cancellato). Le tre funzioni ora restituiscono anche `job` nella
+risposta (`attachVisitSummaryForResponse_`, stessi campi di rientro
+ricalcolati che `moveJob` gia' restituisce da M0-A2) — necessario perche'
+il client possa aggiornare la card senza un reload completo.
+
+**Bug trovato scrivendo i test, corretto nello stesso passaggio**: la
+prima versione di `computeStatusTransitionFromLog_` cercava l'evento
+"piu' recente" con un `reduce` che confrontava i ts (`compareTs_(...) >
+0`) — a parita' ESATTA di timestamp (facile con la precisione al
+secondo di `Utilities.formatDate`, es. due `moveJob` ravvicinati nello
+stesso secondo, come capita spesso nei test ma anche in uso reale),
+questo confronto non aggiornava mai il candidato a parita', restituendo
+l'evento SBAGLIATO come "piu' recente". Il resto del codice (
+`computeFromForCandidate_`, `recalculateMoveFrom_`, e il `lastMove` gia'
+calcolato in `deleteActivityEvent` prima di questa sessione) risolve
+questo esatto caso con una convenzione diversa e gia' corretta: il log
+arriva sempre gia' ordinato con un sort STABILE, quindi l'ultimo
+elemento dell'array (`moves[moves.length - 1]`) e' per costruzione il
+piu' recente anche a parita' di ts. Corretto allineando
+`computeStatusTransitionFromLog_` alla stessa convenzione.
+
+**Frontend** (client.html): `HARD_ERROR_MESSAGES_` esteso con
+`RIENTRO_DIRETTO_VIETATO` (messaggio leggibile, stesso meccanismo gia'
+in uso per gli altri hardErrors). Nuova funzione `applyJobUpdateFromServer_(job)`
+(fattorizzata da tre punti che la ripetevano identica): aggiorna
+`state`/`state.activeJob`, il bottone Archivia, lo storico rientri nel
+modale, e riposiziona la card sulla board (`placeCardInColumn_`,
+**riusa il fix del bug precedente** — cerca e rimuove il nodo esistente
+OVUNQUE si trovi, non solo nella colonna di destinazione) — chiamata da
+`submitActivityPayload_` (add/update evento) e `confirmActivityDelete_`
+(cancellazione evento), entrambe ora leggono `data.job` dalla risposta.
+
+**Test aggiunti** (`Tests.gs`, harness Node), 5 nuovi + 1 helper di
+test: `testBackdateCreationEventTs_` (backdata l'evento di creazione per
+rendere deterministico "qual e' il piu' recente" nei test, evitando la
+precisione al secondo dei timestamp), `testUpdateActivityEventMovesCardWhenCorrectingMostRecentMoveDestination`
+(lo scenario esatto di Marco: Attesa enti → Attesa clienti, nessuna
+nuova visita essendo stand_by→stand_by), `testUpdateActivityEventRejectsWhenCorrectionImpliesDirectReentryToWip`
+(hardError, nessuna scrittura parziale — ne' su jobs ne' sul log),
+`testUpdateActivityEventOpensNewVisitOnRealReentryCorrection` (un vero
+rientro corretto in Cronologia apre una nuova visita esattamente come
+moveJob — questo test ha scoperto il bug del reduce sopra),
+`testAddActivityEventDoesNotMoveCardWhenNewEventIsNotMostRecent` (caso
+negativo: un evento backdatato non sposta la card),
+`testDeleteActivityEventRevertsCardStatusToNewMostRecentMove`
+(cancellare l'evento piu' recente riporta la card alla colonna
+dell'evento rimasto piu' recente). **136/136 test passati nell'harness
+Node** (131 preesistenti + 5 nuovi, nessuna regressione).
+
+**Verificato end-to-end nel Browser pane**, non solo nell'harness:
+stesso server locale gia' usato per il bugfix precedente, seed con una
+card creata direttamente in "Attesa enti". Riprodotto esattamente lo
+scenario di Marco attraverso la UI reale (click sulla card → tab
+Cronologia → "Modifica evento" → cambiato il menu a tendina da "ATTESA
+ENTI" a "ATTESA CLIENTE" → "Salva evento"): `state.activeJob.status`
+diventa `wait_client` subito dopo il salvataggio, nessun errore nel
+form; chiuso il modale, la card sulla board compare **una sola volta**,
+nella colonna "ATTESA CLIENTE" — comportamento corretto, non piu' quello
+segnalato da Marco.
+
+**Push su TEST verificato**: 16/16 file identici.
+
+## Bugfix — card "duplicata" sulla board dopo uno spostamento (2026-08-25)
+
+Segnalato da Marco subito dopo il collaudo di O1/O2 su TEST: la card
+spostata appariva **anche** nella colonna di provenienza, finche' un
+refresh completo della board non la faceva sparire — "disorienta
+fortemente l'utente, non capisce se ha fatto un guaio". **Non e' una
+regressione di Fase O**: Fase O tocca solo il backend (Kanban.gs/
+Utils.gs), mai `client.html` — bug preesistente da M0-B (2026-08-17,
+introduzione dell'aggiornamento parziale del DOM dopo una mossa), mai
+notato prima.
+
+**Causa reale, confermata riproducendo il bug** (non solo letta dal
+codice — vedi sotto): `placeCardInColumn_` (client.html) cercava il
+nodo DOM esistente della card **solo dentro la colonna di
+destinazione** (`job.status`, gia' quello nuovo quando la funzione
+viene chiamata, sia nella mossa ottimistica sia dopo la risposta
+server) — il nodo nella colonna di **provenienza** non veniva mai
+cercato ne' rimosso, restando visibile finche' un `renderBoard()`
+completo (poll a 45s o refresh manuale) non ricostruiva tutto il DOM da
+zero coerentemente con lo stato interno (che invece era sempre corretto
+— il bug era solo visivo/DOM, mai un dato scritto male).
+
+**Riprodotto concretamente** prima di correggere: server HTTP locale
+temporaneo (`/tmp/sf-scratch/repro-server.js`, rimosso a fine sessione)
+che serve `index.html` reale con gli `include()` risolti e uno shim di
+`google.script.run` che inoltra `.api(action, payload)` a `routeAction_`
+via l'harness Node — stessa tecnica delle sessioni N4/N5, adattata da
+zero (non esisteva ancora per questo progetto). Chiamata diretta a
+`moveJob('JOB-...', 'wait_client')` nella console del Browser pane
+(stessa funzione che il drag-and-drop invoca): confermato che la card
+compariva contemporaneamente in **due** colonne
+(`document.querySelectorAll('.card[data-job-id=...]')` restituiva 2
+nodi, uno per colonna), anche dopo che la risposta del server era
+tornata.
+
+**Corretto**: `placeCardInColumn_` ora chiama `removeCardEl_(job.job_id)`
+in testa (la stessa funzione, gia' esistente, che cerca il nodo in
+**tutta** la board — `document.querySelector('#kanban-board .cards
+.card[data-job-id=...]')` — usata finora solo da `deleteJob`), prima di
+decidere se e dove reinserire il nodo nuovo. Nessuna altra modifica al
+comportamento: se la card non deve comparire (colonna nascosta o filtro
+attivo) resta comunque rimossa, come da comportamento gia' documentato.
+
+**Verificato di nuovo con lo stesso server locale, dopo il fix**: stessa
+sequenza (mossa reale, self-move, mossa che chiude una visita
+`wait_client`→`backlog`) — **nessun doppio nodo in nessun caso**, la
+card compare sempre e solo nella colonna corretta, la card non toccata
+resta ferma. 131/131 test nell'harness Node (nessuna regressione — il
+bug era solo DOM, non coperto dai test esistenti che non ispezionano il
+markup). Push su TEST verificato: 16/16 file identici.
+
+## Fase O (performance backend) — O1+O2 codice/test pronti, push su TEST bloccato da token clasp scaduto (2026-08-25)
+
+Sessione autonoma (runbook `docs/RUNBOOK_esecuzione_autonoma.md`), su
+`docs/DESIGN_performance.md`. Nessuna sotto-fase precedente segnata DONE
+per questo documento — prima esecuzione del programma, sotto-fase O1
+seguita da O2 (nessun gate tra le due, come da tabella §4).
+
+**O1 (punti A, C, D di `docs/DESIGN_performance.md`)** — Kanban.gs/Utils.gs:
+- `moveJob`: eliminata la doppia lettura/scrittura di `activity_log_json`
+  (punto A) — `log` ora costruito da `job.activity_log_json` (gia' in
+  mano da `readJobFromRow_`, non piu' riletto con un `getRange` dedicato)
+  e `job.activity_log_json` riassegnato prima di un **unico**
+  `writeJobToRow_` finale (status/status_since_ts/activity_log_json
+  insieme), non piu' una scrittura della riga intera seguita da una
+  seconda scrittura mirata sulla stessa cella.
+- `moveJob`: `readColumns_()` chiamato una sola volta (punto C) —
+  `validateColumnId_` (Utils.gs) accetta ora un secondo parametro
+  opzionale `columns` (default `readColumns_()` se assente, invariato
+  per ogni altro chiamante: `addJob`/`updateColumnLabel`/`moveColumn`
+  continuano a non passarlo); `moveJob` legge le colonne una volta sola
+  e le riusa sia per la validazione sia per `sourceColumn`/`targetColumn`.
+- `writeJobToRow_` (Kanban.gs) accetta un terzo parametro opzionale
+  `originalJob` (punto D): se passato, scrive solo le celle il cui
+  valore e' davvero cambiato rispetto all'originale (confronto per
+  header), non piu' l'intera riga da 22 colonne. `addActivityEvent`/
+  `updateActivityEvent`/`deleteActivityEvent`/`correctJobTimestamps`
+  ora clonano il job appena letto (`Object.assign({}, job)`) prima di
+  mutarlo e lo passano come `originalJob`. Nessun chiamante esistente
+  che non lo passa (`addJob` non lo usa, `updateJob`/`moveJob` restano a
+  scrittura piena, fuori scope di questo punto) e' stato toccato.
+
+**O2 (punti B, E, G)** — Kanban.gs:
+- `findOpenVisitRow_`: legge solo le colonne da 1 a
+  `max(headers.job_id, headers.rientro_ts)` (8 colonne su 13 nello
+  schema corrente — verificato in `Schema.gs`, `VISITE_HEADERS`) invece
+  di tutte le colonne di ogni riga scansionata. Larghezza derivata dalla
+  mappa reale degli header, non un valore fisso, per restare corretta
+  anche se l'ordine cambiasse.
+- `updateVisiteForMove_`: il campo gate (`incarico_ts`/`prep_ts`/
+  `start_ts`/`consegna_ts`) da valorizzare e' ora calcolato una sola
+  volta da `targetColumn.role`, PRIMA di sapere se andra' sulla visita
+  corrente o su quella nuova aperta da un rientro — quando una mossa
+  chiude una visita, la nuova riga nasce gia' completa e viene scritta
+  con un solo `appendVisitRow_`, eliminando la terza scrittura
+  (`writeVisitToRow_` successiva) che il codice precedente faceva sulla
+  riga appena creata.
+
+**Verifica, non solo lettura del codice**: oltre ai 131/131 test
+dell'harness Node (nessuna regressione), ogni criterio di accettazione
+§6 e' stato verificato empiricamente con uno script strumentato
+temporaneo (`/tmp/sf-scratch/perf-verify.js`, rimosso a fine sessione)
+che intercetta `getRange`/`getValue(s)`/`setValue(s)`/`appendRow` sui
+fogli mock e conta le chiamate reali durante `moveJob`/
+`addActivityEvent`:
+- Mossa reale (non self-move): **1** lettura + **1** scrittura della
+  riga `jobs` (22 colonne, `activity_log_json` incluso in entrambe, mai
+  una seconda chiamata dedicata a quella cella) — punto A confermato.
+- `readColumns_()`: **1** chiamata per `moveJob` (non 2) — punto C
+  confermato.
+- `addActivityEvent` con un evento 'note' (nessun allineamento
+  strutturale): **1** sola cella scritta su `jobs` (colonna 20,
+  `activity_log_json`), non le 22 della riga intera — punto D
+  confermato.
+- `findOpenVisitRow_`: lettura a larghezza **8** colonne (non 13) per
+  ogni riga scansionata di `visite` — punto B/E confermato.
+- Mossa che chiude una visita (`wait_client` → `backlog`): **2**
+  operazioni di scrittura totali su `visite` (1 `setValues` per chiudere
+  la vecchia riga + 1 `appendRow` per la nuova, gia' completa), non piu'
+  3 — punto G confermato.
+
+Nessun cambio di risultato rilevato su nessun test esistente (stessi
+131/131 verdi prima e dopo).
+
+**Push su TEST — inizialmente bloccato, poi risolto nella stessa
+sessione**: primo tentativo fallito con `invalid_grant`/`invalid_rapt`
+(token OAuth clasp scaduto) — stesso blocco gia' capitato in N1. Su
+richiesta esplicita di Marco ("clasp login, fai tu il comando") ho
+eseguito `clasp login` dalla cartella `apps-script/`: ha riconosciuto
+una sessione gia' valida e prodotto l'URL di riautorizzazione, che Marco
+ha completato lui stesso nel browser ("fatto, login completato").
+Rilanciato `bash apps-script/test-harness/push-and-verify.sh`: **16/16
+file identici tra TEST e `apps-script/src`, 0 differenze.**
+
+**O1/O2 — DONE, tutti e quattro i punti della Definition of Done
+soddisfatti**: criteri di accettazione §6 verificati TRUE uno per uno
+(non "il codice sembra corretto" — verificati empiricamente con lo
+script strumentato, vedi sopra), 131/131 test nell'harness Node senza
+regressioni, push su TEST verificato (16/16 file identici), questo
+aggiornamento. **O3** (indice vero per la visita aperta) resta dietro il
+proprio gate 🔴 esplicito — non e' una sotto-fase da eseguire ora: il
+documento stesso la subordina all'aver visto l'effetto di O1+O2 in uso
+reale, quindi nessun lavoro ulteriore qui. **Programma Fase O in pausa
+al gate di O3**, in attesa di uso reale e di una decisione di Marco.
 
 ## Collaudo pre-deploy su copia di PROD — due gap trovati da Marco, non bug di questa sessione (2026-08-20)
 

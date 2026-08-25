@@ -16,6 +16,24 @@ function getSpreadsheet_() {
   return active;
 }
 
+// Bugfix 2026-08-25 (incidente RICORRENTE, gia' capitato il 2026-08-19 -
+// vedi PROGRAMMA_STATO.md): il ramo 'prod' delegava a getSpreadsheet_(),
+// che legge PRIMA la Script Property ambientale CONDIVISA
+// (PROP_SPREADSHEET_ID) e solo se vuota ricade sull'id fisso di PROD.
+// Se quella property resta sporca (puntata su TEST) per qualunque
+// motivo - un'esecuzione interrotta prima del proprio 'finally', un
+// test lanciato a mano dall'editor, setupSigmaFlow() eseguita mentre la
+// property era gia' sporca - OGNI richiesta 'prod' (l'ambiente di
+// default, usato ogni volta che l'URL non specifica esplicitamente
+// env=test) la eredita silenziosamente: mostra dati di TEST sul
+// deployment pubblico, e ripersiste la stessa sporcizia nel proprio
+// 'finally' (withEnvironment_ restituisce la property al valore
+// "precedente", che e' proprio quello sporco). 'prod' ora risolve
+// SEMPRE l'id fisso DEFAULT_SPREADSHEET_ID, esattamente come 'test'
+// risolve gia' il proprio id fisso subito sopra - mai la property
+// ambientale. Il fallback a getSpreadsheet_() resta solo per il
+// bootstrap iniziale (DEFAULT_SPREADSHEET_ID non ancora configurato),
+// caso che oggi non si presenta piu' in pratica.
 function getSpreadsheetForEnv_(env) {
   if (env === 'test') {
     var props = PropertiesService.getScriptProperties();
@@ -24,6 +42,10 @@ function getSpreadsheetForEnv_(env) {
       throw new Error('Database TEST non configurato');
     }
     return SpreadsheetApp.openById(testId);
+  }
+
+  if (SIGMAFLOW.DEFAULT_SPREADSHEET_ID) {
+    return SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
   }
 
   return getSpreadsheet_();
@@ -404,8 +426,12 @@ function findColumn_(columns, id) {
   })[0] || null;
 }
 
-function validateColumnId_(id) {
-  var columns = readColumns_();
+// O1 (DESIGN_performance.md, punto C): 'columns' opzionale - un
+// chiamante che ha gia' letto readColumns_() (es. moveJob) lo passa per
+// evitare di rileggere il foglio 'config' una seconda volta nella stessa
+// chiamata. Invariato per ogni chiamante esistente che non lo passa.
+function validateColumnId_(id, columns) {
+  columns = columns || readColumns_();
   var status = normalizeStatus_(id);
   if (!findColumn_(columns, status)) {
     throw new Error('Colonna non valida: ' + status);

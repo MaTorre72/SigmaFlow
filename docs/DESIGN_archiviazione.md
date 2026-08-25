@@ -47,6 +47,15 @@ valorizzato**. Per tutto il resto (card senza una vera chiusura che
 comunque deve lasciare la board) esiste un percorso separato, il
 Cestino (§4.2) — non un'archiviazione impropria.
 
+> **Decisione rivista (Marco, 2026-08-25)**: la regola sopra vale ancora
+> per l'**archiviazione automatica** (trigger giornaliero, §4.1), ma
+> **non più per il bottone manuale**, che ora è disponibile per
+> qualunque card in qualunque momento, senza alcun vincolo su
+> `incarico_chiuso_ts` — vedi il paragrafo aggiunto in §4.1. Segnalato
+> come bug ("il tasto è grigio, come faccio ad archiviare?") — la
+> UX del vincolo (bottone disabilitato senza spiegazione immediata su
+> come sbloccarlo) non era quella voluta.
+
 ---
 
 ## 3. Schema (additivo)
@@ -90,11 +99,19 @@ chiusi" fossero rimasti mescolati dentro l'archivio).
 
 ## 4. I tre percorsi in uscita da una card
 
-### 4.1 — Archiviazione (solo chiusure vere)
+### 4.1 — Archiviazione (solo chiusure vere per l'automatico; il manuale non ha più vincoli)
 
-- **Manuale** — il bottone `archive-button`, già presente in UI ma
-  disabilitato/segnaposto, va abilitato **solo quando
-  `incarico_chiuso_ts` è valorizzato** sul caso aperto nel modale.
+- **Manuale** — il bottone `archive-button` **[rivisto il 2026-08-25]**:
+  originariamente abilitato solo con `incarico_chiuso_ts` valorizzato
+  sul caso aperto nel modale (`archiveJob_` rifiutava lato server
+  altrimenti). Decisione esplicita di Marco: nessun vincolo, il bottone
+  è sempre cliccabile per qualunque card esistente (disabilitato solo
+  quando non c'è nessun job attivo nel modale, es. una card nuova non
+  ancora creata) e `archiveJob_` non rifiuta più nulla in base allo
+  stato di chiusura — sposta sempre il caso in `jobs_archivio`, chiuso
+  o no. **La distinzione "solo chiusure vere" in §2 resta il principio
+  guida per l'archiviazione *automatica* qui sotto, non più per quella
+  manuale.**
 - **Automatico** — trigger Apps Script a tempo (giornaliero), che
   scansiona i casi con `incarico_chiuso_ts` valorizzato e
   `oggi − incarico_chiuso_ts ≥ archiviazione_giorni_default`, e li
@@ -336,8 +353,12 @@ umana su TEST prima di essere lasciato scattare senza supervisione).
       caso già chiuso riceve un rientro reale (nuova visita aperta) —
       un caso tornato in lavorazione non resta eleggibile
       all'archiviazione automatica (N2)
-- [x] Bottone "Archivia" eleggibile solo con `incarico_chiuso_ts`
-      valorizzato (N2)
+- [x] ~~Bottone "Archivia" eleggibile solo con `incarico_chiuso_ts`
+      valorizzato (N2)~~ **Superato il 2026-08-25** (decisione esplicita
+      di Marco, vedi §2/§4.1): il bottone manuale è ora sempre
+      disponibile per qualunque card esistente, nessun vincolo su
+      `incarico_chiuso_ts`. Resta valido solo per l'archiviazione
+      *automatica* (trigger giornaliero, §4.1).
 - [x] Bottone "Sposta nel cestino" (ex "Elimina") disponibile su
       qualunque card, qualunque colonna, senza richiedere
       `incarico_chiuso_ts`; conferma leggera, distinta da quella di

@@ -220,7 +220,11 @@ function moveJob(params) {
     throw new Error('Job non trovato: ' + params.job_id);
   }
 
-  var status = validateColumnId_(requireParam_(params, 'status'));
+  // O1 (DESIGN_performance.md, punto C): letto una sola volta, riusato
+  // anche piu' sotto per sourceColumn/targetColumn invece di rileggere
+  // il foglio 'config' una seconda volta nella stessa chiamata.
+  var columns = readColumns_();
+  var status = validateColumnId_(requireParam_(params, 'status'), columns);
   var headers = getHeaderMap_(sheet);
   var now = nowIso_();
   var job = readJobFromRow_(sheet, row, headers);
@@ -242,7 +246,6 @@ function moveJob(params) {
     return ok_({ job_id: params.job_id, status: status, job: job });
   }
 
-  var columns = readColumns_();
   var sourceColumn = findColumn_(columns, job.status) || { id: job.status, role: 'neutral' };
   var targetColumn = findColumn_(columns, status);
 
@@ -283,7 +286,6 @@ function moveJob(params) {
   // ATTUALE, non da quando e' stata creata o dall'ultimo cambio di
   // qualunque altro campo.
   job.status_since_ts = now;
-  writeJobToRow_(sheet, row, headers, job);
   // Evento automatico per l'activity log: scrittura diretta (non passa da
   // addActivityEvent) per evitare la doppia validazione su un movimento
   // che il sistema ha gia' autorizzato spostando la card.
@@ -300,8 +302,10 @@ function moveJob(params) {
     autoEvent.is_rework = true;
   }
 
-  var rawLog = sheet.getRange(row, headers.activity_log_json).getValue();
-  var log = parseActivityLog_(rawLog);
+  // O1 (DESIGN_performance.md, punto A): activity_log_json e' gia' in
+  // 'job' (letto una sola volta da readJobFromRow_ sopra) - non serve
+  // rileggere la stessa cella dal foglio una seconda volta.
+  var log = parseActivityLog_(job.activity_log_json);
 
   // Modello caso/visita (Fase L2): start_ts/done_ts/incarico_ts/prep_ts/
   // visit_number/is_rework/rework_cause/service_time_d/lead_time_d/
@@ -314,7 +318,13 @@ function moveJob(params) {
 
   log.push(autoEvent);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
-  sheet.getRange(row, headers.activity_log_json).setValue(serializeActivityLog_(log));
+  job.activity_log_json = serializeActivityLog_(log);
+
+  // O1 (DESIGN_performance.md, punto A): un solo write della riga job
+  // (status/status_since_ts/activity_log_json/eventuali campi toccati
+  // sopra insieme), non piu' una scrittura della riga intera seguita da
+  // una seconda scrittura mirata sulla stessa cella activity_log_json.
+  writeJobToRow_(sheet, row, headers, job);
 
   // M0-A2: il job restituito porta gia' i campi di rientro ricalcolati
   // (visit_number/is_rework/rework_cause/start_ts/done_ts) dalla visita
@@ -348,6 +358,28 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
     accumulateWaitTime_(activeVisit, sourceColumn, log, now);
   }
 
+  // O2 (DESIGN_performance.md, punto G): il campo gate da valorizzare
+  // dipende solo da targetColumn.role, gia' noto qui — calcolato una
+  // volta sola, PRIMA di sapere se andra' sulla visita corrente (nessun
+  // rientro) o su quella nuova appena aperta (rientro), cosi' la visita
+  // nuova puo' nascere gia' completa invece di essere scritta e poi
+  // riscritta. Stessa regola "prima volta" gia' in uso per i campi su
+  // jobs: essendo ogni visita una riga nuova, non serve un reset
+  // esplicito come nella derivazione a runtime superata (il bug descritto
+  // in BUGFIX_derivazione_gate_dal_log.md) — la visita nasce gia' vuota.
+  var gateField = null;
+  if (targetColumn.role === 'backlog') {
+    gateField = 'incarico_ts';
+  } else if (targetColumn.role === 'prep') {
+    gateField = 'prep_ts';
+  } else if (targetColumn.role === 'wip') {
+    gateField = 'start_ts';
+  } else if (targetColumn.role === 'done') {
+    // Si valorizza al primo ingresso in done, entro questa visita: non
+    // chiude la visita da sola (sez. 3), la card puo' ancora rientrare.
+    gateField = 'consegna_ts';
+  }
+
   if (closesVisit) {
     activeVisit.rientro_ts = now;
     activeVisit.rientro_da = sourceColumn.id;
@@ -368,28 +400,19 @@ function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log,
       t_interno_d: 0,
       rework_cause: sourceColumn.id
     };
+    // closesVisit e' vero solo quando targetColumn.role e' 'backlog' o
+    // 'prep' (unico caso previsto da moveJob), quindi gateField e'
+    // sempre valorizzato qui — la visita nasce gia' completa, un solo
+    // appendVisitRow_ invece di append + riscrittura.
+    if (gateField) {
+      activeVisit[gateField] = now;
+    }
     appendVisitRow_(visiteSheet, activeVisit);
-    activeRow = visiteSheet.getLastRow();
+    return activeVisit;
   }
 
-  // Stessa regola "prima volta" gia' in uso per i campi su jobs, applicata
-  // qui alla visita attiva: essendo ogni visita una riga nuova, non serve
-  // un reset esplicito come nella derivazione a runtime superata (il bug
-  // descritto in BUGFIX_derivazione_gate_dal_log.md) — la visita nasce
-  // gia' vuota.
-  if (targetColumn.role === 'backlog' && !activeVisit.incarico_ts) {
-    activeVisit.incarico_ts = now;
-  }
-  if (targetColumn.role === 'prep' && !activeVisit.prep_ts) {
-    activeVisit.prep_ts = now;
-  }
-  if (targetColumn.role === 'wip' && !activeVisit.start_ts) {
-    activeVisit.start_ts = now;
-  }
-  if (targetColumn.role === 'done' && !activeVisit.consegna_ts) {
-    // Si valorizza al primo ingresso in done, entro questa visita: non
-    // chiude la visita da sola (sez. 3), la card puo' ancora rientrare.
-    activeVisit.consegna_ts = now;
+  if (gateField && !activeVisit[gateField]) {
+    activeVisit[gateField] = now;
   }
 
   writeVisitToRow_(visiteSheet, activeRow, activeVisit);
@@ -429,14 +452,29 @@ function ensureOpenVisit_(visiteSheet, job, now) {
   return { row: visiteSheet.getLastRow(), visit: visit };
 }
 
+// O3 (DESIGN_performance.md): la ricerca del job_id e' delegata a
+// TextFinder (ricerca server-side sulla sola colonna job_id) invece di
+// leggere in JS ogni riga di 'visite' (O2 aveva gia' ridotto le colonne
+// lette da 13 a 8, ma il costo restava comunque proporzionale al numero
+// TOTALE di visite di tutto il sistema). Un vero indice posizionale
+// (job -> numero di riga) e' stato scartato in fase di design: diventa
+// silenziosamente sbagliato ad ogni deleteRow su 'visite' fatto per
+// ALTRI job (archiviazione/cestino/ripristino), non solo per quello
+// cercato — qui invece non si cachea nessuna posizione, si cerca sempre
+// dal vivo. matchEntireCell evita falsi positivi tipo "JOB-1" dentro
+// "JOB-10". rientro_ts viene letto solo per le righe trovate
+// (tipicamente 1-3 per job, mai l'intera tabella).
 function findOpenVisitRow_(sheet, jobId) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) { return -1; }
   var headers = getHeaderMap_(sheet);
-  var values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
-  for (var i = 0; i < values.length; i++) {
-    if (values[i][headers.job_id - 1] === jobId && !values[i][headers.rientro_ts - 1]) {
-      return i + 2;
+
+  var jobIdColumnRange = sheet.getRange(2, headers.job_id, lastRow - 1, 1);
+  var matches = jobIdColumnRange.createTextFinder(String(jobId)).matchEntireCell(true).findAll();
+  for (var i = 0; i < matches.length; i++) {
+    var row = matches[i].getRow();
+    if (!sheet.getRange(row, headers.rientro_ts).getValue()) {
+      return row;
     }
   }
   return -1;
@@ -665,6 +703,10 @@ function addActivityEvent(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
+  // O1 (DESIGN_performance.md, punto D): copia del job COSI' COM'ERA,
+  // prima di qualunque mutazione - passata a writeJobToRow_ per scrivere
+  // solo le celle davvero cambiate.
+  var originalJob = Object.assign({}, job);
   var log = parseActivityLog_(job.activity_log_json);
   var candidate = buildActivityEventCandidate_(params, log);
 
@@ -699,7 +741,7 @@ function addActivityEvent(params) {
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, log);
 
   job.activity_log_json = serializeActivityLog_(log);
-  writeJobToRow_(sheet, row, headers, job);
+  writeJobToRow_(sheet, row, headers, job, originalJob);
 
   return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
 }
@@ -913,6 +955,8 @@ function updateActivityEvent(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
+  // O1 (DESIGN_performance.md, punto D): vedi commento in addActivityEvent.
+  var originalJob = Object.assign({}, job);
   var log = parseActivityLog_(job.activity_log_json);
 
   var existing = log.filter(function(event) { return event.id === eventId; })[0];
@@ -948,7 +992,7 @@ function updateActivityEvent(params) {
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, remaining);
 
   job.activity_log_json = serializeActivityLog_(remaining);
-  writeJobToRow_(sheet, row, headers, job);
+  writeJobToRow_(sheet, row, headers, job, originalJob);
 
   return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
 }
@@ -965,6 +1009,8 @@ function deleteActivityEvent(params) {
 
   var headers = getHeaderMap_(sheet);
   var job = readJobFromRow_(sheet, row, headers);
+  // O1 (DESIGN_performance.md, punto D): vedi commento in addActivityEvent.
+  var originalJob = Object.assign({}, job);
   var log = parseActivityLog_(job.activity_log_json);
 
   var existing = log.filter(function(event) { return event.id === eventId; })[0];
@@ -1001,7 +1047,7 @@ function deleteActivityEvent(params) {
   }
 
   job.activity_log_json = serializeActivityLog_(recalculated);
-  writeJobToRow_(sheet, row, headers, job);
+  writeJobToRow_(sheet, row, headers, job, originalJob);
 
   return ok_({ job_id: jobId, event_id: eventId, job: attachOpenVisitSummary_(job) });
 }
@@ -1128,23 +1174,20 @@ function deleteVisiteRowsForJob_(sheet, jobId) {
   }
 }
 
-// Wrapper §4.1: eleggibile solo con incarico_chiuso_ts valorizzato — la
-// stessa regola vale sia per il bottone manuale (via archiveJob, sotto)
-// sia per il futuro trigger automatico (N3), che chiamera' questa stessa
-// funzione dopo aver selezionato i casi scaduti: unica fonte della
-// regola, non duplicata tra i due percorsi.
+// Bugfix 2026-08-25 (decisione esplicita di Marco): il bottone "Archivia"
+// deve essere sempre disponibile per qualunque card, in qualunque stato —
+// nessun vincolo, ne' lato client ne' lato server. Rimossa la regola di
+// eleggibilita' precedente (§4.1 di DESIGN_archiviazione.md, N2:
+// "solo casi chiusi possono essere archiviati", verificata sia qui sia
+// dal bottone client updateArchiveButtonState_) — qualunque job, chiuso
+// o no, puo' essere archiviato in ogni momento. L'archiviazione
+// *automatica* (archiveEligibleJobs_) resta invariata: seleziona da sola,
+// PRIMA di chiamare questa funzione, solo i casi con incarico_chiuso_ts
+// valorizzato e oltre soglia — non dipende dal controllo appena rimosso.
 function archiveJob_(jobId) {
-  var sheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.JOBS);
-  var row = findRowById_(sheet, 'job_id', jobId);
-  if (row >= 0) {
-    var job = readJobFromRow_(sheet, row, getHeaderMap_(sheet));
-    if (!job.incarico_chiuso_ts) {
-      throw new Error('Il caso non e ancora chiuso: valorizza "Chiuso" prima di archiviare.');
-    }
-  }
-  // Se row < 0 (job gia' spostato da una chiamata precedente/concorrente),
-  // moveJobToSheet_ gestisce l'idempotenza senza bisogno di rileggere qui
-  // l'eleggibilita' di un job che non e' piu' in 'jobs'.
+  // Se il job non e' piu' in 'jobs' (gia' spostato da una chiamata
+  // precedente/concorrente), moveJobToSheet_ gestisce l'idempotenza da
+  // solo, nessun controllo aggiuntivo da fare qui.
   return moveJobToSheet_(
     jobId,
     SIGMAFLOW.SHEETS.JOBS, SIGMAFLOW.SHEETS.VISITE,
@@ -1541,11 +1584,32 @@ function readJobFromRow_(sheet, row, headers) {
   return job;
 }
 
-function writeJobToRow_(sheet, row, headers, job) {
-  var values = JOB_HEADERS.map(function(header) {
-    return job[header] === undefined ? '' : job[header];
+// O1 (DESIGN_performance.md, punto D): 'originalJob' opzionale - un
+// chiamante che ha gia' in mano il job COSI' COM'ERA prima di mutarlo
+// (letto da readJobFromRow_, prima di qualunque assegnazione) lo passa
+// per scrivere solo le celle il cui valore e' davvero cambiato, invece
+// della riga intera. Le operazioni sulla Cronologia (addActivityEvent/
+// updateActivityEvent/deleteActivityEvent) e la correzione data
+// (correctJobTimestamps) toccano tipicamente 1-3 dei 25 campi di
+// JOB_HEADERS. Senza 'originalJob' (es. addJob/updateJob/moveJob, dove
+// piu' campi cambiano insieme) si scrive la riga intera come prima -
+// nessuna regressione per i chiamanti che non lo passano.
+function writeJobToRow_(sheet, row, headers, job, originalJob) {
+  if (!originalJob) {
+    var values = JOB_HEADERS.map(function(header) {
+      return job[header] === undefined ? '' : job[header];
+    });
+    sheet.getRange(row, 1, 1, JOB_HEADERS.length).setValues([values]);
+    return;
+  }
+
+  JOB_HEADERS.forEach(function(header, index) {
+    var newValue = job[header] === undefined ? '' : job[header];
+    var oldValue = originalJob[header] === undefined ? '' : originalJob[header];
+    if (newValue !== oldValue) {
+      sheet.getRange(row, headers[header] || (index + 1)).setValue(newValue);
+    }
   });
-  sheet.getRange(row, 1, 1, JOB_HEADERS.length).setValues([values]);
 }
 
 function jobToRow_(job) {

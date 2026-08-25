@@ -265,9 +265,9 @@ function runAllTests() {
     testCardColor,
     testUpdateJobInvoicedTogglesIncaricoChiusoTs,
     testArchiveJobMovesJobAndVisiteToArchivio,
-    testArchiveJobRejectsCaseNotClosed,
+    testArchiveJobSucceedsOnCaseNotClosed,
     testArchiveJobIsIdempotentOnSecondCall,
-    testArchiveJobApiActionRejectsCaseNotClosed,
+    testArchiveJobApiActionSucceedsOnCaseNotClosed,
     testCestinaJobMovesJobAndVisiteRegardlessOfClosure,
     testDeleteJobMovesToCestinoInsteadOfDeleting,
     testRipristinaJobRestoresJobAndVisiteToOriginalStatus,
@@ -282,6 +282,8 @@ function runAllTests() {
     testArchiveEligibleJobsNeverTouchesCestino,
     testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult,
     testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty,
+    testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty,
+    testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
     testGetArchivioReturnsEmptyWhenSheetsMissing,
@@ -1259,23 +1261,30 @@ function testArchiveJobMovesJobAndVisiteToArchivio() {
   });
 }
 
-function testArchiveJobRejectsCaseNotClosed() {
+// Bugfix 2026-08-25 (decisione esplicita di Marco): il bottone
+// "Archivia" deve essere sempre disponibile, in ogni stato — archiveJob_
+// non rifiuta piu' un caso senza incarico_chiuso_ts. Sostituisce il
+// vecchio testArchiveJobRejectsCaseNotClosed (asseriva il rifiuto,
+// comportamento ora superato). L'archiviazione *automatica*
+// (archiveEligibleJobs_) resta invariata: seleziona da sola solo i casi
+// chiusi da abbastanza tempo, prima ancora di chiamare archiveJob_ - vedi
+// testArchiveEligibleJobsSkipsCasesNeverClosed, non toccato qui.
+function testArchiveJobSucceedsOnCaseNotClosed() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     setupSigmaFlow();
     ss = SpreadsheetApp.openById(ss.getId());
     var created = addJob({ title: 'Caso ancora aperto', size_class: 'S' }).data;
 
-    var failed = false;
-    try {
-      archiveJob_(created.job_id);
-    } catch (err) {
-      failed = err.message.indexOf('non e ancora chiuso') !== -1;
-    }
-    assertTrue_(failed, 'archiveJob_ deve rifiutare un caso senza incarico_chiuso_ts');
+    var archived = archiveJob_(created.job_id);
+    assertTrue_(archived.success, 'archiveJob_ deve riuscire anche su un caso mai chiuso');
 
     var jobsAfter = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
-    assertEquals_(1, jobsAfter.length, 'il job non deve essere stato spostato');
+    assertEquals_(0, jobsAfter.length, 'il job deve essere stato spostato in jobs_archivio');
+
+    var archivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO)).filter(function(j) { return j.job_id === created.job_id; });
+    assertEquals_(1, archivio.length, 'il job compare in jobs_archivio');
+    assertTrue_(!archivio[0].incarico_chiuso_ts, 'incarico_chiuso_ts resta vuoto: non era mai stato chiuso');
   });
 }
 
@@ -1299,20 +1308,17 @@ function testArchiveJobIsIdempotentOnSecondCall() {
   });
 }
 
-function testArchiveJobApiActionRejectsCaseNotClosed() {
+// Sostituisce il vecchio testArchiveJobApiActionRejectsCaseNotClosed,
+// stesso motivo di testArchiveJobSucceedsOnCaseNotClosed sopra.
+function testArchiveJobApiActionSucceedsOnCaseNotClosed() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     setupSigmaFlow();
     ss = SpreadsheetApp.openById(ss.getId());
     var created = addJob({ title: 'Via azione API, non chiuso', size_class: 'S' }).data;
 
-    var failed = false;
-    try {
-      archiveJob({ job_id: created.job_id });
-    } catch (err) {
-      failed = err.message.indexOf('non e ancora chiuso') !== -1;
-    }
-    assertTrue_(failed, 'l\'azione archiveJob deve rifiutare un caso non chiuso, stessa regola di archiveJob_');
+    var result = archiveJob({ job_id: created.job_id });
+    assertTrue_(result.success, 'l\'azione archiveJob deve riuscire anche su un caso non chiuso, stessa regola di archiveJob_');
   });
 }
 
@@ -1621,6 +1627,77 @@ function testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsh
 
     props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
   });
+}
+
+// Bugfix 2026-08-25 (STESSO incidente ricorso, questa volta sul percorso
+// generale — segnalato di nuovo da Marco): il fix del 2026-08-19 sopra
+// aveva blindato solo il trigger di archiviazione; getSpreadsheetForEnv_
+// (Utils.gs), usata da OGNI richiesta web tramite withEnvironment_/api(),
+// per l'ambiente 'prod' (il default, qualunque richiesta senza
+// env=test) delegava ancora a getSpreadsheet_() - che legge prima la
+// property ambientale condivisa. Con la property sporca, ogni richiesta
+// 'prod' avrebbe risolto silenziosamente il foglio sporco (mostrando
+// dati di TEST sul deployment pubblico) invece del vero PROD. Verificato
+// solo con SpreadsheetApp.openById(...).getId() - nessuna lettura o
+// scrittura di dati, sicuro anche se eseguito per errore sul vero
+// progetto Apps Script (nessun rischio equivalente a una scrittura).
+function testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty() {
+  var props = PropertiesService.getScriptProperties();
+  var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, 'id-sporco-non-test-non-prod');
+
+  try {
+    var resolved = getSpreadsheetForEnv_('prod');
+    assertEquals_(SIGMAFLOW.DEFAULT_SPREADSHEET_ID, resolved.getId(), 'prod deve risolvere sempre il vero id di PROD (DEFAULT_SPREADSHEET_ID), mai la property ambientale sporca');
+
+    // Stesso principio anche per l'ambiente di default implicito (nessun
+    // env passato, come farebbe un browser puntato sul deployment
+    // pubblico senza ?env=test).
+    var resolvedDefault = getSpreadsheetForEnv_(normalizeEnv_(undefined));
+    assertEquals_(SIGMAFLOW.DEFAULT_SPREADSHEET_ID, resolvedDefault.getId(), 'l\'ambiente implicito (nessun env specificato) deve risolvere PROD, mai la property sporca');
+  } finally {
+    if (previousId) {
+      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);
+    } else {
+      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+    }
+  }
+}
+
+// Bugfix 2026-08-25 (richiesta di Marco): dopo aver eliminato
+// SIGMAFLOW_SPREADSHEET_ID (property PROD, incidente sopra), ha chiesto
+// se poteva eliminare anche SIGMAFLOW_TEST_SPREADSHEET_ID. Diversa da
+// quella di PROD (un valore sbagliato qui non puo' mai far trapelare
+// dati su PROD — la separazione resta quella di getSpreadsheetForEnv_),
+// ma valeva lo stesso principio di non dipendere da una property
+// sovrascrivibile assente: withTestSpreadsheet_ (Tests.gs) ora ricade su
+// DEFAULT_TEST_SPREADSHEET_ID. Verifica che la property possa restare
+// assente senza rompere l'esecuzione di test/migrazioni dall'editor
+// (throw "Script Property mancante" prima di questo fix).
+function testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent() {
+  var props = PropertiesService.getScriptProperties();
+  var previousTestProp = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
+  var previousSpreadsheetProp = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  props.deleteProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
+
+  try {
+    var resolvedId = null;
+    withTestSpreadsheet_(function(ss) {
+      resolvedId = ss.getId();
+    });
+    assertEquals_(SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID, resolvedId, 'senza SIGMAFLOW_TEST_SPREADSHEET_ID, withTestSpreadsheet_ deve ricadere su DEFAULT_TEST_SPREADSHEET_ID, non lanciare un errore');
+  } finally {
+    if (previousTestProp) {
+      props.setProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID, previousTestProp);
+    } else {
+      props.deleteProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
+    }
+    if (previousSpreadsheetProp) {
+      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetProp);
+    } else {
+      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+    }
+  }
 }
 
 // --- N4 (DESIGN_archiviazione.md, §6/§6b): viste Archivio/Cestino
@@ -3826,12 +3903,22 @@ function runSingleTest_(testFn) {
   }
 }
 
+// Bugfix 2026-08-25 (richiesta di Marco, stesso principio del fix su
+// getSpreadsheetForEnv_ 'prod'): non dipende piu' esclusivamente dalla
+// Script Property sovrascrivibile SIGMAFLOW_TEST_SPREADSHEET_ID (utile
+// per puntare a un TEST alternativo quando serve, vedi
+// docs/testing-and-security.md — resta un override legittimo, non
+// rimosso), ricade su DEFAULT_TEST_SPREADSHEET_ID (id fisso) se la
+// property e' assente — cosi' quella property puo' restare eliminata a
+// riposo (stesso stato "pulito" ora scelto per PROP_SPREADSHEET_ID)
+// senza rompere l'esecuzione di test/migrazioni dall'editor, che prima
+// si fermava con "Script Property mancante".
 function withTestSpreadsheet_(callback) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   var props = PropertiesService.getScriptProperties();
   var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-  var testId = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
+  var testId = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
 
   if (!testId) {
     lock.releaseLock();
