@@ -1,6 +1,46 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase P — CHIUSA DEFINITIVAMENTE (P1-P7 tutte DONE), in attesa di merge/deploy da parte di Marco (2026-08-26, chiusura sessione 6)
+
+**Correzione importante prima della chiusura**: `docs/DESIGN_lock_ambiente.md`
+conteneva, in una versione intermedia, una riga secondo cui **Q**
+sarebbe stata "eseguita nella stessa giornata di lavoro di P6/P7, non
+deferita" — **errore**, segnalato da Claude prima di agire (non
+eseguito nulla di Q sulla base di quella riga) e confermato da Marco:
+Q resta una fase a sé, in coda, non parte di questa chiusura. Riga
+corretta nel documento (§6) per allinearla al resto del documento
+stesso (§5: "Q resta il passo successivo, pronta ma non lanciata
+insieme"), che era già coerente.
+
+**`docs/DESIGN_lock_ambiente.md` §6 — tutte le caselle P1-P7 spuntate.**
+P1-P5 già chiuse e mergiate su `main` (PR #12). P6 (tre punti: card
+orfana, `pendingWrites` centralizzato, `renderCardPathSummary_`) e P7
+(migrazione una tantum, TEST e PROD) verificate end-to-end e
+documentate con i riferimenti ai commit e ai log di esecuzione reali.
+
+**Stato del branch**: `fix/fase-p-lock-ambiente-2026-08-26`, tutto
+pushato, nessun commit locale in sospeso. PR [#13](https://github.com/MaTorre72/SigmaFlow/pull/13)
+aperta per la review (copre solo i commit non ancora in `main`: P6
+terzo punto + P7 — P1-P6 primi due punti già mergiati con PR #12).
+
+**Cosa resta, riservato a Marco — non eseguibile da Claude per regola
+tecnica del progetto** (stessa regola già applicata a fine P1-P6):
+1. Review/merge della PR #13 su GitHub.
+2. Redeploy del deployment PROD (Distribuisci → Gestisci distribuzioni
+   → Nuova versione → Distribuisci) — necessario perché il fix di P6
+   (pannello percorso card) sia visibile agli utenti reali. I **dati**
+   di P7 sono già corretti su PROD in modo permanente, indipendentemente
+   dal deployment (scritti direttamente sul foglio da Marco).
+
+**Programma Fase P (P1-P7) — completo.** Nessun'altra azione lato
+Claude in sospeso. Fase **Q** resta riservata (solo il nome, design
+già scritto in `docs/DESIGN_derivazione_visite.md`) per una sessione
+futura, su richiesta esplicita di Marco quando deciderà di riprenderla
+— non prima.
+
+---
+
 ## P7 — COMPLETA anche su PROD, eseguita da Marco (2026-08-26, sessione 6 continua)
 
 Seguito diretto della sezione sotto (TEST). Marco ha eseguito lui
