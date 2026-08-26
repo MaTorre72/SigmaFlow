@@ -760,6 +760,166 @@ function eseguiMigrazioneCompletaSuProd() {
   return eseguiMigrazioneCompleta_(ss, { confermaNome: 'SigmaFlow Database' });
 }
 
+// P7 (DESIGN_lock_ambiente.md §2.7): migrazione una tantum sui job GIA'
+// ESISTENTI, scritti in modo inaffidabile prima del fix di P5
+// (recomputeCurrentStatus_/recomputeIncaricoChiusoTs_, Kanban.gs) - quel
+// fix corregge status/status_since_ts/incarico_chiuso_ts solo da oggi in
+// avanti, ad ogni modifica della Cronologia; i job scritti prima
+// restano con qualunque valore la vecchia logica aveva prodotto.
+// Verificato sui dati reali (55 job con Cronologia leggibile): 20 con
+// status_since_ts disallineato, 2 con status stesso diverso da dove
+// l'ultimo evento della Cronologia dice che dovrebbero essere.
+//
+// Riusa le due funzioni pure di P5 COSI' COME SONO (nessuna riscrittura,
+// nessuna modifica): la Cronologia (activity_log_json) resta l'unica
+// fonte di verita', qui applicata retroattivamente a ogni riga del
+// foglio 'jobs'. Non tocca 'visite' - solo i tre campi su 'jobs'.
+//
+// dryRun (default true, il valore MAI usato per la scrittura reale):
+// con true, nessuna scrittura sul foglio - solo il report di cosa
+// cambierebbe. Con false (sempre esplicito), scrive SOLO i campi che
+// differiscono, riga per riga (via writeJobToRow_ con originalJob,
+// stesso principio O1) - il report e' comunque sempre calcolato e
+// restituito/loggato, con un timestamp proprio per ogni esecuzione, per
+// permettere un controllo a posteriori su una scrittura di massa.
+//
+// Riga con activity_log_json mancante o non interpretabile: saltata e
+// segnalata in rows_skipped_unparsable, non blocca le altre righe -
+// parseActivityLog_ non lancia mai un errore fatale (ritorna [] su
+// qualunque JSON non valido), quindi il caso si riconosce da un log
+// vuoto dopo il parsing, non da un'eccezione.
+function recomputeExistingJobsStatus_(ss, dryRun) {
+  dryRun = dryRun !== false;
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var headers = getHeaderMap_(sheet);
+  var lastRow = sheet.getLastRow();
+
+  var report = {
+    dry_run: dryRun,
+    spreadsheet_id: ss.getId(),
+    spreadsheet_name: ss.getName(),
+    executed_at: nowIso_(),
+    total_rows_scanned: 0,
+    rows_skipped_unparsable: [],
+    rows_changed: 0,
+    changes_by_field: { status: 0, status_since_ts: 0, incarico_chiuso_ts: 0 },
+    status_changes_detail: [],
+    changes: []
+  };
+
+  for (var row = 2; row <= lastRow; row++) {
+    var job = readJobFromRow_(sheet, row, headers);
+    if (!job.job_id) {
+      continue;
+    }
+    report.total_rows_scanned++;
+
+    var log = parseActivityLog_(job.activity_log_json);
+    if (!log.length) {
+      report.rows_skipped_unparsable.push({ job_id: job.job_id, row: row, reason: 'activity_log_json vuoto o non interpretabile' });
+      continue;
+    }
+
+    var before = {
+      status: job.status,
+      status_since_ts: job.status_since_ts,
+      incarico_chiuso_ts: job.incarico_chiuso_ts
+    };
+
+    // Copia: recomputeCurrentStatus_/recomputeIncaricoChiusoTs_ mutano
+    // l'oggetto passato - 'job' resta l'originale, per writeJobToRow_.
+    var recomputed = Object.assign({}, job);
+    recomputeCurrentStatus_(recomputed, log);
+    recomputeIncaricoChiusoTs_(recomputed, log);
+
+    var rowChanges = [];
+    ['status', 'status_since_ts', 'incarico_chiuso_ts'].forEach(function(field) {
+      if (before[field] !== recomputed[field]) {
+        rowChanges.push({ field: field, before: before[field], after: recomputed[field] });
+        report.changes_by_field[field]++;
+      }
+    });
+
+    if (!rowChanges.length) {
+      continue;
+    }
+
+    report.rows_changed++;
+    var changeEntry = { job_id: job.job_id, row: row, fields: rowChanges };
+    report.changes.push(changeEntry);
+    if (rowChanges.some(function(change) { return change.field === 'status'; })) {
+      report.status_changes_detail.push(changeEntry);
+    }
+
+    if (!dryRun) {
+      writeJobToRow_(sheet, row, headers, recomputed, job);
+    }
+  }
+
+  Logger.log(JSON.stringify(report));
+  return report;
+}
+
+// Esegue la migrazione P7 sul foglio TEST (withTestSpreadsheet_, stesso
+// meccanismo gia' usato da migrateVisiteFromHistoryOnTest/
+// setupSigmaFlowOnTest) - eseguibile dall'editor Apps Script (menu
+// Esegui) o via `clasp run` (execution API), mai sul foglio PROD.
+function recomputeExistingJobsStatusOnTest(dryRun) {
+  return withTestSpreadsheet_(function(ss) {
+    return recomputeExistingJobsStatus_(ss, dryRun);
+  });
+}
+
+// Wrapper senza parametri, per lanciarli con un click dal menu Esegui
+// dell'editor (che chiama sempre la funzione selezionata a zero
+// argomenti - non c'e' modo di passare dryRun a mano da li'). Stesso
+// dryRun esplicito di sempre: Write è SEMPRE dryRun=false, mai il
+// default.
+function recomputeExistingJobsStatusOnTestDryRun() {
+  return recomputeExistingJobsStatusOnTest(true);
+}
+
+function recomputeExistingJobsStatusOnTestWrite() {
+  return recomputeExistingJobsStatusOnTest(false);
+}
+
+// Stesso pattern di sicurezza di allineaSchemaSuProd/
+// migrateVisiteFromHistorySuProd: apre SIGMAFLOW.DEFAULT_SPREADSHEET_ID
+// direttamente per id, verifica il nome prima di scrivere, si ferma da
+// sola se non corrisponde. Nome SENZA underscore finale apposta, per
+// restare visibile nel menu Esegui - da eseguire solo su richiesta
+// esplicita, direttamente da Marco stesso dall'editor Apps Script (o da
+// lui via `clasp run` dal proprio terminale), MAI da questa sessione o
+// da un'esecuzione automatica: nessuna riga di questo file scrive su
+// PROD finche' non e' Marco stesso a farlo scattare.
+function recomputeExistingJobsStatusSuProd(dryRun) {
+  var ss = SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID);
+  if (ss.getName() !== 'SigmaFlow Database') {
+    throw new Error('Nome foglio inatteso ("' + ss.getName() + '"), controllo di sicurezza fallito. Nessuna modifica eseguita.');
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return recomputeExistingJobsStatus_(ss, dryRun);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Wrapper senza parametri per l'editor, stesso motivo di
+// recomputeExistingJobsStatusOnTestDryRun/Write sopra.
+// recomputeExistingJobsStatusSuProdWrite è LA funzione che scrive
+// davvero su PROD - va lanciata solo da Marco, mai da Claude, gate o
+// non gate (CLAUDE.md).
+function recomputeExistingJobsStatusSuProdDryRun() {
+  return recomputeExistingJobsStatusSuProd(true);
+}
+
+function recomputeExistingJobsStatusSuProdWrite() {
+  return recomputeExistingJobsStatusSuProd(false);
+}
+
 // Corregge il ruolo della colonna che DEFAULT_COLUMNS assegna a 'prep'
 // (oggi 'todo'/TO DO) se sul foglio live risulta ancora un ruolo
 // diverso (tipicamente 'wip', stato pre-Fase-K) — trovato concretamente
