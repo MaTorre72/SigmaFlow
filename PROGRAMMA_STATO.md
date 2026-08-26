@@ -1,6 +1,52 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## P6 — terzo punto aggiunto dopo il merge: fix su renderCardPathSummary_ (2026-08-26, sessione 5)
+
+Dopo il merge/deploy di Fase P (P1-P6, sezione sotto), Marco ha
+segnalato un secondo problema distinto sullo stesso screenshot: il
+pannello "Percorso della card" mostrava una durata impossibile (WIP:
+103g per una card spostata lì 14 giorni prima — caso reale
+`JOB-20260707-GUKC`). Verificato sui dati veri del foglio "SigmaFlow
+Database": `job.status_since_ts` è disallineato dall'ultimo evento
+della Cronologia su **20 job su 55** (scritto in modo inaffidabile
+prima del fix di P5, mai aggiornato sui job già esistenti — P5 corregge
+solo da quel momento in avanti). Due correzioni distinte decise con
+Marco: una difesa lato client qui (**P6, terzo punto**, aggiunta allo
+stesso branch dopo il merge — i primi due punti di P6 erano già
+mergiati/deployati), una migrazione dati lato server in una sotto-fase
+a sé (**P7**, tocca dati reali, fuori scope qui).
+
+**Fix**: `renderCardPathSummary_` (client.html) — il segmento "in corso"
+usava `job.status_since_ts` come inizio senza controllare che fosse
+successivo all'ultimo evento `move` del log. Ora `Math.max(status_since_ts,
+segmentStart)`: `status_since_ts` può solo spostare l'inizio in AVANTI
+rispetto a quanto dice il log, mai indietro. Stesso principio di P5 ("la
+Cronologia comanda"), applicato qui solo alla visualizzazione — **non
+corregge il dato sul foglio** (quello è P7).
+
+**Collaudato nel Browser pane** (server locale di riproduzione, chiamata
+diretta a `renderCardPathSummary_` con un `job.status_since_ts`
+manipolato, per isolare esattamente la funzione toccata):
+- Caso bug reale: `status_since_ts` spostato 103 giorni prima
+  dell'ultimo evento del log → il pannello mostra la durata calcolata
+  dal log (pochi minuti, coerente col tempo reale trascorso nel test),
+  non più 103 giorni.
+- Caso opposto (M0-C, già supportato prima del fix, verificato di non
+  averlo rotto): `status_since_ts` più recente dell'ultimo evento del
+  log (2 minuti dopo) → il pannello rispetta il valore corretto, non lo
+  scavalca con quello del log.
+- Nessun errore in console.
+
+**171/171 test nell'harness Node** (nessuna regressione — fix puramente
+client-side, coerente con P6 punti 1/2 già verificati in precedenza).
+Push su TEST verificato: 16/16 file identici. Nessuna PR aperta, come
+da richiesta — resta sullo stesso branch `fix/fase-p-lock-ambiente-2026-08-26`
+(ora un commit avanti rispetto a `main`, che ha già i primi due punti di
+P6 mergiati/deployati).
+
+---
+
 ## Fase P — CHIUSA (P1-P6 tutte DONE), in attesa di merge/deploy da parte di Marco (2026-08-26)
 
 Tutte le caselle di `docs/DESIGN_lock_ambiente.md` §6 spuntate (P1-P6).
