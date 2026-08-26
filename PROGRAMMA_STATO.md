@@ -1,6 +1,86 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## P7 — migrazione una tantum status/status_since_ts/incarico_chiuso_ts: TEST completo, PROD in attesa di Marco (2026-08-26, sessione 6)
+
+Richiesta esplicita di Marco: "deve tutto essere coerente con la
+Cronologia, sempre — se una card viene toccata deve essere aggiornata",
+niente gate, TEST e PROD nella stessa sessione. **Rispettato per TEST,
+non per PROD**: la scrittura su dati reali PROD resta riservata a
+Marco stesso, per regola tecnica di `CLAUDE.md` — nessuna eccezione,
+nemmeno su richiesta esplicita in sessione. Segnalato subito a inizio
+sessione, prima di scrivere codice.
+
+**Codice** (`ActivityLog.gs`, commit `5ebef32`): `recomputeExistingJobsStatus_(ss, dryRun)`
+— riusa `recomputeCurrentStatus_`/`recomputeIncaricoChiusoTs_` (P5)
+così come sono, applicandole retroattivamente a ogni riga di `jobs`.
+`dryRun=true` (default): solo report, nessuna scrittura. `dryRun=false`
+(sempre esplicito): scrive solo i campi che differiscono. Riga con
+`activity_log_json` mancante/non interpretabile: saltata e segnalata,
+non blocca le altre. Wrapper `OnTest`/`SuProd` (stesso pattern di
+sicurezza di `allineaSchemaSuProd`) + wrapper senza parametri per
+l'editor (`...OnTestDryRun`/`...OnTestWrite`/`...SuProdDryRun`/`...SuProdWrite`,
+dato che il menu Esegui chiama sempre a zero argomenti).
+
+**Blocco tecnico incontrato e non risolto**: `clasp run` (Execution
+API) fallisce sempre con "Unable to run script function..." — verificato
+non specifico alla nuova funzione (fallisce anche su una funzione
+banale preesistente), non risolto da un nuovo `clasp login` con
+riautorizzazione completa. Causa più probabile: l'Execution API in
+modalità `MYSELF` richiede che l'account abbia già eseguito almeno una
+funzione dall'editor online per completare il consenso — non coperto
+dal login da riga di comando. **Non bloccante**: Marco ha eseguito
+direttamente dall'editor Apps Script (menu Esegui → Log di esecuzione),
+stesso identico output che avrebbe dato `clasp run`.
+
+**TEST — dry-run eseguito da Marco** (`recomputeExistingJobsStatusOnTestDryRun`,
+17:52:50): 52 job scansionati, 0 righe malformate, **1 solo job
+cambierebbe** (`JOB-DEMO-19`: `status` todo→wip, `status_since_ts`
+2026-07-27T08:38→2026-07-29T08:40; `incarico_chiuso_ts` invariato per
+tutti) — dataset demo/TEST, in gran parte già coerente (diversamente
+da PROD, vedi sotto). **Verificato contro la Cronologia reale** da
+Marco prima di procedere: ultimo evento davvero un move verso WIP
+il 29/07 08:40, confermato.
+
+**TEST — scrittura eseguita da Marco** (`recomputeExistingJobsStatusOnTestWrite`,
+17:55:52): stesso identico risultato del dry-run (1 job, stessi
+valori before/after) — scrittura applicata. **175/175 test
+nell'harness Node** (171 preesistenti + 4 nuovi: dry-run senza
+scrittura, scrittura dei soli campi cambiati, riga malformata non
+blocca le altre, job già consistente non tocca). Push su TEST
+verificato: 16/16 file identici.
+
+**Log delle due esecuzioni reali, conservato per un controllo a
+posteriori** (copiato qui integralmente, non solo riassunto):
+
+```
+Dry-run (17:52:50): {"dry_run":true,"spreadsheet_id":"1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU","spreadsheet_name":"SigmaFlow Database TEST","executed_at":"2026-08-26T17:52:52+02:00","total_rows_scanned":52,"rows_skipped_unparsable":[],"rows_changed":1,"changes_by_field":{"status":1,"status_since_ts":1,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}],"changes":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}]}
+
+Scrittura (17:55:52): {"dry_run":false,"spreadsheet_id":"1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU","spreadsheet_name":"SigmaFlow Database TEST","executed_at":"2026-08-26T17:55:54+02:00","total_rows_scanned":52,"rows_skipped_unparsable":[],"rows_changed":1,"changes_by_field":{"status":1,"status_since_ts":1,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}],"changes":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}]}
+```
+
+**PROD — non eseguito da questa sessione, in attesa di Marco.**
+Numeri attesi (già noti da §2.7 del documento, verificati in
+precedenza sui dati reali, da confermare col vero dry-run): **20 job
+su 55 con `status_since_ts` disallineato**, **2 con `status` (la
+colonna sulla board) diverso da dove l'ultimo evento della Cronologia
+dice che dovrebbero essere** — `JOB-20260707-0YXL` e
+`JOB-20260707-QSCD`. Questi due vanno segnalati esplicitamente nel
+report finale quando Marco esegue, non nascosti in un conteggio
+aggregato — per decisione sua esplicita, corretti come tutti gli
+altri, senza eccezione.
+
+**Istruzioni per Marco (stesso procedimento già seguito su TEST)**:
+1. Editor Apps Script → menu funzioni → `recomputeExistingJobsStatusSuProdDryRun` → Esegui → Log di esecuzione, incollarmelo.
+2. Dopo conferma che i numeri tornano (in particolare i due job con `status` diverso): `recomputeExistingJobsStatusSuProdWrite` → Esegui → Log di esecuzione, incollarmelo di nuovo.
+
+**Programma Fase P7 — completo lato Claude.** Codice scritto,
+collaudato nell'harness Node, eseguito e verificato su TEST reale
+(dry-run + scrittura). Manca solo l'esecuzione su PROD, riservata a
+Marco.
+
+---
+
 ## P6 — terzo punto aggiunto dopo il merge: fix su renderCardPathSummary_ (2026-08-26, sessione 5)
 
 Dopo il merge/deploy di Fase P (P1-P6, sezione sotto), Marco ha
