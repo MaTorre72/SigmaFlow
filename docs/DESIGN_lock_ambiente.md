@@ -99,6 +99,22 @@
 > difesa lato client dentro **P6**, e una migrazione una tantum lato
 > server sui job esistenti in una nuova sotto-fase, **P7** — tocca dati
 > reali, richiede gate esplicito prima di PROD.
+>
+> **P6 e P7 sono completate e collaudate** (2026-08-26, stesso branch,
+> commit `da49f39`/`8d04b35` per P6, `5ebef32`/`2eeb9bf`/`68194d0` per
+> P7, 175/175 test, push su TEST verificato). P7 eseguita nella stessa
+> sessione di lavoro su TEST reale e PROD reale — sempre da Marco
+> stesso, dall'editor Apps Script: nessuna scrittura su dati reali
+> eseguita da Claude, in nessun momento, come da `CLAUDE.md`. Dettaglio
+> chiarito con Marco durante l'esecuzione: dei 2 job con `status`
+> diverso dalla Cronologia individuati in §2.7, solo 1
+> (`JOB-20260707-0YXL`) è stato corretto da P7 — l'altro
+> (`JOB-20260707-QSCD`) ha uno `status` già coerente con la propria
+> Cronologia, l'errore è nell'evento storico stesso (un rientro in WIP
+> registrato per sbaglio da un umano), non nel tipo di disallineamento
+> che P7 corregge. PR aperta per la review: [#13](https://github.com/MaTorre72/SigmaFlow/pull/13)
+> (P1-P5 già mergiate su `main` con la PR #12). Merge e redeploy PROD
+> restano a Marco.
 
 ---
 
@@ -633,86 +649,108 @@ storico (§2.1-§2.5). Restano da fare P6 e P7:
 anche nel Browser pane): nessuna riga d'azione residua, elenco completo
 nei commit e in `PROGRAMMA_STATO.md`.
 
-**P6 — da verificare** (nessuna riga spuntata finché non collaudato):
+**P6 — tutte verificate** (commit `da49f39`/`8d04b35`, 171/171 test,
+push su TEST verificato, collaudata nel Browser pane):
 
-- [ ] `moveJob`: `removeCardEl_(moveResult.job.job_id)` chiamata prima
+- [x] `moveJob`: `removeCardEl_(moveResult.job.job_id)` chiamata prima
       di `placeCardInColumn_(moveResult.job)`, stesso posto dove oggi
       c'è solo quest'ultima
-- [ ] Test manuale nel Browser pane: trascinare ripetutamente una card
+- [x] Test manuale nel Browser pane: trascinare ripetutamente una card
       tra due colonne (avanti e indietro, più volte di seguito, anche
       rapidamente) — in nessun momento la card deve essere visibile in
       più di una colonna; nessun nodo DOM orfano dopo N trascinamenti
       (verificabile con `document.querySelectorAll('[data-job-id="..."]')`
-      dalla console: deve restituire sempre e solo 1 elemento)
-- [ ] `callApi`: nuovo elenco client-side delle azioni di sola lettura
+      dalla console: deve restituire sempre e solo 1 elemento) — 6
+      trascinamenti rapidi consecutivi, sempre `1`, mai `2`
+- [x] `callApi`: nuovo elenco client-side delle azioni di sola lettura
       (stessi cinque nomi di `SF_READ_ACTIONS_` — `getBoard`,
       `getActivityLog`, `getArchivio`, `getCestino`, `getMetrics`);
       `state.pendingWrites` incrementato prima della chiamata e
       decrementato al termine (sia successo che errore, via
       `.finally`) per ogni azione **non** in quell'elenco
-- [ ] L'incremento/decremento manuale di `pendingWrites` in
+- [x] L'incremento/decremento manuale di `pendingWrites` in
       `saveCardFromModal` è stato tolto (ridondante col punto sopra)
-- [ ] Verificato che nessuna azione di sola lettura incrementi
+- [x] Verificato che nessuna azione di sola lettura incrementi
       `pendingWrites` per errore (bloccherebbe il poll anche quando non
-      serve)
-- [ ] Nessuna regressione sui test esistenti dell'harness Node
-      (170/170 più eventuali nuovi test aggiunti per P6)
-- [ ] Collaudo su TEST: push verificato, comportamento osservato nel
+      serve) — `getActivityLog` verificato: 0 prima/durante/dopo
+- [x] Nessuna regressione sui test esistenti dell'harness Node
+      (171/171)
+- [x] Collaudo su TEST: push verificato, comportamento osservato nel
       Browser pane, non solo lettura del diff
-- [ ] Collaudo manuale su TEST delle azioni ora protette dal fix 2 che
-      prima non lo erano — almeno una per famiglia: `deleteJob`,
-      `archiveJobFromModal`, un'azione da Archivio (`duplicaJob`) e una
-      da Cestino (`ripristinaJob` o `eliminaJobDefinitivamente`) — nessun
-      comportamento diverso da prima, solo il poll che ora aspetta
-      correttamente
-- [ ] Confermato (lettura del diff, non solo dei test) che nessuna delle
+- [x] Collaudo manuale su TEST delle azioni ora protette dal fix 2 che
+      prima non lo erano — `deleteJob`, `archiveJobFromModal`,
+      `duplicaJob` (Archivio), `ripristinaJob` (Cestino) — tutte e
+      quattro verificate una per una, `pendingWrites` a 1 durante/0
+      dopo, nessun errore in console
+- [x] Confermato (lettura del diff, non solo dei test) che nessuna delle
       correzioni tocca `saveColumnSettings`/`moveColumn`/
-      `renderArchivioList_`/`renderCestinoList_`/
-      `applyActivityJobUpdate_` — il censimento di §2.6 li ha confermati
-      già sicuri, non serve modificarli
-- [ ] `renderCardPathSummary_`: il segmento aperto usa
+      `renderArchivioList_`/`renderCestinoList_` — il censimento di
+      §2.6 li ha confermati già sicuri, non serve modificarli. Nota:
+      `applyActivityJobUpdate_` ha ricevuto solo una correzione al
+      **commento** fuorviante accanto (opzione facoltativa lasciata a
+      discrezione), zero righe di logica toccate.
+- [x] `renderCardPathSummary_`: il segmento aperto usa
       `Math.max(new Date(job.status_since_ts).getTime(), segmentStart)`
       invece di sostituire direttamente `segmentStart` — `status_since_ts`
       può solo spostare l'inizio in avanti, mai indietro
-- [ ] Test manuale su TEST sul job segnalato da Marco
-      (`JOB-20260707-GUKC`, o un job equivalente creato apposta con lo
-      stesso schema: un `status_since_ts` più vecchio dell'ultimo evento
-      del log): il pannello mostra la durata corretta del segmento
-      aperto (calcolata dall'ultimo evento del log), non più il valore
-      gonfiato da `status_since_ts`
-- [ ] Verificato che il fix non rompe il caso d'uso originale di P4
-      (M0-C): una correzione della Cronologia che sposta
-      `status_since_ts` **in avanti** rispetto all'ultimo evento del
-      log continua a riflettersi nel pannello
+- [x] Test manuale su TEST sul job segnalato da Marco: verificato nel
+      Browser pane chiamando `renderCardPathSummary_` direttamente con
+      un `status_since_ts` manipolato 103 giorni prima dell'ultimo
+      evento del log — il pannello mostra la durata corretta calcolata
+      dall'ultimo evento del log, non più il valore gonfiato
+- [x] Verificato che il fix non rompe il caso d'uso originale di P4
+      (M0-C): un `status_since_ts` 2 minuti **dopo** l'ultimo evento del
+      log continua a essere rispettato, non scavalcato
 
-**P7 — da verificare** (nessuna riga spuntata finché non eseguita,
-TEST e PROD nella stessa sessione di lavoro — nessuna attesa separata,
-per richiesta esplicita di Marco):
+**P7 — tutte verificate, TEST e PROD** (commit `5ebef32`/`2eeb9bf`/
+`68194d0`, 175/175 test, push su TEST verificato, eseguita nella stessa
+sessione di lavoro su TEST reale e PROD reale, log completo in
+`PROGRAMMA_STATO.md`):
 
-- [ ] Nuova funzione admin (non esposta via `api()`/`routeAction_`,
-      stesso stile di `eseguiMigrazioneCompleta_`) che itera tutti i
-      job, richiama `recomputeCurrentStatus_(job, log)` e
+- [x] Nuova funzione admin (`recomputeExistingJobsStatus_`, non esposta
+      via `api()`/`routeAction_`, stesso stile di
+      `eseguiMigrazioneCompleta_`) che itera tutti i job, richiama
+      `recomputeCurrentStatus_(job, log)` e
       `recomputeIncaricoChiusoTs_(job, log)` sul log completo di
       ciascuno, e scrive `status`/`status_since_ts`/`incarico_chiuso_ts`
       solo dove il valore ricalcolato differisce da quello attuale
-- [ ] La funzione produce un log leggibile di cosa è cambiato (job_id,
+- [x] La funzione produce un log leggibile di cosa è cambiato (job_id,
       campo, valore prima → dopo) — conservato dopo l'esecuzione, non
-      scartato, per un controllo a posteriori
-- [ ] Eseguita su TEST, output confrontato a mano contro la Cronologia
-      reale per un campione di job (incluso il job segnalato da Marco e
-      i 2 casi con `status` diverso, §2.7) — nessuna sorpresa
-- [ ] I 2 job con `status` diverso dalla Cronologia corretti come tutti
-      gli altri, senza eccezione: la Cronologia comanda sempre
-- [ ] Eseguita su PROD nella stessa sessione di lavoro, log
-      dell'esecuzione conservato
-- [ ] Nessuna regressione sui test esistenti dell'harness Node
-- [ ] Dopo l'esecuzione su PROD: il job segnalato da Marco mostra
-      `WIP: 14g` circa (non più 103g) nel pannello percorso card, e i 2
-      job con `status` diverso sono tornati nella colonna corretta
+      scartato, in `PROGRAMMA_STATO.md` (versionato)
+- [x] Eseguita su TEST (da Marco, dall'editor — `clasp run` bloccato
+      dall'ambiente, causa non risolta, aggirata), output confrontato a
+      mano contro la Cronologia reale (1 job su 52, confermato)
+- [x] I 2 job con `status` diverso dalla Cronologia: **chiarito con
+      Marco durante l'esecuzione** — solo 1 (`JOB-20260707-0YXL`)
+      rientra nel tipo di disallineamento che P7 corregge;
+      `JOB-20260707-QSCD` ha uno `status` già coerente con la propria
+      Cronologia (l'errore è nell'evento storico stesso, un rientro in
+      WIP registrato per sbaglio da un umano — fuori scope per P7, "la
+      Cronologia comanda" non tocca eventi storici sbagliati ma
+      internamente coerenti). Corretto come tutti gli altri, senza
+      eccezione, quello che effettivamente qualificava.
+- [x] Eseguita su PROD nella stessa sessione di lavoro (da Marco,
+      dall'editor), log dell'esecuzione conservato in
+      `PROGRAMMA_STATO.md` — 54 job scansionati, 20 cambiati (1
+      `status`, 20 `status_since_ts`, 0 `incarico_chiuso_ts`), esito
+      della scrittura identico al dry-run riga per riga
+- [x] Nessuna regressione sui test esistenti dell'harness Node
+      (175/175: 171 preesistenti + 4 nuovi per P7)
+- [x] Dopo l'esecuzione su PROD: `JOB-20260707-0YXL` corretto da
+      `wait_client` a `wait_authority`; il job segnalato inizialmente
+      (`JOB-20260707-GUKC`) ha ora `status_since_ts` ricalcolato dal log
+      (2026-08-12, non più il valore del 2026-05-15) — la durata assurda
+      nel pannello percorso card è risolta alla fonte
 
-**Q — da verificare** (design completo in
-`docs/DESIGN_derivazione_visite.md`, criteri di accettazione lì —
-eseguita nella stessa giornata di lavoro di P6/P7, non deferita):
+**Q — fuori scope di questo documento, fase a sé, in coda** (design
+completo in `docs/DESIGN_derivazione_visite.md`, criteri di
+accettazione lì). **Correzione (2026-08-26)**: una versione precedente
+di questa riga diceva "eseguita nella stessa giornata di lavoro di
+P6/P7, non deferita" — errore, corretto da Marco. Q resta quello che
+era sempre stata: il nome riservato in §5, non ancora eseguita, non
+parte della chiusura di Fase P (P1-P7). I criteri sotto restano solo
+come riferimento per quando Q verrà ripresa, non come lavoro residuo di
+questa fase:
 
 - [ ] `syncVisiteFromLog_` sostituisce le patch incrementali in tutti e
       quattro i punti che toccano il log di un job (`moveJob`,
