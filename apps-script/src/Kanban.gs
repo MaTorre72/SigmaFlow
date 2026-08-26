@@ -214,10 +214,10 @@ function addJob(params) {
   sheet.appendRow(jobToRow_(job));
 
   // Modello caso/visita: la visita 1 nasce con la card, stesso principio
-  // del gate-setting in updateVisiteForMove_ applicato alla colonna di
-  // destinazione iniziale — senza questo, un job creato direttamente in
-  // WIP/TO DO/DONE non avrebbe alcuna riga 'visite' finche' non viene
-  // spostato per la prima volta.
+  // del gate-setting in computeVisiteFromLog_ (ActivityLog.gs) applicato
+  // alla colonna di destinazione iniziale — senza questo, un job creato
+  // direttamente in WIP/TO DO/DONE non avrebbe alcuna riga 'visite'
+  // finche' non viene spostato per la prima volta.
   var visiteSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
   if (visiteSheet) {
     appendVisitRow_(visiteSheet, {
@@ -290,7 +290,7 @@ function moveJob(params) {
   // della successiva su qualunque spostamento con provenienza stand_by/done
   // e destinazione backlog/prep. Uno spostamento tra due colonne di attesa
   // diverse, o l'ingresso in done, non apre/chiude nulla — vedi
-  // updateVisiteForMove_ per gli accumulatori e consegna_ts.
+  // computeVisiteFromLog_ (ActivityLog.gs) per gli accumulatori e consegna_ts.
   var closesVisit = sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
 
   if (targetColumn.role === 'backlog' && !job.arrival_ts) {
@@ -338,12 +338,7 @@ function moveJob(params) {
   // Modello caso/visita (Fase L2): start_ts/done_ts/incarico_ts/prep_ts/
   // visit_number/is_rework/rework_cause/service_time_d/lead_time_d/
   // wait_time_d non sono piu' salvati su jobs (rimossi in L5) — vivono
-  // solo su 'visite'. Usa il log COSI' COM'E' PRIMA di appendere l'evento
-  // di questo stesso spostamento: la ricerca dell'ingresso nella colonna
-  // di attesa lasciata (sez. 4) deve guardare solo eventi realmente
-  // precedenti a "now".
-  var activeVisit = updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now);
-
+  // solo su 'visite'.
   log.push(autoEvent);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
   job.activity_log_json = serializeActivityLog_(log);
@@ -354,130 +349,62 @@ function moveJob(params) {
   // una seconda scrittura mirata sulla stessa cella activity_log_json.
   writeJobToRow_(sheet, row, headers, job);
 
+  // Fase Q (DESIGN_derivazione_visite.md): unico meccanismo di
+  // aggiornamento di 'visite', usato anche per lo spostamento live —
+  // ricostruisce l'intera sequenza dal log (con l'evento di questa mossa
+  // gia' incluso e ordinato) invece di patchare la sola riga aperta.
+  var activeVisit = syncVisiteFromLog_(job, log.filter(function(event) { return event.type === 'move'; }));
+
   // M0-A2: il job restituito porta gia' i campi di rientro ricalcolati
   // (visit_number/is_rework/rework_cause/start_ts/done_ts) dalla visita
-  // appena aggiornata da updateVisiteForMove_ — nessuna lettura
-  // aggiuntiva, la visita e' gia' in mano. Permette al client di
-  // aggiornare la sola card spostata senza un reload completo.
+  // appena aggiornata da syncVisiteFromLog_ — nessuna lettura aggiuntiva,
+  // la visita e' gia' in mano. Permette al client di aggiornare la sola
+  // card spostata senza un reload completo.
   applyVisitSummaryFields_(job, activeVisit);
 
   return ok_({ job_id: params.job_id, status: status, job: job });
 }
 
-// Modello caso/visita (DESIGN_modello_caso_visita.md, sez. 2-4): aggiorna
-// il foglio 'visite' in occasione di uno spostamento. Non tocca 'jobs'.
-function updateVisiteForMove_(job, sourceColumn, targetColumn, closesVisit, log, now) {
+// Fase Q (DESIGN_derivazione_visite.md, §2/§3): unico meccanismo di
+// aggiornamento di 'visite', usato in ogni caso in cui il log di un job
+// cambia — spostamento live (moveJob), correzione manuale (addActivityEvent/
+// updateActivityEvent), cancellazione (deleteActivityEvent), migrazione
+// storica (migrateVisiteFromHistory_) e backfill Fase F
+// (migrateSingleJobActivityLog_). Non decide mai "quale riga toccare":
+// ricalcola SEMPRE l'intera sequenza di visite del job dal log intero
+// (computeVisiteFromLog_, la stessa funzione gia' collaudata per la
+// migrazione storica L5) e sostituisce per intero le righe esistenti del
+// job in 'visite' con quelle appena calcolate — mai una patch su una riga
+// sola. Elimina per costruzione la classe di bug in cui una correzione di
+// un evento storico applicava il proprio effetto alla visita
+// "attualmente aperta" invece che a quella storicamente pertinente
+// (`applyManualMoveEffects_`/`ensureOpenVisit_`, ritirate da questa
+// stessa fase). 'moveLog' deve arrivare gia' filtrato sui soli eventi
+// 'move' e ordinato per ts (stesso log gia' pronto in ogni chiamante).
+function syncVisiteFromLog_(job, moveLog) {
   var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
   if (!visiteSheet) {
-    // Non dovrebbe succedere dopo ensureCurrentSchema_() in testa a
-    // moveJob: se succede comunque, non si blocca lo spostamento sulla
-    // board per un problema di sola derivazione metriche.
-    return;
+    // Non dovrebbe succedere dopo ensureCurrentSchema_() in testa ai
+    // chiamanti principali: se succede comunque, non si blocca l'azione
+    // sul job per un problema di sola derivazione metriche.
+    return null;
   }
 
-  var opened = ensureOpenVisit_(visiteSheet, job, now);
-  var activeVisit = opened.visit;
-  var activeRow = opened.row;
+  var result = computeVisiteFromLog_(job.job_id, moveLog);
+  deleteVisiteRowsForJob_(visiteSheet, job.job_id);
+  result.visite.forEach(function(visit) {
+    appendVisitRow_(visiteSheet, visit);
+  });
 
-  // Sez. 4: gli accumulatori per tipo si incrementano ad ogni USCITA da
-  // una colonna stand_by, qualunque sia la destinazione (un'altra attesa,
-  // backlog/prep, o done) — quindi anche quando closesVisit e' false.
-  if (sourceColumn.role === 'stand_by') {
-    accumulateWaitTime_(activeVisit, sourceColumn, log, now);
+  if (result.warnings.length) {
+    // Stesso formato di migrateVisiteFromHistory_ (es. RIENTRO_DIRETTO_A_WIP
+    // nello storico) — non e' un errore che deve bloccare l'azione in
+    // corso (l'evento e' gia' stato validato da validateSequence_ per
+    // quanto riguarda QUESTA chiamata), ma non va perso in silenzio.
+    Logger.log('syncVisiteFromLog_ (' + job.job_id + '): ' + JSON.stringify(result.warnings));
   }
 
-  // O2 (DESIGN_performance.md, punto G): il campo gate da valorizzare
-  // dipende solo da targetColumn.role, gia' noto qui — calcolato una
-  // volta sola, PRIMA di sapere se andra' sulla visita corrente (nessun
-  // rientro) o su quella nuova appena aperta (rientro), cosi' la visita
-  // nuova puo' nascere gia' completa invece di essere scritta e poi
-  // riscritta. Stessa regola "prima volta" gia' in uso per i campi su
-  // jobs: essendo ogni visita una riga nuova, non serve un reset
-  // esplicito come nella derivazione a runtime superata (il bug descritto
-  // in BUGFIX_derivazione_gate_dal_log.md) — la visita nasce gia' vuota.
-  var gateField = null;
-  if (targetColumn.role === 'backlog') {
-    gateField = 'incarico_ts';
-  } else if (targetColumn.role === 'prep') {
-    gateField = 'prep_ts';
-  } else if (targetColumn.role === 'wip') {
-    gateField = 'start_ts';
-  } else if (targetColumn.role === 'done') {
-    // Si valorizza al primo ingresso in done, entro questa visita: non
-    // chiude la visita da sola (sez. 3), la card puo' ancora rientrare.
-    gateField = 'consegna_ts';
-  }
-
-  if (closesVisit) {
-    activeVisit.rientro_ts = now;
-    activeVisit.rientro_da = sourceColumn.id;
-    writeVisitToRow_(visiteSheet, activeRow, activeVisit);
-
-    activeVisit = {
-      job_id: job.job_id,
-      numero_visita: Number(activeVisit.numero_visita || 1) + 1,
-      apertura_ts: now,
-      incarico_ts: '',
-      prep_ts: '',
-      start_ts: '',
-      consegna_ts: '',
-      rientro_ts: '',
-      rientro_da: '',
-      t_cliente_d: 0,
-      t_ente_d: 0,
-      t_interno_d: 0,
-      rework_cause: sourceColumn.id
-    };
-    // closesVisit e' vero solo quando targetColumn.role e' 'backlog' o
-    // 'prep' (unico caso previsto da moveJob), quindi gateField e'
-    // sempre valorizzato qui — la visita nasce gia' completa, un solo
-    // appendVisitRow_ invece di append + riscrittura.
-    if (gateField) {
-      activeVisit[gateField] = now;
-    }
-    appendVisitRow_(visiteSheet, activeVisit);
-    return activeVisit;
-  }
-
-  if (gateField && !activeVisit[gateField]) {
-    activeVisit[gateField] = now;
-  }
-
-  writeVisitToRow_(visiteSheet, activeRow, activeVisit);
-  return activeVisit;
-}
-
-// Se non esiste ancora una visita aperta per questo caso (job creato
-// prima della Fase L, o migrazione storica L5 non ancora eseguita), ne
-// crea una minima al volo per non bloccare lo spostamento: la
-// materializzazione storica di L5 e' autorevole e la sovrascrivera'.
-function ensureOpenVisit_(visiteSheet, job, now) {
-  var row = findOpenVisitRow_(visiteSheet, job.job_id);
-  if (row > 0) {
-    return { row: row, visit: readVisitFromRow_(visiteSheet, row) };
-  }
-
-  // Bootstrap raro (dopo L5 ogni job con un log dovrebbe gia' avere le
-  // sue righe 'visite' dalla migrazione storica): senza altra
-  // informazione (job non porta piu' i campi gate — rimossi in L5), si
-  // assume visita 1.
-  var visit = {
-    job_id: job.job_id,
-    numero_visita: 1,
-    apertura_ts: job.arrival_ts || now,
-    incarico_ts: '',
-    prep_ts: '',
-    start_ts: '',
-    consegna_ts: '',
-    rientro_ts: '',
-    rientro_da: '',
-    t_cliente_d: 0,
-    t_ente_d: 0,
-    t_interno_d: 0,
-    rework_cause: ''
-  };
-  appendVisitRow_(visiteSheet, visit);
-  return { row: visiteSheet.getLastRow(), visit: visit };
+  return result.visite.length ? result.visite[result.visite.length - 1] : null;
 }
 
 // O3 (DESIGN_performance.md): la ricerca del job_id e' delegata a
@@ -516,13 +443,6 @@ function readVisitFromRow_(sheet, row) {
     visit[header] = normalizeCell_(values[headers[header] - 1]);
   });
   return visit;
-}
-
-function writeVisitToRow_(sheet, row, visit) {
-  var values = VISITE_HEADERS.map(function(header) {
-    return visit[header] === undefined ? '' : visit[header];
-  });
-  sheet.getRange(row, 1, 1, VISITE_HEADERS.length).setValues([values]);
 }
 
 function appendVisitRow_(sheet, visit) {
@@ -766,11 +686,14 @@ function addActivityEvent(params) {
   // allineano sempre in automatico al valore suggerito dall'evento appena
   // registrato, senza chiedere conferma all'utente. I dettagli di questi
   // campi restano interni: l'utente cura solo la cronologia.
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, log);
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
   // P5/P5b: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_/
   // recomputeIncaricoChiusoTs_.
   recomputeCurrentStatus_(job, log);
   recomputeIncaricoChiusoTs_(job, log);
+  // Fase Q (DESIGN_derivazione_visite.md): 'visite' ricostruita per
+  // intero dal log completo, non piu' dal solo candidato appena toccato.
+  syncVisiteFromLog_(job, log.filter(function(event) { return event.type === 'move'; }));
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job, originalJob);
@@ -841,190 +764,22 @@ function recomputeIncaricoChiusoTs_(job, log) {
   }
 }
 
-function applyStructuralAlignment_(job, warnings, candidate, log) {
+// Fase Q (DESIGN_derivazione_visite.md, §3): non tocca piu' 'visite' —
+// gli effetti sulla visita (apertura/chiusura, accumulo attese, campi
+// gate incarico_ts/prep_ts/start_ts/consegna_ts) sono ormai interamente
+// derivati dal log intero da computeVisiteFromLog_/syncVisiteFromLog_,
+// chiamata a parte da ogni chiamante con il log completo aggiornato.
+// Resta solo il campo strutturato ancora su jobs (arrival_ts).
+// applyManualMoveEffects_/alignOpenVisitFields_/ensureOpenVisit_
+// (che scrivevano sempre sulla visita "attualmente aperta", mai su
+// quella storicamente pertinente a un evento vecchio corretto/aggiunto)
+// sono state ritirate insieme a questa semplificazione.
+function applyStructuralAlignment_(job, warnings) {
   warnings.forEach(function(warning) {
     if (JOB_HEADERS.indexOf(warning.field) !== -1) {
       job[warning.field] = warning.suggestedValue;
     }
   });
-
-  // M2 (DESIGN_dashboard.md, §3, opzione 2). applyManualMoveEffects_ sposta
-  // davvero la card per QUALUNQUE evento 'move' manuale (non solo i
-  // rientri, corretto il 2026-08-20 dopo un collaudo di Marco: il fix
-  // iniziale aggiornava job.status solo per il pattern di rientro
-  // stand_by/done -> backlog/prep, lasciando ferma la card su un
-  // successivo move manuale "in avanti", es. TO DO -> WIP). Se ha aperto
-  // una nuova visita (rientro vero), quella e' ormai la visita aperta:
-  // alignOpenVisitFields_ va comunque chiamata dopo (non prima), cosi'
-  // ensureOpenVisit_ trova sempre la visita giusta (quella senza
-  // rientro_ts, che dopo uno split e' sempre la nuova, mai quella appena
-  // chiusa) e le applica i campi (incarico_ts/prep_ts) pertinenti a
-  // QUESTO stesso candidato.
-  applyManualMoveEffects_(job, candidate, log);
-  alignOpenVisitFields_(job, warnings);
-}
-
-// M2 (DESIGN_dashboard.md, §3, opzione 2): una correzione manuale in
-// Cronologia (addActivityEvent/updateActivityEvent) che rappresenta uno
-// spostamento deve spostare davvero la card - non solo registrarlo nel
-// diario. Applicato "live" (sullo stato corrente del job), non alla
-// posizione storica dell'evento corretto - stessa convenzione gia' in
-// uso per gli altri campi strutturali, vedi il commento su
-// alignOpenVisitFields_. Se lo spostamento rappresenta anche un vero
-// rientro (stessa regola di moveJob: provenienza stand_by/done,
-// destinazione backlog/prep) apre/chiude la visita come farebbe il
-// drag-and-drop reale - il divieto di rientro diretto in WIP e' gia'
-// garantito a monte da validateSequence_
-// (RIENTRO_DIRETTO_WIP_NON_CONSENTITO): qui si assume che il candidato
-// sia gia' stato validato.
-//
-// Fix del 2026-08-20 (segnalato da Marco su dati PROD reali: "Dove si
-// blocca il lavoro"/"Profilo di rientro" quasi sempre a zero, pur con
-// molti rientri veri nella storia): il fix iniziale spostava la card e
-// apriva/chiudeva la visita, ma non chiamava MAI accumulateWaitTime_
-// (Kanban.gs, la stessa funzione che updateVisiteForMove_ usa per il
-// drag-and-drop reale) - un'uscita da una colonna stand_by registrata a
-// mano (la maggioranza dei dati reali di Marco: quasi tutta la sua
-// Cronologia e' "source":"manual", non generata dal drag-and-drop) non
-// accumulava mai t_cliente_d/t_ente_d/t_interno_d. Ora lo fa per
-// QUALUNQUE uscita da una colonna stand_by (non solo quelle che
-// chiudono la visita - stessa condizione di updateVisiteForMove_),
-// richiede il log completo (4o parametro, gia' disponibile in
-// addActivityEvent/updateActivityEvent dopo il push del candidato).
-// P5 (DESIGN_lock_ambiente.md §2.5): NON imposta piu' job.status/
-// status_since_ts (spostato in recomputeCurrentStatus_, che li ricalcola
-// sempre dal log INTERO ordinato, non dal solo candidato qui passato -
-// un candidato con data passata non e' detto sia il piu' recente).
-// Resta solo per gli effetti su 'visite' specifici di QUESTO candidato
-// (apertura/chiusura, accumulo attese) - chiamata solo da
-// addActivityEvent/updateActivityEvent, MAI da deleteActivityEvent
-// (vedi commento li' - richiamarla sull'evento-piu'-recente-rimasto
-// dopo una cancellazione duplicherebbe/sposterebbe visite su
-// cancellazioni non correlate).
-function applyManualMoveEffects_(job, candidate, log) {
-  if (!candidate || candidate.type !== 'move') {
-    return;
-  }
-
-  var columns = readColumns_();
-  var targetColumn = findColumn_(columns, candidate.to);
-  if (!targetColumn) {
-    return;
-  }
-
-  var sourceColumn = candidate.from ? findColumn_(columns, candidate.from) : null;
-  // Ne' accumulo ne' split sono possibili senza una provenienza
-  // stand_by (stesso vincolo di updateVisiteForMove_/moveJob).
-  if (!sourceColumn || sourceColumn.role !== 'stand_by') {
-    return;
-  }
-
-  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
-  if (!visiteSheet) {
-    return;
-  }
-
-  var opened = ensureOpenVisit_(visiteSheet, job, candidate.ts);
-  var activeVisit = opened.visit;
-
-  if (log) {
-    accumulateWaitTime_(activeVisit, sourceColumn, log, candidate.ts);
-  }
-
-  var closesVisit = targetColumn.role === 'backlog' || targetColumn.role === 'prep';
-  if (!closesVisit) {
-    // Uscita da un'attesa senza rientro vero (es. verso un'altra
-    // colonna stand_by): l'unico effetto e' l'accumulo sopra, gia'
-    // scritto - stessa logica di updateVisiteForMove_.
-    writeVisitToRow_(visiteSheet, opened.row, activeVisit);
-    return;
-  }
-
-  // P5b (DESIGN_lock_ambiente.md §2.5, richiesto da Marco dopo il punto
-  // esplorativo di P5): l'azzeramento incondizionato di incarico_chiuso_ts
-  // sul solo candidato e' STATO lo stesso bug del Bug 1, applicato a
-  // questo campo - spostato in recomputeIncaricoChiusoTs_ (chiamata in
-  // fondo a addActivityEvent/updateActivityEvent), che deriva dal log
-  // INTERO se esiste davvero un rientro successivo alla chiusura, non
-  // dal solo candidato appena toccato.
-
-  // Idempotenza: se questo stesso rientro (stesso job, stessa data,
-  // stessa provenienza) e' gia' stato registrato in precedenza - es. un
-  // secondo salvataggio dello stesso evento via updateActivityEvent senza
-  // cambiare data/colonne - non duplicare la visita. L'accumulo sopra
-  // resta pero' non idempotente su una modifica ripetuta dello stesso
-  // evento (limite noto, non risolvibile senza un registro per-evento
-  // dei contributi gia' applicati - fuori scope di questo fix).
-  if (reentryAlreadyApplied_(visiteSheet, job.job_id, candidate.ts, sourceColumn.id)) {
-    writeVisitToRow_(visiteSheet, opened.row, activeVisit);
-    return;
-  }
-
-  activeVisit.rientro_ts = candidate.ts;
-  activeVisit.rientro_da = sourceColumn.id;
-  writeVisitToRow_(visiteSheet, opened.row, activeVisit);
-
-  appendVisitRow_(visiteSheet, {
-    job_id: job.job_id,
-    numero_visita: Number(activeVisit.numero_visita || 1) + 1,
-    apertura_ts: candidate.ts,
-    incarico_ts: '',
-    prep_ts: '',
-    start_ts: '',
-    consegna_ts: '',
-    rientro_ts: '',
-    rientro_da: '',
-    t_cliente_d: 0,
-    t_ente_d: 0,
-    t_interno_d: 0,
-    rework_cause: sourceColumn.id
-  });
-}
-
-// Supporta l'idempotenza di applyManualMoveEffects_: true se esiste
-// gia' una visita di questo job chiusa esattamente con questa data e
-// provenienza di rientro.
-function reentryAlreadyApplied_(visiteSheet, jobId, rientroTs, rientroDa) {
-  return readTable_(visiteSheet).some(function(visit) {
-    return visit.job_id === jobId && visit.rientro_ts === rientroTs && visit.rientro_da === rientroDa;
-  });
-}
-
-// Fase L3 (DESIGN_modello_caso_visita.md, sez. 11): le correzioni manuali
-// dell'utente in Cronologia (addActivityEvent/updateActivityEvent/
-// deleteActivityEvent) e il ricalcolo durante la migrazione Fase F
-// (migrateSingleJobActivityLog_, unico altro chiamante di
-// applyStructuralAlignment_) allineano lo stesso campo anche sulla
-// visita APERTA corrente del caso — non quella a cui l'evento corretto
-// apparteneva storicamente: identificarla con precisione, per un evento
-// che puo' risalire a una visita gia' chiusa da tempo, e' compito della
-// migrazione storica autorevole di L5, non di questo allineamento live.
-var JOB_FIELD_TO_VISIT_FIELD_ = {
-  incarico_ts: 'incarico_ts',
-  prep_ts: 'prep_ts',
-  start_ts: 'start_ts',
-  done_ts: 'consegna_ts'
-};
-
-function alignOpenVisitFields_(job, warnings) {
-  var visitWarnings = warnings.filter(function(warning) {
-    return JOB_FIELD_TO_VISIT_FIELD_[warning.field] !== undefined;
-  });
-  if (!visitWarnings.length) {
-    return;
-  }
-
-  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
-  if (!visiteSheet) {
-    return;
-  }
-
-  var opened = ensureOpenVisit_(visiteSheet, job, nowIso_());
-  var visit = opened.visit;
-  visitWarnings.forEach(function(warning) {
-    visit[JOB_FIELD_TO_VISIT_FIELD_[warning.field]] = warning.suggestedValue;
-  });
-  writeVisitToRow_(visiteSheet, opened.row, visit);
 }
 
 function getActivityLog(params) {
@@ -1092,11 +847,14 @@ function updateActivityEvent(params) {
   remaining.push(candidate);
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
-  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, remaining);
+  applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
   // P5/P5b: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_/
   // recomputeIncaricoChiusoTs_.
   recomputeCurrentStatus_(job, remaining);
   recomputeIncaricoChiusoTs_(job, remaining);
+  // Fase Q (DESIGN_derivazione_visite.md): 'visite' ricostruita per
+  // intero dal log completo, non piu' dal solo candidato appena toccato.
+  syncVisiteFromLog_(job, remaining.filter(function(event) { return event.type === 'move'; }));
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job, originalJob);
@@ -1138,30 +896,25 @@ function deleteActivityEvent(params) {
   // dall'evento cancellato non piu' rappresentativo: si riallinea in
   // automatico all'evento move piu' recente rimasto, con lo stesso
   // meccanismo (silenzioso) usato per l'aggiunta/modifica di un evento.
-  // M2 (DESIGN_dashboard.md, §3): candidate NON passato qui di proposito
-  // (a differenza di addActivityEvent/updateActivityEvent) - lastMove non
-  // e' un evento appena inserito dall'utente, e' un evento gia' esistente
-  // che la cancellazione ha reso "l'ultimo rimasto": applicargli anche
-  // applyManualMoveEffects_ risposterebbe la card (e duplicherebbe la
-  // visita, se un rientro) ad ogni cancellazione di un evento successivo
-  // non correlato, invece di limitarsi a riallineare le date. Lo
-  // spostamento vero resta gestito solo al momento in cui l'evento che lo
-  // rappresenta viene inserito/modificato.
   var moves = recalculated.filter(function(event) { return event.type === 'move'; });
   var lastMove = moves.length ? moves[moves.length - 1] : null;
   if (lastMove) {
     applyStructuralAlignment_(job, checkStructuralAlignment_(job, lastMove));
   }
   // P5 (Bug 2, DESIGN_lock_ambiente.md §2.5): prima di questo fix,
-  // job.status non veniva MAI riallineato qui (applyStructuralAlignment_
-  // sopra e' chiamata senza candidate/log di proposito - vedi commento -
-  // quindi applyManualMoveEffects_ non scatta mai in questa funzione).
-  // Cancellare l'evento che determinava la posizione attuale lasciava la
-  // card bloccata li'. recomputeCurrentStatus_ e' pura (nessun effetto
-  // su visite, coerente col motivo per cui applyManualMoveEffects_ resta
-  // volutamente esclusa da questa funzione) - risolve senza reintrodurre
-  // il problema del commento sopra.
+  // job.status non veniva MAI riallineato qui. recomputeCurrentStatus_ e'
+  // pura (nessun effetto su visite) - risolve senza reintrodurre il
+  // problema.
   recomputeCurrentStatus_(job, recalculated);
+  // Fase Q (DESIGN_derivazione_visite.md, §3): prima di questo fix,
+  // deleteActivityEvent non toccava MAI 'visite' (il vecchio meccanismo a
+  // patch, applyManualMoveEffects_, non era richiamabile qui senza
+  // rischiare di duplicare/spostare visite su cancellazioni non
+  // correlate — commento storico, ora superato). La ricostruzione
+  // completa e' per natura idempotente: ricalcolare da capo l'intero log
+  // rimasto dopo la cancellazione da' sempre lo stesso risultato,
+  // qualunque sia l'evento cancellato — nessun rischio residuo.
+  syncVisiteFromLog_(job, moves);
 
   job.activity_log_json = serializeActivityLog_(recalculated);
   writeJobToRow_(sheet, row, headers, job, originalJob);

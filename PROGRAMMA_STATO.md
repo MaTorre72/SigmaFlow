@@ -1,6 +1,114 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase Q — derivazione unificata di 'visite' dal log: COMPLETA (codice + TEST + PROD) (2026-08-26, sessione 7)
+
+Confermato da Marco: P6/P7 chiusi definitivamente, nessuno strascico
+(PR #13/#14 mergiate in `main`, `origin/main` allineato). Nuova branch
+dedicata `fix/fase-q-derivazione-visite-2026-08-26`, creata da `main`
+aggiornato. Eseguito secondo il prompt operativo di Fase Q gia'
+concordato, su `docs/DESIGN_derivazione_visite.md` — file trovato
+mancante dal working tree all'inizio sessione (mai committato),
+recuperato integro da uno stash locale rimasto orfano dalla sessione
+P6/P7 (`git stash show -p` + `git show <commit-untracked>:<path>`,
+202 righe, contenuto verificato prima di procedere) invece di essere
+riscritto da zero — nessuna perdita di lavoro.
+
+**Codice** (commit `225bd03`): `computeVisiteFromLog_` (ActivityLog.gs)
+cambia firma da `(job)` a `(jobId, moveLog)` — riceve il log gia'
+filtrato/ordinato dal chiamante. Nuova `syncVisiteFromLog_(job, moveLog)`
+(Kanban.gs): unico meccanismo di aggiornamento di 'visite', usato ora da
+`moveJob`, `addActivityEvent`, `updateActivityEvent` **e**
+`deleteActivityEvent` (che prima non toccava mai 'visite' — commento
+esplicito nel vecchio codice, superato dalla ricostruzione completa,
+idempotente per natura). Ritirate (rimosse, non lasciate morte):
+`alignOpenVisitFields_`, `ensureOpenVisit_`, `reentryAlreadyApplied_`,
+`updateVisiteForMove_`, la vecchia `applyManualMoveEffects_`,
+`writeVisitToRow_` (rimasta senza chiamanti), i 4 rami di
+`checkStructuralAlignment_` che generavano warning per i gate della
+visita (start_ts/done_ts/incarico_ts/prep_ts — ora derivati per intero
+da `computeVisiteFromLog_`, mai piu' da un warning sul solo candidato).
+`findOpenVisitRow_` resta (lettura, usata da `attachOpenVisitSummary_`).
+Anche `migrateSingleJobActivityLog_` (Fase F, ActivityLog.gs) ora chiama
+`syncVisiteFromLog_` in fondo — non elencata nel prompt originale, ma
+necessaria: senza, `testMigrateToActivityLogAlignsOpenVisit` si sarebbe
+rotto (la migrazione Fase F cambia il log quanto gli altri quattro
+percorsi, stesso principio "un solo meccanismo, sempre" del documento).
+
+**Comportamento cambiato, intenzionalmente, da questa unificazione**:
+il vecchio `alignOpenVisitFields_` sovrascriveva incondizionatamente
+`start_ts` ad ogni move manuale verso WIP; `moveJob`/`computeVisiteFromLog_`
+mantengono invece sempre il PRIMO ingresso (principio "Card B", gia'
+testato altrove) — esattamente il tipo di divergenza tra i due
+meccanismi che Q elimina. Due test esistenti aggiornati di conseguenza
+(`testDeleteActivityEventManual`, `testDeleteActivityEventRealignsOpenVisit`):
+valore atteso di `start_ts` corretto dall'ultimo ingresso al primo.
+
+**Due nuovi test dedicati** (criteri di accettazione del documento,
+entrambi registrati in `runAllTests()`):
+`testAddActivityEventHistoricalReentryUpdatesHistoricallyCorrectVisit`
+(un rientro storico scoperto/corretto DOPO un secondo rientro gia'
+registrato: con la ricostruzione completa l'effetto va sulla visita
+storicamente corretta, non su quella "attualmente aperta" — quella
+resta intatta) e `testDeleteActivityEventHistoricalReentryRecalculatesVisite`
+(stesso principio via cancellazione: rimuovere il rientro che separava
+due visite le fonde in una sola, cosa che oggi — prima di Q — non
+succede affatto).
+
+**177/177 test nell'harness Node** (175 preesistenti + 2 nuovi). Push
+su TEST verificato: 16/16 file identici (`push-and-verify.sh`).
+
+**Blocco tecnico, stesso di P7, verificato di nuovo prima di procedere**:
+`clasp run migrateVisiteFromHistoryOnTest` fallisce con "Unable to run
+script function..." — stesso limite dell'Execution API gia' documentato
+in P7 (probabile causa: serve un consenso completato dall'editor online,
+non coperto dal login da riga di comando). **Non risolvibile da questa
+sessione.**
+
+**Bug trovato e corretto DOPO la prima esecuzione reale di Marco su
+TEST** (commit `0dbc1bd`): `migrateVisiteFromHistory_` non loggava mai
+il proprio risultato (a differenza di `recomputeExistingJobsStatus_`,
+la funzione equivalente di P7, che usa `Logger.log`) — la prima
+esecuzione di Marco da editor ha mostrato solo "avviata/completata",
+nessun dato da incollare. Aggiunto `Logger.log(JSON.stringify(summary))`
+(stesso pattern di P7), 177/177 test ancora verdi, ripushato e
+riverificato su TEST (16/16 identici).
+
+**TEST — eseguito da Marco** (`migrateVisiteFromHistoryOnTest`,
+19:13:49): `{"jobs_processed":52,"jobs_without_log":0,"visite_written":57,"coherence_warnings":[]}`
+— 52 job scansionati (stesso numero della dry-run P7 su TEST, stesso
+dataset), nessuna riga malformata, 57 visite scritte per 52 job (alcuni
+job hanno piu' di una visita/rientro, come atteso), **zero warning di
+coerenza** (nessun `RIENTRO_DIRETTO_A_WIP` nello storico TEST reale).
+
+**Confronto a campione — eseguito da Marco, coerente**: `JOB-DEMO-19` e
+altri due job con piu' rientri controllati a mano contro la loro
+Cronologia reale su TEST — tutto coerente, nessuna discrepanza.
+
+**PROD — eseguito da Marco** (`migrateVisiteFromHistorySuProd`,
+19:20:11): `{"jobs_processed":54,"jobs_without_log":0,"visite_written":76,"coherence_warnings":[]}`
+— 54 job scansionati (stesso numero dello scan P7 su PROD), nessuna
+riga malformata, 76 visite scritte per 54 job, **zero warning di
+coerenza**. Nessuna scrittura su dati reali eseguita da Claude, in
+nessun momento — sempre dall'editor Apps Script, da Marco stesso, per
+regola tecnica del progetto.
+
+**Resta, facoltativo — collaudo visivo finale**: pannello "Percorso
+della card" e tempi di attesa in dashboard su un job noto per avere
+rientri (es. `JOB-DEMO-19` su TEST, `JOB-20260707-GUKC` su PROD, gia'
+verificato "coerente" nel confronto a campione sopra) — non bloccante,
+Marco puo' farlo con comodo alla prossima apertura della board.
+
+**Programma Fase Q — completo.** Codice scritto e collaudato
+nell'harness Node (177/177, nuovi test compresi), pushato e verificato
+su TEST, migrazione eseguita e verificata su TEST **e PROD** con esito
+pulito (zero warning in entrambi), confronto a campione su TEST
+confermato coerente da Marco. Nessuna PR aperta verso `main` (non
+richiesto in questa sessione) — branch `fix/fase-q-derivazione-visite-2026-08-26`
+pronta per la review quando Marco vorra' aprirla.
+
+---
+
 ## Fase P — CHIUSA DEFINITIVAMENTE (P1-P7 tutte DONE), in attesa di merge/deploy da parte di Marco (2026-08-26, chiusura sessione 6)
 
 **Correzione importante prima della chiusura**: `docs/DESIGN_lock_ambiente.md`

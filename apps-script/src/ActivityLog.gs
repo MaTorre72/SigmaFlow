@@ -207,41 +207,18 @@ function validateSequence_(events, candidate) {
 }
 
 // Confronta l'evento candidato con i campi strutturati ancora su jobs
-// (solo arrival_ts, dopo L5) e con i gate ormai propri della visita
-// aperta (start_ts/done_ts/incarico_ts/prep_ts, rimossi da jobs in L5,
-// sez. 9.1). Per questi ultimi non c'e' piu' un valore corrente da
-// confrontare su jobs: il suggerimento si propone sempre per il ruolo
-// pertinente — applyStructuralAlignment_/alignOpenVisitFields_ (Kanban.gs)
-// lo scrive solo sulla visita aperta, la correzione manuale di un evento
-// e' per definizione autorevole per quell'evento specifico.
+// (arrival_ts, incarico_chiuso_ts via CORRECTABLE_FIELDS). I gate della
+// visita (start_ts/done_ts/incarico_ts/prep_ts, rimossi da jobs in L5,
+// sez. 9.1) non passano piu' da qui — Fase Q (DESIGN_derivazione_visite.md):
+// sono derivati per intero da computeVisiteFromLog_/syncVisiteFromLog_
+// (Kanban.gs) dal log completo, mai da un warning sul solo candidato.
 function checkStructuralAlignment_(job, candidate) {
   var warnings = [];
 
-  if (candidate.type === 'move') {
-    var columns = readColumns_();
-    var column = findColumn_(columns, candidate.to);
-
-    if (column && column.role === 'wip') {
-      warnings.push({ field: 'start_ts', currentValue: '', suggestedValue: candidate.ts });
-    }
-
-    if (column && column.role === 'done') {
-      warnings.push({ field: 'done_ts', currentValue: '', suggestedValue: candidate.ts });
-    }
-
-    if (column && column.role === 'backlog') {
-      warnings.push({ field: 'incarico_ts', currentValue: '', suggestedValue: candidate.ts });
-    }
-
-    if (column && column.role === 'prep') {
-      warnings.push({ field: 'prep_ts', currentValue: '', suggestedValue: candidate.ts });
-    }
-  }
-
   // N1 (DESIGN_archiviazione.md, §8b): un evento 'correction' scrive
   // direttamente il campo corretto sul job, riusando lo stesso percorso
-  // di applicazione (applyStructuralAlignment_) gia' usato dai warning
-  // generati dai move — nessuna via separata per aggiornare jobs.
+  // di applicazione (applyStructuralAlignment_) usato anche dal warning
+  // arrival_ts sotto — nessuna via separata per aggiornare jobs.
   // Whitelist esplicita (SIGMAFLOW.CORRECTABLE_FIELDS), gia' verificata
   // come hard error in validateSequence_ — qui il campo e' per costruzione
   // gia' valido se si arriva fin qui.
@@ -421,11 +398,20 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
   // allineamento della scrittura live, cosi' il risultato e' identico a
   // quello che si sarebbe ottenuto se gli eventi fossero stati registrati
   // uno per uno nel tempo.
-  log.filter(function(event) { return event.type === 'move'; })
-    .sort(function(a, b) { return compareTs_(a.ts, b.ts); })
-    .forEach(function(moveEvent) {
-      applyStructuralAlignment_(job, checkStructuralAlignment_(job, moveEvent));
-    });
+  var backfilledMoves = log.filter(function(event) { return event.type === 'move'; })
+    .sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+  backfilledMoves.forEach(function(moveEvent) {
+    applyStructuralAlignment_(job, checkStructuralAlignment_(job, moveEvent));
+  });
+
+  // Fase Q (DESIGN_derivazione_visite.md, §2): il log del job e' appena
+  // cambiato (evento di creazione backfillato) — stesso meccanismo unico
+  // usato da moveJob/addActivityEvent/updateActivityEvent/deleteActivityEvent,
+  // non un caso a parte. Sovrascritto comunque dalla successiva
+  // migrateVisiteFromHistory_ quando questa migrazione gira dentro
+  // eseguiMigrazioneCompleta_ — ridondante ma innocuo li', necessario
+  // quando migrateToActivityLog/migrateActivityLogOnTest gira da sola.
+  syncVisiteFromLog_(job, backfilledMoves);
 
   job.activity_log_json = serializeActivityLog_(log);
 
@@ -435,8 +421,8 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
 // Fase L5 (DESIGN_modello_caso_visita.md, sez. 7): materializzazione UNA
 // TANTUM delle visite storiche per ogni caso esistente, leggendo l'intero
 // activity_log_json e applicando la stessa regola di apertura/chiusura
-// gia' live in moveJob/updateVisiteForMove_ (sez. 2), non piu' "derivazione
-// a runtime ad ogni lettura" come nel documento precedente
+// gia' live in moveJob/syncVisiteFromLog_ (Fase Q, Kanban.gs), non piu'
+// "derivazione a runtime ad ogni lettura" come nel documento precedente
 // (BUGFIX_derivazione_gate_dal_log.md). Sovrascrive qualunque riga
 // 'visite' preesistente: i bootstrap minimi creati da L2/L3 per i job
 // toccati prima di questa migrazione sono provvisori, questa e' la
@@ -506,12 +492,16 @@ function migrateVisiteFromHistory_(ss) {
   };
 
   if (!jobs.length) {
+    Logger.log(JSON.stringify(summary));
     return summary;
   }
 
   var allVisite = [];
   jobs.forEach(function(job) {
-    var result = computeVisiteFromLog_(job);
+    var moveLog = parseActivityLog_(job.activity_log_json).filter(function(event) {
+      return event.type === 'move';
+    });
+    var result = computeVisiteFromLog_(job.job_id, moveLog);
     if (!result.visite.length) {
       summary.jobs_without_log++;
       return;
@@ -537,6 +527,16 @@ function migrateVisiteFromHistory_(ss) {
   }
   summary.visite_written = allVisite.length;
 
+  // Stesso pattern di recomputeExistingJobsStatus_ (P7): Logger.log, non
+  // console.log — e' l'unico dei due che compare nel pannello "Log di
+  // esecuzione" dell'editor Apps Script quando Marco lancia la funzione
+  // da li' (via i wrapper OnTest/SuProd sotto), confermato funzionante
+  // in P7. Senza questa riga l'esecuzione da editor non mostra alcun
+  // risultato, solo "avviata/completata" (bug trovato il 2026-08-26: la
+  // primissima esecuzione reale di Marco su TEST non ha prodotto nessun
+  // output da incollare).
+  Logger.log(JSON.stringify(summary));
+
   return summary;
 }
 
@@ -551,10 +551,12 @@ function migrateVisiteFromHistory_(ss) {
 // della Card A non puo' quindi produrre un'incoerenza qui: si usa la
 // sequenza reale dei 'to', il campo 'from' (eventualmente sbagliato)
 // e' semplicemente ignorato.
-function computeVisiteFromLog_(job) {
-  var log = parseActivityLog_(job.activity_log_json).filter(function(event) {
-    return event.type === 'move';
-  });
+// Fase Q (DESIGN_derivazione_visite.md): riceve moveLog gia' filtrato/
+// ordinato dal chiamante invece di rileggerlo da job.activity_log_json —
+// serve anche a syncVisiteFromLog_ (Kanban.gs), chiamata con il log
+// aggiornato in memoria PRIMA che job.activity_log_json venga riscritto.
+function computeVisiteFromLog_(jobId, moveLog) {
+  var log = moveLog || [];
 
   var result = { visite: [], warnings: [] };
   if (!log.length) {
@@ -569,7 +571,7 @@ function computeVisiteFromLog_(job) {
   function openVisit(ts, reworkCause) {
     visitNumber++;
     currentVisit = {
-      job_id: job.job_id,
+      job_id: jobId,
       numero_visita: visitNumber,
       apertura_ts: ts,
       incarico_ts: '',
@@ -604,7 +606,7 @@ function computeVisiteFromLog_(job) {
       // guardia. Si segnala, non si corregge automaticamente (stesso
       // principio del documento bugfix: report, non correzione cieca).
       result.warnings.push({
-        job_id: job.job_id,
+        job_id: jobId,
         code: 'RIENTRO_DIRETTO_A_WIP',
         ts: event.ts,
         from: sourceColumn.id,
