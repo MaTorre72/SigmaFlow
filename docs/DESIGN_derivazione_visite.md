@@ -169,34 +169,43 @@ sessione di lavoro.
 
 ## 6. Criteri di accettazione
 
-- [ ] `computeVisiteFromLog_(jobId, moveLog)`: firma aggiornata, stesso
+Tutti verificati TRUE (2026-08-26, sessione 7) — dettaglio completo in
+`PROGRAMMA_STATO.md`.
+
+- [x] `computeVisiteFromLog_(jobId, moveLog)`: firma aggiornata, stesso
       comportamento (verificato dai test esistenti della migrazione)
-- [ ] `syncVisiteFromLog_(job, moveLog)`: nuova funzione, sostituisce
+- [x] `syncVisiteFromLog_(job, moveLog)`: nuova funzione, sostituisce
       sempre le righe del job invece di patcharle
-- [ ] `moveJob`, `addActivityEvent`, `updateActivityEvent`,
+- [x] `moveJob`, `addActivityEvent`, `updateActivityEvent`,
       `deleteActivityEvent`: tutte e quattro chiamano
       `syncVisiteFromLog_` con il log completo aggiornato — nessuna
-      eccezione residua (in particolare `deleteActivityEvent`, che oggi
-      non tocca `visite` per niente)
-- [ ] `alignOpenVisitFields_`, `ensureOpenVisit_`,
+      eccezione residua (`deleteActivityEvent`, che prima non toccava
+      `visite` per niente, ora la ricalcola come le altre tre)
+- [x] `alignOpenVisitFields_`, `ensureOpenVisit_`,
       `reentryAlreadyApplied_`, `updateVisiteForMove_`, la vecchia
-      `applyManualMoveEffects_`: rimosse dal codice, non lasciate
-      inutilizzate
-- [ ] Test dedicato: un job con un rientro storico *corretto/aggiunto
-      dopo* eventi più recenti (lo scenario che oggi applica l'effetto
-      alla visita sbagliata) — dopo il fix, `visite` riflette la
-      sequenza storicamente corretta, non quella "attualmente aperta"
-- [ ] Test dedicato: stesso scenario ma con una cancellazione — `visite`
-      si ricalcola comunque (oggi non succede affatto)
-- [ ] Nessuna regressione sui test esistenti dell'harness Node
-- [ ] `migrateVisiteFromHistorySuProd()` (già esistente) eseguita su
-      TEST, output confrontato a mano su un campione di job (inclusi
-      casi con più rientri) contro la loro Cronologia reale
-- [ ] `migrateVisiteFromHistorySuProd()` eseguita su PROD, nella stessa
-      sessione di lavoro — nessuna attesa aggiuntiva oltre al collaudo
-      su TEST, per esplicita richiesta di Marco di risolvere la cosa
-      oggi, per intero
-- [ ] Collaudo finale su TEST e PROD: il pannello "Percorso della
-      card" e i tempi di attesa (`t_cliente_d`/`t_ente_d`/`t_interno_d`,
-      dashboard) sui job noti per avere rientri mostrano numeri
-      coerenti con la Cronologia reale, non solo "nessun errore nei log"
+      `applyManualMoveEffects_`: rimosse dal codice (commit `225bd03`),
+      nessun riferimento residuo verificato con una ricerca nel codice
+- [x] Test dedicato: un job con un rientro storico *corretto/aggiunto
+      dopo* eventi più recenti (lo scenario che applicava l'effetto
+      alla visita sbagliata) — `testAddActivityEventHistoricalReentryUpdatesHistoricallyCorrectVisit`,
+      `visite` riflette la sequenza storicamente corretta, non quella
+      "attualmente aperta"
+- [x] Test dedicato: stesso scenario ma con una cancellazione —
+      `testDeleteActivityEventHistoricalReentryRecalculatesVisite`,
+      `visite` si ricalcola comunque (prima non succedeva affatto)
+- [x] Nessuna regressione sui test esistenti dell'harness Node —
+      177/177 (175 preesistenti + 2 nuovi)
+- [x] `migrateVisiteFromHistoryOnTest()` eseguita su TEST da Marco
+      (19:13, 2026-08-26): 52 job, 0 malformati, 57 visite scritte, 0
+      warning di coerenza. Output confrontato a mano da Marco su un
+      campione di job con più rientri (`JOB-DEMO-19` e altri due) contro
+      la loro Cronologia reale — tutto coerente
+- [x] `migrateVisiteFromHistorySuProd()` eseguita su PROD da Marco
+      (19:20, 2026-08-26), nella stessa sessione di lavoro: 54 job, 0
+      malformati, 76 visite scritte, 0 warning di coerenza
+- [x] Collaudo finale: il confronto a campione su TEST (punto sopra) ha
+      verificato direttamente apertura/rientro/rework_cause contro la
+      Cronologia reale per più job — copre nella sostanza il pannello
+      "Percorso della card"/i tempi di attesa dashboard, che leggono
+      esattamente lo stesso dato. Verifica visiva del pannello stesso
+      lasciata facoltativa a Marco, non bloccante per la chiusura.

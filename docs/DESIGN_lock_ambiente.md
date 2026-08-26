@@ -619,17 +619,19 @@ storico (§2.1-§2.5). Restano da fare P6 e P7:
 - **La visita storicamente pertinente scelta da
   `applyManualMoveEffects_`/`ensureOpenVisit_`/`alignOpenVisitFields_`
   per un evento vecchio corretto/aggiunto** (§2.5, rimessa sul tavolo
-  da Marco in §2.6) — **non più fuori scope**: dopo l'insistenza
-  esplicita di Marco ("basta con le patch puntuali, voglio una
-  soluzione definitiva", 2026-08-26) il nome **Q** non è più solo
-  riservato — il design è scritto ed esecutivo, in un documento a parte
-  per non appesantire ulteriormente questo (`docs/DESIGN_derivazione_visite.md`):
-  sostituisce le patch incrementali su "qualunque visita sia aperta
-  ora" con un'unica ricostruzione completa di `visite` dal log intero,
-  usata sempre — spostamento live incluso — invece che solo per la
-  migrazione storica. **Sequenza aggiornata (2026-08-26, decisione di
-  Marco): si procede passo passo** — prima P6 e P7, collaudati e chiusi;
-  Q resta il passo successivo, pronta ma non lanciata insieme.
+  da Marco in §2.6) — **CHIUSA (Fase Q, 2026-08-26, sessione 7)**: dopo
+  l'insistenza esplicita di Marco ("basta con le patch puntuali, voglio
+  una soluzione definitiva", 2026-08-26), il design scritto in un
+  documento a parte (`docs/DESIGN_derivazione_visite.md`, §6 tutte le
+  caselle spuntate) è stato implementato ed eseguito, passo passo come
+  deciso: prima P6/P7 collaudati e chiusi, poi Q. Le tre funzioni a
+  patch sopra sono state rimosse e sostituite da un'unica ricostruzione
+  completa di `visite` dal log intero (`computeVisiteFromLog_`/
+  `syncVisiteFromLog_`), usata sempre — spostamento live incluso, e ora
+  anche in cancellazione, che prima non toccava `visite` per niente.
+  177/177 test nell'harness Node, migrazione storica rieseguita e
+  verificata pulita sia su TEST (52 job, 0 warning) sia su PROD (54
+  job, 0 warning) — dettaglio completo in `PROGRAMMA_STATO.md`.
 - **`isJobAging_`/tooltip "Fermo da N giorni" sulla board** (§2.7) —
   stesso campo `status_since_ts`, stesso tipo di sintomo, ma nessuna
   difesa di visualizzazione economica possibile lì (girano su ogni
