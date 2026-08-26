@@ -254,7 +254,7 @@ storico (§2.1-§2.4). Resta da fare P5:
 | **P2** | `SF_READ_ACTIONS_`: lock globale solo sulle azioni di scrittura. | ✅ Completata (commit `89bf7ea`, gate confermato) | — |
 | **P3** | `doPost` delega ad `api(params.action, params)`. | ✅ Completata (commit `c94a32c`) | — |
 | **P4** | Barra segmentata del percorso card, tab Informazioni. | ✅ Completata (commit `c94a32c`) | — |
-| **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts` (nuova funzione pura, dal log intero) dagli effetti su `visite` (restano legati al candidato specifico, mai in delete). Chiamata di ricalcolo in fondo a `addActivityEvent`/`updateActivityEvent`/`deleteActivityEvent`. Test dedicati per Bug 1, Bug 2, e test esplorativo su `incarico_chiuso_ts` (§2.5/§6). | Da fare | — |
+| **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts` (nuova funzione pura, dal log intero) dagli effetti su `visite` (restano legati al candidato specifico, mai in delete). Chiamata di ricalcolo in fondo a `addActivityEvent`/`updateActivityEvent`/`deleteActivityEvent`. Test dedicati per Bug 1, Bug 2, e test esplorativo su `incarico_chiuso_ts` (§2.5/§6). | ✅ Completata (Bug 1/Bug 2, sessione 2026-08-26) — punto esplorativo su `incarico_chiuso_ts` **confermato come bug analogo, non corretto**, in attesa di decisione di Marco | — |
 
 ## 5. Fuori scope, per ora
 
@@ -274,32 +274,39 @@ storico (§2.1-§2.4). Resta da fare P5:
 pane): nessuna riga d'azione residua, elenco completo nei commit e in
 `PROGRAMMA_STATO.md`.
 
-- [ ] Nuova funzione (es. `recomputeCurrentStatus_(job, log)`) — imposta
+**P5 — tutti verificati TRUE** (170/170 test, push su TEST verificato):
+
+- [x] Nuova funzione (`recomputeCurrentStatus_(job, log)`) — imposta
       `job.status`/`status_since_ts` dall'evento `move` cronologicamente
       più recente del log ordinato; nessun effetto su `visite` (P5)
-- [ ] Chiamata in fondo a `addActivityEvent`, `updateActivityEvent` e
+- [x] Chiamata in fondo a `addActivityEvent`, `updateActivityEvent` e
       `deleteActivityEvent`, dopo ogni altra elaborazione (P5)
-- [ ] `applyManualMoveEffects_` non imposta più direttamente
+- [x] `applyManualMoveEffects_` non imposta più direttamente
       `job.status`/`status_since_ts` — resta solo per gli effetti su
       `visite`, invariati per il candidato specifico (P5)
-- [ ] `applyManualMoveEffects_` continua a essere chiamata solo per il
+- [x] `applyManualMoveEffects_` continua a essere chiamata solo per il
       candidato in `addActivityEvent`/`updateActivityEvent`, **mai** in
       `deleteActivityEvent` — nessun effetto collaterale su `visite`
       reintrodotto dalla cancellazione (P5)
-- [ ] Test Bug 1: inserire un evento move con data passata su un job
+- [x] Test Bug 1: inserire un evento move con data passata su un job
       che ha già eventi più recenti — `job.status` deve riflettere
-      l'evento più recente, non quello appena inserito (P5)
-- [ ] Test Bug 2: cancellare l'evento più recente — `job.status` deve
-      tornare a riflettere il nuovo evento più recente rimasto (P5)
-- [ ] Test esplorativo `incarico_chiuso_ts`: inserire un rientro vecchio
+      l'evento più recente, non quello appena inserito (P5) —
+      `testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus`
+- [x] Test Bug 2: cancellare l'evento più recente — `job.status` deve
+      tornare a riflettere il nuovo evento più recente rimasto (P5) —
+      `testDeleteActivityEventRevertsStatusToNewMostRecentMove`
+- [x] Test esplorativo `incarico_chiuso_ts`: inserire un rientro vecchio
       (backdated) su un job già richiuso da eventi successivi più
-      recenti — verificare se `incarico_chiuso_ts` viene erroneamente
-      azzerato; se sì, applicare lo stesso principio (derivato dal log
-      intero, non dal solo candidato); se no, documentare come
-      verificato-non-un-problema, non lasciarlo senza risposta (P5)
-- [ ] `moveJob` non modificata — nessuna regressione sul drag-and-drop
-      reale (P5)
-- [ ] Nessuna regressione sui test esistenti (167 attuali) (P5)
+      recenti — **verificato: SÌ, si riproduce lo stesso schema di
+      Bug 1** (`incarico_chiuso_ts` azzerato per errore); segnalato a
+      Marco, fix **non applicato** su sua richiesta esplicita, in attesa
+      di decisione — documentato con
+      `testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed`
+      (asserisce il comportamento attuale/il bug, non quello desiderato) (P5)
+- [x] `moveJob` non modificata — nessuna regressione sul drag-and-drop
+      reale (P5) — verificato con `git diff`, zero righe toccate
+- [x] Nessuna regressione sui test esistenti (170/170, 167 preesistenti
+      + 3 nuovi) (P5)
 
 ---
 

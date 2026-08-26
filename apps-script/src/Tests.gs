@@ -348,6 +348,9 @@ function runAllTests() {
     testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit,
     testAddActivityEventPlainManualMoveUpdatesStatus,
     testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus,
+    testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus,
+    testDeleteActivityEventRevertsStatusToNewMostRecentMove,
+    testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed,
     testAddActivityEventColonnaNonTrovata,
     testAddActivityEventReasonObbligatoria,
     testAddActivityEventSequenceWarningsSenzaForce,
@@ -3091,6 +3094,119 @@ function testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus() {
 
     var visite = readVisiteForJob_(ss, created.job_id);
     assertEquals_(2, visite.length, 'il rientro apre comunque la visita 2 (unico split), il move successivo non ne apre una terza');
+  });
+}
+
+// P5 (DESIGN_lock_ambiente.md §2.5, Bug 1 - segnalato da Marco): un
+// evento move con data passata (dimenticato, corretto mesi dopo) non
+// deve piu' sovrascrivere lo stato attuale se non e' l'evento piu'
+// recente del log intero ordinato. Prima del fix, applyManualMoveEffects_
+// impostava job.status incondizionatamente sul candidato appena
+// toccato, indipendentemente da dove finisse nel log dopo il sort.
+function testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Bug1 stato non affidabile', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'todo' });
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var beforeCorrection = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', beforeCorrection.status, 'precondizione: la card e\' in wip prima della correzione storica');
+
+    var oldTs = testIsoDaysAgo_(new Date(), 90);
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: oldTs, to: 'wait_client' });
+    assertTrue_(result.data.ok === true, 'l\'evento storico dimenticato deve comunque registrarsi in Cronologia: ' + JSON.stringify(result.data));
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'lo stato attuale deve restare wip (l\'evento davvero piu\' recente), non saltare a wait_client solo perche\' appena corretto in Cronologia');
+  });
+}
+
+// P5 (DESIGN_lock_ambiente.md §2.5, Bug 2 - segnalato da Marco):
+// cancellare l'evento move piu' recente deve far tornare lo stato
+// all'evento move rimasto piu' recente, non lasciarlo bloccato sul
+// valore dell'evento appena cancellato. Prima del fix, deleteActivityEvent
+// non ricalcolava mai job.status (applyManualMoveEffects_ era esclusa
+// di proposito, per non duplicare effetti su visite - vedi commento in
+// Kanban.gs - ma nessun altro codice colmava il vuoto sullo status).
+function testDeleteActivityEventRevertsStatusToNewMostRecentMove() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Bug2 cancellazione non riallinea', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'todo' });
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var correction = addActivityEvent({ job_id: created.job_id, type: 'move', ts: nowIso_(), to: 'wait_client' });
+    assertTrue_(correction.data.ok === true, 'la correzione manuale deve riuscire: ' + JSON.stringify(correction.data));
+    var afterCorrection = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wait_client', afterCorrection.status, 'precondizione: la correzione manuale ha spostato la card');
+
+    var log = getActivityLog({ job_id: created.job_id }).data.log;
+    var manualEvent = log.filter(function(event) { return event.source === 'manual'; }).slice(-1)[0];
+    var deleteResult = deleteActivityEvent({ job_id: created.job_id, event_id: manualEvent.id });
+    assertTrue_(deleteResult.success, 'la cancellazione deve riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'cancellato l\'evento piu\' recente, lo stato deve tornare a quello rimasto piu\' recente (wip), non restare bloccato su wait_client');
+  });
+}
+
+// P5 (DESIGN_lock_ambiente.md §2.5, punto esplorativo): stesso schema del
+// Bug 1 ("agisce sul candidato invece che sul piu' recente del log
+// intero"), qui applicato a incarico_chiuso_ts invece che a job.status.
+// Riprodotto con un log costruito direttamente sulla riga (gli eventi
+// automatici dell'API sono sempre stampati "ora", non backdatabili via
+// parametro - stesso limite gia' aggirato da testAddJobWithPastArrival_
+// per il solo campo arrival_ts, qui esteso al log intero).
+//
+// RISULTATO: CONFERMATO UN BUG ANALOGO. Segnalato a Marco, NON corretto
+// in questa sessione su sua richiesta esplicita (§2.5) - in attesa di
+// decisione. Questo test documenta il comportamento ATTUALE (il bug),
+// non quello desiderato: va aggiornato insieme a un eventuale fix, non
+// lasciato cosi' per sempre.
+function testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Esplorativo incarico_chiuso_ts', size_class: 'S', status: 'backlog' }).data;
+    var jobId = created.job_id;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', jobId);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+
+    // Storia interamente manuale, ben separata nel tempo (300/250/200/100
+    // minuti fa): backlog -> wait_client -> todo (rientro vero, gia'
+    // registrato) -> wip.
+    var log = [
+      { id: 'e1', ts: testTsMinutesAgo_(300), type: 'move', source: 'auto', from: null, to: 'backlog', note: '' },
+      { id: 'e2', ts: testTsMinutesAgo_(250), type: 'move', source: 'manual', from: 'backlog', to: 'wait_client' },
+      { id: 'e3', ts: testTsMinutesAgo_(200), type: 'move', source: 'manual', from: 'wait_client', to: 'todo' },
+      { id: 'e4', ts: testTsMinutesAgo_(100), type: 'move', source: 'manual', from: 'todo', to: 'wip' }
+    ];
+    job.arrival_ts = testTsMinutesAgo_(300);
+    job.status = 'wip';
+    job.status_since_ts = testTsMinutesAgo_(100);
+    job.activity_log_json = JSON.stringify(log);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var closed = updateJob({ job_id: jobId, invoiced: true });
+    assertTrue_(closed.success, 'la chiusura recente ("ora") deve riuscire');
+    var beforeCorrection = readTable_(sheet).filter(function(j) { return j.job_id === jobId; })[0];
+    assertTrue_(Boolean(beforeCorrection.incarico_chiuso_ts), 'precondizione: l\'incarico e\' chiuso di recente prima della correzione storica');
+
+    // Rientro VECCHIO dimenticato, tra e2 (wait_client, -250min) ed e3
+    // (todo, -200min) - un vero pattern di rientro (from si ricalcola
+    // dal log, deve risolvere wait_client), ma ampiamente precedente
+    // alla chiusura recente sopra.
+    var oldTs = testTsMinutesAgo_(225);
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: oldTs, to: 'backlog', force: true });
+    assertTrue_(result.data.ok === true, 'l\'evento storico dimenticato deve registrarsi: ' + JSON.stringify(result.data));
+    assertEquals_('wait_client', result.data.event.from, 'precondizione: il candidato deve risolvere from=wait_client (vero pattern di rientro, non un caso degenere)');
+
+    var job2 = readTable_(sheet).filter(function(j) { return j.job_id === jobId; })[0];
+    assertEquals_('', job2.incarico_chiuso_ts, 'BUG CONFERMATO (non corretto in questa sessione): un rientro vecchio backdated azzera comunque incarico_chiuso_ts anche se il job resta chiuso da eventi piu\' recenti - vedi DESIGN_lock_ambiente.md §2.5');
+    assertEquals_('wip', job2.status, 'a differenza di incarico_chiuso_ts, lo status NON viene toccato da questo evento vecchio - P5 gia\' corregge correttamente questo caso');
   });
 }
 

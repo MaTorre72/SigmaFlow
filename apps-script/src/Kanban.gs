@@ -767,11 +767,33 @@ function addActivityEvent(params) {
   // registrato, senza chiedere conferma all'utente. I dettagli di questi
   // campi restano interni: l'utente cura solo la cronologia.
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, log);
+  // P5: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_.
+  recomputeCurrentStatus_(job, log);
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job, originalJob);
 
   return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
+}
+
+// P5 (DESIGN_lock_ambiente.md §2.5): job.status/status_since_ts devono
+// sempre riflettere l'evento 'move' cronologicamente PIU' RECENTE
+// dell'intero log ordinato - non l'ultimo evento toccato dalla chiamata
+// in corso, che puo' essere un evento vecchio appena corretto/aggiunto
+// (Bug 1) o l'evento appena cancellato, lasciando lo stato bloccato sul
+// suo valore (Bug 2). Funzione pura: nessun effetto su 'visite' (quelli
+// restano in applyManualMoveEffects_, legati al candidato specifico).
+// 'log' deve arrivare gia' ordinato per ts (stesso sort gia' fatto da
+// ogni chiamante prima di invocarla) - l'ultimo elemento dell'array e'
+// per costruzione il piu' recente anche a parita' di ts.
+function recomputeCurrentStatus_(job, log) {
+  var moves = (log || []).filter(function(event) { return event.type === 'move'; });
+  if (!moves.length) {
+    return;
+  }
+  var mostRecentMove = moves[moves.length - 1];
+  job.status = mostRecentMove.to;
+  job.status_since_ts = mostRecentMove.ts;
 }
 
 function applyStructuralAlignment_(job, warnings, candidate, log) {
@@ -824,6 +846,16 @@ function applyStructuralAlignment_(job, warnings, candidate, log) {
 // chiudono la visita - stessa condizione di updateVisiteForMove_),
 // richiede il log completo (4o parametro, gia' disponibile in
 // addActivityEvent/updateActivityEvent dopo il push del candidato).
+// P5 (DESIGN_lock_ambiente.md §2.5): NON imposta piu' job.status/
+// status_since_ts (spostato in recomputeCurrentStatus_, che li ricalcola
+// sempre dal log INTERO ordinato, non dal solo candidato qui passato -
+// un candidato con data passata non e' detto sia il piu' recente).
+// Resta solo per gli effetti su 'visite' specifici di QUESTO candidato
+// (apertura/chiusura, accumulo attese) - chiamata solo da
+// addActivityEvent/updateActivityEvent, MAI da deleteActivityEvent
+// (vedi commento li' - richiamarla sull'evento-piu'-recente-rimasto
+// dopo una cancellazione duplicherebbe/sposterebbe visite su
+// cancellazioni non correlate).
 function applyManualMoveEffects_(job, candidate, log) {
   if (!candidate || candidate.type !== 'move') {
     return;
@@ -834,9 +866,6 @@ function applyManualMoveEffects_(job, candidate, log) {
   if (!targetColumn) {
     return;
   }
-
-  job.status = candidate.to;
-  job.status_since_ts = candidate.ts;
 
   var sourceColumn = candidate.from ? findColumn_(columns, candidate.from) : null;
   // Ne' accumulo ne' split sono possibili senza una provenienza
@@ -1018,6 +1047,8 @@ function updateActivityEvent(params) {
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, remaining);
+  // P5: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_.
+  recomputeCurrentStatus_(job, remaining);
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job, originalJob);
@@ -1073,6 +1104,16 @@ function deleteActivityEvent(params) {
   if (lastMove) {
     applyStructuralAlignment_(job, checkStructuralAlignment_(job, lastMove));
   }
+  // P5 (Bug 2, DESIGN_lock_ambiente.md §2.5): prima di questo fix,
+  // job.status non veniva MAI riallineato qui (applyStructuralAlignment_
+  // sopra e' chiamata senza candidate/log di proposito - vedi commento -
+  // quindi applyManualMoveEffects_ non scatta mai in questa funzione).
+  // Cancellare l'evento che determinava la posizione attuale lasciava la
+  // card bloccata li'. recomputeCurrentStatus_ e' pura (nessun effetto
+  // su visite, coerente col motivo per cui applyManualMoveEffects_ resta
+  // volutamente esclusa da questa funzione) - risolve senza reintrodurre
+  // il problema del commento sopra.
+  recomputeCurrentStatus_(job, recalculated);
 
   job.activity_log_json = serializeActivityLog_(recalculated);
   writeJobToRow_(sheet, row, headers, job, originalJob);

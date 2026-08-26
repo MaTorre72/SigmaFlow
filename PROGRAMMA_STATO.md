@@ -1,6 +1,109 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase P (ambiente e lock globale) — P5 DONE, due bug reali corretti + un terzo confermato in attesa di decisione (2026-08-26, sessione 3)
+
+Proseguimento della sessione P1-P4 (stesso branch, verificato allineato
+all'ultimo commit `c94a32c` prima di iniziare). Bug segnalato da Marco:
+lo stato "attuale" della card non riflette in modo affidabile l'ultima
+colonna registrata in Cronologia — automatica o manuale, di oggi o di
+mesi fa. Documento aggiornato con la sotto-fase P5 (§2.5/§4/§6) prima
+di implementare.
+
+**Causa reale, in `applyManualMoveEffects_` (Kanban.gs)**: la funzione
+faceva due cose diverse nello stesso posto — impostava `job.status`/
+`status_since_ts` sul candidato appena toccato dalla chiamata in corso
+**e** applicava gli effetti su `visite` (apertura/chiusura, accumulo
+attese) specifici di quel candidato. La prima parte era sbagliata:
+un evento move non è detto sia il più recente del log solo perché è
+quello appena inserito/corretto/cancellato.
+
+**Due bug distinti riprodotti e corretti**:
+- **Bug 1** (`addActivityEvent`/`updateActivityEvent`): un evento move
+  con data passata (dimenticato, corretto mesi dopo) sovrascriveva
+  comunque lo stato attuale, anche con eventi successivi più recenti
+  già nel log.
+- **Bug 2** (`deleteActivityEvent`): cancellare l'evento che determinava
+  la posizione attuale lasciava la card bloccata lì, invece di tornare
+  alla colonna dell'evento rimasto più recente (la funzione non
+  ricalcolava mai `job.status` dopo una cancellazione).
+
+**Fix implementato**: nuova funzione pura `recomputeCurrentStatus_(job, log)`
+(Kanban.gs) — imposta `job.status`/`status_since_ts` dall'evento `move`
+cronologicamente più recente dell'intero log ordinato (`log` arriva già
+ordinato per ts da ogni chiamante), nessun effetto su `visite`. Chiamata
+in fondo a `addActivityEvent`, `updateActivityEvent` **e**
+`deleteActivityEvent`, dopo ogni altra elaborazione. `applyManualMoveEffects_`
+ha perso le due righe che impostavano `job.status`/`status_since_ts` —
+resta **solo** per gli effetti su `visite`, invariata per il resto,
+chiamata solo per il candidato specifico in add/update, **mai** in
+delete (già strutturalmente vero prima di questa sessione — `deleteActivityEvent`
+passa `applyStructuralAlignment_` senza `candidate`/`log`, quindi
+`applyManualMoveEffects_` riceve `candidate` `undefined` e ritorna
+subito; verificato di non aver introdotto nessuna chiamata nuova lì).
+
+**`moveJob` (drag-and-drop reale) non toccata** — non ha questo bug
+(scrive `job.status` direttamente dalla mossa in corso, non passa da
+questo meccanismo), confermato con `git diff` (zero righe modificate in
+quella funzione).
+
+**Punto esplorativo su `incarico_chiuso_ts` — CONFERMATO UN BUG ANALOGO,
+NON CORRETTO in questa sessione** (richiesta esplicita di Marco, in
+attesa di una sua decisione): `applyManualMoveEffects_` azzera
+`incarico_chiuso_ts` incondizionatamente quando il candidato rappresenta
+un vero rientro (stesso schema del Bug 1, applicato a un altro campo).
+Riprodotto con un log costruito direttamente sulla riga (gli eventi
+automatici sono sempre stampati "ora" dall'API, non backdatabili via
+parametro): job chiuso di recente (`invoiced: true`, "ora"), poi
+aggiunto un rientro vecchio dimenticato (tra due eventi già esistenti,
+`from` ricalcolato correttamente a `wait_client` — un vero pattern di
+rientro, non un caso degenere) — `incarico_chiuso_ts` viene azzerato
+per errore, riaprendo un incarico che avrebbe dovuto restare chiuso.
+`job.status` invece resta corretto (`wip`, non toccato da questo evento
+vecchio) — conferma che il fix di P5 funziona correttamente anche in
+questo scenario più complesso, il problema residuo è isolato al solo
+campo `incarico_chiuso_ts`. Documentato con un test dedicato
+(`testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed`)
+che **asserisce il comportamento attuale (il bug)**, non quello
+desiderato — commentato esplicitamente come tale, da aggiornare insieme
+a un eventuale fix futuro, non lasciato così per sempre.
+
+**Test aggiunti** (`Tests.gs`), tutti registrati nell'array `tests` di
+`runAllTests()` (verificato che il conteggio sia salito, non solo che
+dicesse "N/N" — lezione della sessione precedente):
+`testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus` (Bug 1),
+`testDeleteActivityEventRevertsStatusToNewMostRecentMove` (Bug 2),
+`testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed`
+(esplorativo). **170/170 test nell'harness Node** (167 preesistenti + 3
+nuovi, nessuna regressione). Push su TEST verificato: 16/16 file
+identici.
+
+**Nota metodologica per sessioni future**: le prime riproduzioni di
+Bug 2 e del punto esplorativo sono fallite per un problema del mock
+timestamp dell'harness (non un bug prodotto) — mescolare `new
+Date().toISOString()` reale con `nowIso_()`/`Utilities.formatDate` del
+mock (che etichetta l'ora locale della macchina con un offset fisso
+"+02:00", indipendentemente dal vero fuso) produce istanti assoluti
+incoerenti tra loro. Soluzione: usare sempre gli helper già esistenti
+in `Tests.gs` per questo scopo (`testTsMinutesAgo_`, `testIsoDaysAgo_`,
+`testAddJobWithPastArrival_`) o, quando serve controllo totale su una
+sequenza storica con eventi ben separati nel tempo, costruire il log
+direttamente sulla riga (`readJobFromRow_`/`writeJobToRow_`) invece di
+affidarsi a eventi automatici dell'API (sempre stampati "ora").
+
+**Criteri di accettazione P5 (§6 del documento) — tutti verificati
+TRUE**, incluso il punto esplorativo (riportato, non lasciato senza
+risposta).
+
+**Programma Fase P — P1-P5 tutte DONE.** Residuo aperto, in attesa di
+decisione di Marco: fix di `incarico_chiuso_ts` (stesso principio di
+P5, applicabile in una sotto-fase successiva se confermato).
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) da
+aggiornare con il commit di P5.
+
+---
+
 ## Fase P (ambiente e lock globale) — P3 e P4 DONE, programma completo (2026-08-26, sessione 2)
 
 Proseguimento della sessione P1/P2 (stesso branch
