@@ -1,7 +1,7 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
-## Fase Q — derivazione unificata di 'visite' dal log: codice DONE, collaudo TEST/PROD in attesa di Marco (2026-08-26, sessione 7)
+## Fase Q — derivazione unificata di 'visite' dal log: COMPLETA (codice + TEST + PROD) (2026-08-26, sessione 7)
 
 Confermato da Marco: P6/P7 chiusi definitivamente, nessuno strascico
 (PR #13/#14 mergiate in `main`, `origin/main` allineato). Nuova branch
@@ -85,26 +85,27 @@ coerenza** (nessun `RIENTRO_DIRETTO_A_WIP` nello storico TEST reale).
 altri due job con piu' rientri controllati a mano contro la loro
 Cronologia reale su TEST — tutto coerente, nessuna discrepanza.
 
-**Resta, riservato a Marco — non eseguibile da Claude** (scrittura su
-dati reali TEST/PROD tramite l'unica via disponibile, l'editor Apps
-Script, stesso procedimento gia' seguito per P7):
-1. ~~Editor Apps Script (progetto TEST) → `migrateVisiteFromHistoryOnTest`~~ — FATTO, vedi sopra.
-2. ~~Confronto a mano su un campione di job con piu' rientri~~ — FATTO, vedi sopra.
-3. Dopo conferma: editor Apps Script (progetto PROD) →
-   `migrateVisiteFromHistorySuProd` → Esegui → Log di esecuzione,
-   incollarmelo di nuovo — stessa sessione di lavoro, nessuna attesa
-   separata, per la stessa richiesta esplicita di Marco gia' seguita in
-   P7 ("basta con le patch puntuali, voglio una soluzione definitiva",
-   risolta oggi per intero).
-4. Collaudo finale (pannello "Percorso della card", tempi di attesa in
-   dashboard) sui job noti per avere rientri, su TEST e PROD.
+**PROD — eseguito da Marco** (`migrateVisiteFromHistorySuProd`,
+19:20:11): `{"jobs_processed":54,"jobs_without_log":0,"visite_written":76,"coherence_warnings":[]}`
+— 54 job scansionati (stesso numero dello scan P7 su PROD), nessuna
+riga malformata, 76 visite scritte per 54 job, **zero warning di
+coerenza**. Nessuna scrittura su dati reali eseguita da Claude, in
+nessun momento — sempre dall'editor Apps Script, da Marco stesso, per
+regola tecnica del progetto.
 
-**Programma Fase Q — completo lato Claude.** Codice scritto, collaudato
-nell'harness Node (nuovi test compresi), pushato e verificato su TEST,
-migrazione TEST eseguita da Marco con esito pulito. Manca il confronto
-a campione (punto 2) e l'esecuzione PROD (punto 3), riservata a Marco
-per lo stesso motivo tecnico gia' incontrato in P7. Nessuna PR
-aperta verso `main` (non richiesto in questa sessione).
+**Resta, facoltativo — collaudo visivo finale**: pannello "Percorso
+della card" e tempi di attesa in dashboard su un job noto per avere
+rientri (es. `JOB-DEMO-19` su TEST, `JOB-20260707-GUKC` su PROD, gia'
+verificato "coerente" nel confronto a campione sopra) — non bloccante,
+Marco puo' farlo con comodo alla prossima apertura della board.
+
+**Programma Fase Q — completo.** Codice scritto e collaudato
+nell'harness Node (177/177, nuovi test compresi), pushato e verificato
+su TEST, migrazione eseguita e verificata su TEST **e PROD** con esito
+pulito (zero warning in entrambi), confronto a campione su TEST
+confermato coerente da Marco. Nessuna PR aperta verso `main` (non
+richiesto in questa sessione) — branch `fix/fase-q-derivazione-visite-2026-08-26`
+pronta per la review quando Marco vorra' aprirla.
 
 ---
 
