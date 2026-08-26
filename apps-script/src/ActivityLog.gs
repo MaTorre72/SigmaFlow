@@ -492,6 +492,7 @@ function migrateVisiteFromHistory_(ss) {
   };
 
   if (!jobs.length) {
+    Logger.log(JSON.stringify(summary));
     return summary;
   }
 
@@ -525,6 +526,16 @@ function migrateVisiteFromHistory_(ss) {
     visiteSheet.getRange(2, 1, rows.length, VISITE_HEADERS.length).setValues(rows);
   }
   summary.visite_written = allVisite.length;
+
+  // Stesso pattern di recomputeExistingJobsStatus_ (P7): Logger.log, non
+  // console.log — e' l'unico dei due che compare nel pannello "Log di
+  // esecuzione" dell'editor Apps Script quando Marco lancia la funzione
+  // da li' (via i wrapper OnTest/SuProd sotto), confermato funzionante
+  // in P7. Senza questa riga l'esecuzione da editor non mostra alcun
+  // risultato, solo "avviata/completata" (bug trovato il 2026-08-26: la
+  // primissima esecuzione reale di Marco su TEST non ha prodotto nessun
+  // output da incollare).
+  Logger.log(JSON.stringify(summary));
 
   return summary;
 }
