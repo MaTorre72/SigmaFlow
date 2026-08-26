@@ -101,7 +101,7 @@ function seedTestDataset_(ss, replace) {
 
     if (hasRework) {
       // Visita 1: chiusa, con un rientro da una colonna di attesa —
-      // stessa dinamica di updateVisiteForMove_ in Kanban.gs.
+      // stessa dinamica di computeVisiteFromLog_ in ActivityLog.gs.
       var v1Apertura = testIsoDaysAgo_(now, arrivalDays + reworkGapDays);
       var v1Rientro = testIsoDaysAgo_(now, arrivalDays);
       var reworkCause = reworkCauses[i % reworkCauses.length];
@@ -405,6 +405,8 @@ function runAllTests() {
     testUpdateActivityEventAlignsOpenVisitField,
     testDeleteActivityEventRealignsOpenVisit,
     testMigrateToActivityLogAlignsOpenVisit,
+    testAddActivityEventHistoricalReentryUpdatesHistoricallyCorrectVisit,
+    testDeleteActivityEventHistoricalReentryRecalculatesVisite,
     testBackupRetentionDaysFallsBackToDefaultWhenConfigMissing,
     testBackupRetentionDaysReadsConfiguredValue,
     testBackupProdRejectsWrongSpreadsheetName,
@@ -1126,9 +1128,12 @@ function testDeleteActivityEventRealignsOpenVisit() {
 
     deleteActivityEvent({ job_id: jobId, event_id: e2.data.event.id });
 
+    // Fase Q (DESIGN_derivazione_visite.md): stessa nota di
+    // testDeleteActivityEventManual — start_ts resta il PRIMO ingresso in
+    // wip (t1), non l'ultimo (t3), con la ricostruzione completa dal log.
     var visite = readVisiteForJob_(ss, jobId);
     assertEquals_(1, visite.length, 'una visita presente per il job');
-    assertEquals_(t3, visite[0].start_ts, 'start_ts della visita aperta riallineato dopo la cancellazione, come su jobs');
+    assertEquals_(t1, visite[0].start_ts, 'start_ts della visita resta il PRIMO ingresso in wip (t1) dopo la cancellazione');
   });
 }
 
@@ -2957,7 +2962,7 @@ function testAddActivityEventManualReentryAccumulatesRealWaitTime() {
 // Uscita da un'attesa SENZA rientro vero (verso un'altra colonna
 // stand_by, es. da attesa cliente ad attesa enti): deve comunque
 // accumulare il tempo di attesa sulla visita ancora aperta, esattamente
-// come fa updateVisiteForMove_ per il drag-and-drop reale - non solo
+// come fa computeVisiteFromLog_ per il drag-and-drop reale - non solo
 // quando l'uscita chiude la visita.
 function testAddActivityEventManualStandByToStandByAccumulatesWaitWithoutClosingVisit() {
   withTestSpreadsheet_(function(ss) {
@@ -3517,8 +3522,17 @@ function testDeleteActivityEventManual() {
     var remaining3 = log.filter(function(e) { return e.id === e3.data.event.id; })[0];
     assertEquals_(todoCol.id, remaining3.from, 'from dell\'evento successivo ricalcolato dopo la cancellazione');
 
+    // Fase Q (DESIGN_derivazione_visite.md): 'visite' e' ora ricostruita
+    // per intero dal log (syncVisiteFromLog_/computeVisiteFromLog_), che
+    // applica sempre la stessa regola "Card B" del percorso live e della
+    // migrazione storica — start_ts resta il PRIMO ingresso in wip (t1),
+    // non l'ultimo (t3), anche dopo che l'evento intermedio e' stato
+    // cancellato. Prima di questa fase il vecchio alignOpenVisitFields_
+    // sovrascriveva start_ts ad ogni move verso wip, un comportamento
+    // diverso (e incoerente) rispetto a moveJob/computeVisiteFromLog_ —
+    // proprio il tipo di divergenza tra i due meccanismi che Q elimina.
     var visit = readVisiteForJob_(ss, jobId)[0];
-    assertEquals_(t3, visit.start_ts, 'start_ts della visita riallineato in automatico all\'ultimo move rimasto dopo la cancellazione, senza intervento dell\'utente');
+    assertEquals_(t1, visit.start_ts, 'start_ts della visita resta il PRIMO ingresso in wip (t1), non l\'ultimo (t3), coerente con computeVisiteFromLog_ dopo la cancellazione');
   });
 }
 
@@ -3770,7 +3784,8 @@ function testComputeVisiteFromLogWipToWipKeepsFirstStartTs() {
       ])
     };
 
-    var result = computeVisiteFromLog_(job);
+    var moveLog = JSON.parse(job.activity_log_json).filter(function(event) { return event.type === 'move'; });
+    var result = computeVisiteFromLog_(job.job_id, moveLog);
 
     assertEquals_(1, result.visite.length, 'wip->wip non deve aprire una nuova visita');
     assertEquals_('2026-06-25T09:00:00+02:00', result.visite[0].start_ts, 'start_ts deve restare il PRIMO ingresso in wip, non l\'ultimo (bug Card B)');
@@ -3794,7 +3809,8 @@ function testComputeVisiteFromLogStandByReentryOpensNewVisit() {
       ])
     };
 
-    var result = computeVisiteFromLog_(job);
+    var moveLog = JSON.parse(job.activity_log_json).filter(function(event) { return event.type === 'move'; });
+    var result = computeVisiteFromLog_(job.job_id, moveLog);
 
     assertEquals_(2, result.visite.length, 'il rientro da attesa deve aprire una nuova visita');
     assertEquals_('2026-01-02T09:00:00+02:00', result.visite[0].start_ts, 'start_ts visita 1');
@@ -3821,7 +3837,8 @@ function testComputeVisiteFromLogFlagsIllegalDirectReentryToWip() {
       ])
     };
 
-    var result = computeVisiteFromLog_(job);
+    var moveLog = JSON.parse(job.activity_log_json).filter(function(event) { return event.type === 'move'; });
+    var result = computeVisiteFromLog_(job.job_id, moveLog);
 
     assertEquals_(1, result.warnings.length, 'un rientro diretto illegale nello storico deve produrre un warning');
     assertEquals_('RIENTRO_DIRETTO_A_WIP', result.warnings[0].code, 'codice warning corretto');
@@ -3853,6 +3870,140 @@ function testMigrateVisiteFromHistoryEndToEnd() {
     var boardJob = getBoard().data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
     assertEquals_(2, Number(boardJob.visit_number), 'visit_number ricalcolato da visite dopo la migrazione');
     assertTrue_(coerceBoolean_(boardJob.is_rework), 'is_rework ricalcolato da visite dopo la migrazione');
+  });
+}
+
+// --- Fase Q (DESIGN_derivazione_visite.md): derivazione unificata di
+// 'visite' dal log intero, usata sempre (spostamento live, correzione
+// manuale, cancellazione) invece di patchare "qualunque visita sia
+// aperta ora" — syncVisiteFromLog_/computeVisiteFromLog_ (Kanban.gs/
+// ActivityLog.gs). ---
+
+// Riproduce esattamente il bug che Q elimina: un rientro storico
+// (stand_by -> backlog) scoperto/corretto DOPO che nel log esistono gia'
+// eventi piu' recenti (compreso un secondo rientro gia' registrato). Col
+// vecchio meccanismo a patch (applyManualMoveEffects_/ensureOpenVisit_,
+// ritirate da questa fase) l'effetto di questo evento sarebbe stato
+// applicato SEMPRE alla visita "attualmente aperta" (qui: la seconda,
+// gia' aperta da T-90) — nonostante l'evento risalga a T-95, PRIMA che
+// quella visita esistesse anche solo sulla carta. Con la ricostruzione
+// completa dal log, l'effetto finisce invece sulla visita storicamente
+// corretta (la prima), lasciando la seconda intatta.
+function testAddActivityEventHistoricalReentryUpdatesHistoricallyCorrectVisit() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro storico scoperto dopo', size_class: 'M' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+
+    var t120 = testTsMinutesAgo_(120);
+    var t110 = testTsMinutesAgo_(110);
+    var t100 = testTsMinutesAgo_(100);
+    var t90 = testTsMinutesAgo_(90);
+    var t80 = testTsMinutesAgo_(80);
+    var t95 = testTsMinutesAgo_(95);
+
+    job.arrival_ts = t120;
+    job.activity_log_json = JSON.stringify([
+      { id: 'e1', ts: t120, type: 'move', source: 'auto', to: 'backlog', from: null, note: '' },
+      { id: 'e2', ts: t110, type: 'move', source: 'manual', to: 'wip', from: 'backlog', note: '' },
+      { id: 'e3', ts: t100, type: 'move', source: 'manual', to: 'wait_client', from: 'wip', note: '' },
+      { id: 'e4', ts: t90, type: 'move', source: 'manual', to: 'backlog', from: 'wait_client', note: '', is_rework: true },
+      { id: 'e5', ts: t80, type: 'move', source: 'manual', to: 'wip', from: 'backlog', note: '' }
+    ]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var summary = migrateVisiteFromHistory_(ss);
+    assertEquals_(1, summary.jobs_processed, 'precondizione: un job processato dalla migrazione storica');
+    var before = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, before.length, 'precondizione: due visite gia\' presenti (un rientro gia\' registrato a T-90)');
+
+    // Correzione tardiva: un rientro DIMENTICATO, avvenuto a T-95 —
+    // PRIMA del rientro gia' registrato a T-90, quindi prima ancora che
+    // la seconda visita esistesse. force:true perche' l'inserimento
+    // produce un COLONNA_DOPPIA con e4 (entrambi verso 'backlog') —
+    // atteso e innocuo, non l'oggetto di questo test.
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: t95, to: 'backlog', force: true });
+    assertTrue_(result.data.ok === true, 'la correzione storica dovrebbe riuscire con force:true');
+
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'restano due visite (la seconda gia\' registrata a T-90 diventa un no-op sulla stessa colonna, non una terza visita)');
+
+    var visit1 = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    var visit2 = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
+
+    assertEquals_(t95, visit1.rientro_ts, 'la visita 1 si chiude al vero rientro storico (T-95), non a quello registrato dopo (T-90)');
+    assertEquals_('wait_client', visit1.rientro_da, 'rientro_da della visita 1 corretto');
+    assertEquals_(t95, visit2.apertura_ts, 'la visita 2 si apre al rientro storico corretto (T-95)');
+    assertEquals_(t80, visit2.start_ts, 'start_ts della visita 2 resta il primo ingresso reale in wip (T-80), mai toccato da questa correzione');
+    assertTrue_(!visit2.rientro_ts, 'la visita 2 (quella davvero ancora aperta) NON deve risultare chiusa dalla correzione di un evento a lei precedente');
+  });
+}
+
+// Stesso scenario di sopra, ma tramite cancellazione invece che
+// correzione: cancellare l'evento che rappresentava il PRIMO di due
+// rientri deve fondere le prime due visite in una sola. Prima di questa
+// fase deleteActivityEvent non toccava mai 'visite' (commento esplicito
+// nel vecchio codice, per non rischiare di duplicare/spostare visite con
+// il meccanismo a patch) — con la ricostruzione completa, che e'
+// idempotente per natura, questo limite non esiste piu'.
+function testDeleteActivityEventHistoricalReentryRecalculatesVisite() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Cancellazione di un rientro storico', size_class: 'M' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+
+    var t120 = testTsMinutesAgo_(120);
+    var t110 = testTsMinutesAgo_(110);
+    var t100 = testTsMinutesAgo_(100);
+    var t90 = testTsMinutesAgo_(90);
+    var t80 = testTsMinutesAgo_(80);
+    var t70 = testTsMinutesAgo_(70);
+    var t60 = testTsMinutesAgo_(60);
+    var t50 = testTsMinutesAgo_(50);
+
+    job.arrival_ts = t120;
+    job.activity_log_json = JSON.stringify([
+      { id: 'e1', ts: t120, type: 'move', source: 'auto', to: 'backlog', from: null, note: '' },
+      { id: 'e2', ts: t110, type: 'move', source: 'manual', to: 'wip', from: 'backlog', note: '' },
+      { id: 'e3', ts: t100, type: 'move', source: 'manual', to: 'wait_client', from: 'wip', note: '' },
+      { id: 'e4', ts: t90, type: 'move', source: 'manual', to: 'backlog', from: 'wait_client', note: '', is_rework: true },
+      { id: 'e5', ts: t80, type: 'move', source: 'manual', to: 'wip', from: 'backlog', note: '' },
+      { id: 'e6', ts: t70, type: 'move', source: 'manual', to: 'wait_authority', from: 'wip', note: '' },
+      { id: 'e7', ts: t60, type: 'move', source: 'manual', to: 'backlog', from: 'wait_authority', note: '', is_rework: true },
+      { id: 'e8', ts: t50, type: 'move', source: 'manual', to: 'wip', from: 'backlog', note: '' }
+    ]);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var summary = migrateVisiteFromHistory_(ss);
+    assertEquals_(1, summary.jobs_processed, 'precondizione: un job processato dalla migrazione storica');
+    var before = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(3, before.length, 'precondizione: tre visite (due rientri registrati)');
+
+    var deleted = deleteActivityEvent({ job_id: created.job_id, event_id: 'e4' });
+    assertTrue_(Boolean(deleted.data.job), 'la cancellazione dovrebbe riuscire');
+
+    // Senza e4, l'unico rientro rimasto e' a T-60 (e7): le prime due
+    // visite si fondono in una sola, che ora attraversa (senza chiudersi)
+    // anche il tratto e3->e5 — un rientro diretto da attesa a wip nello
+    // storico rimasto, segnalato ma non corretto (stesso principio gia'
+    // testato per computeVisiteFromLog_/RIENTRO_DIRETTO_A_WIP).
+    var visite = readVisiteForJob_(ss, created.job_id);
+    assertEquals_(2, visite.length, 'le prime due visite si fondono in una sola dopo la cancellazione del rientro che le separava — oggi (prima di Q) sarebbero rimaste 3, stale rispetto al log');
+
+    var visit1 = visite.filter(function(v) { return Number(v.numero_visita) === 1; })[0];
+    var visit2 = visite.filter(function(v) { return Number(v.numero_visita) === 2; })[0];
+
+    assertEquals_(t60, visit1.rientro_ts, 'la visita 1 (fusa) si chiude al rientro rimasto (T-60), non piu\' a quello cancellato (T-90)');
+    assertEquals_('wait_authority', visit1.rientro_da, 'rientro_da della visita 1 fusa corretto');
+    assertEquals_(t110, visit1.start_ts, 'start_ts della visita 1 fusa resta il primo ingresso in wip (T-110)');
+    assertEquals_(t50, visit2.start_ts, 'start_ts della visita 2 (quella ancora aperta) invariato (T-50)');
+    assertTrue_(!visit2.rientro_ts, 'la visita 2 resta aperta');
   });
 }
 
