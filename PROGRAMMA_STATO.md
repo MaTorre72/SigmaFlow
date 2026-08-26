@@ -1,6 +1,181 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## P7 — COMPLETA anche su PROD, eseguita da Marco (2026-08-26, sessione 6 continua)
+
+Seguito diretto della sezione sotto (TEST). Marco ha eseguito lui
+stesso, dall'editor Apps Script, dry-run e scrittura su PROD — nessuna
+azione di scrittura dati eseguita da Claude, come da regola del
+progetto.
+
+**PROD — dry-run** (`recomputeExistingJobsStatusSuProdDryRun`, 17:59:51):
+54 job scansionati, 0 righe malformate, **20 job cambierebbero** — 1
+su `status` (`JOB-20260707-0YXL`: `wait_client`→`wait_authority`), 20
+su `status_since_ts`, 0 su `incarico_chiuso_ts`. Numeri coerenti con
+l'analisi di §2.7 del documento (~20/55 disallineati).
+
+**Punto chiarito da Marco durante la review del dry-run**: l'analisi
+originale (§2.7) segnalava **2** job con `status` diverso dalla
+Cronologia (`JOB-20260707-0YXL` e `JOB-20260707-QSCD`), ma il dry-run
+ne mostra **1 solo**. Non è un bug della migrazione: `JOB-20260707-QSCD`
+non compare perché il suo `status` già corrisponde a quello che dice
+la sua Cronologia — l'errore è nell'**evento della Cronologia stesso**
+(un rientro in WIP registrato per sbaglio da un umano, confermato da
+Marco: "non doveva stare in WIP"), non un disallineamento status↔log.
+Dato che P5/P7 seguono sempre "la Cronologia comanda", un evento
+storico sbagliato ma coerente con lo `status` attuale non viene (e non
+deve) essere toccato da questa migrazione — correggerlo richiederebbe
+modificare l'evento stesso in Cronologia, un'azione manuale distinta,
+fuori scope qui. **1 è quindi il numero corretto**, confermato da
+Marco.
+
+**PROD — scrittura** (`recomputeExistingJobsStatusSuProdWrite`, 18:01:28):
+**esito identico al dry-run**, riga per riga, job per job, stesso
+prima/dopo per tutti e 20 — nessuna scrittura fuori da quanto già
+previsto e verificato. Nessun errore.
+
+**Log completo delle due esecuzioni PROD, conservato per un controllo
+a posteriori:**
+
+```
+Dry-run PROD (17:59:51): {"dry_run":true,"spreadsheet_id":"15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g","spreadsheet_name":"SigmaFlow Database","executed_at":"2026-08-26T17:59:53+02:00","total_rows_scanned":54,"rows_skipped_unparsable":[],"rows_changed":20,"changes_by_field":{"status":1,"status_since_ts":20,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]}],"changes":[{"job_id":"JOB-20260707-GUKC","row":8,"fields":[{"field":"status_since_ts","before":"2026-05-15T15:00","after":"2026-08-12T13:58"}]},{"job_id":"JOB-20260707-EMPA","row":11,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-10T09:00"}]},{"job_id":"JOB-20260707-18H2","row":12,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T12:00"}]},{"job_id":"JOB-20260707-Q0RY","row":14,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T11:47"}]},{"job_id":"JOB-20260707-NZFQ","row":16,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-06T15:00"}]},{"job_id":"JOB-20260707-763N","row":17,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-6QIZ","row":18,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-BGHE","row":19,"fields":[{"field":"status_since_ts","before":"2026-08-19T10:59:21+02:00","after":"2026-07-21T10:00"}]},{"job_id":"JOB-20260707-7YP8","row":20,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T09:00"}]},{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]},{"job_id":"JOB-20260707-AI13","row":26,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-22T09:00"}]},{"job_id":"JOB-20260707-427Q","row":35,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-05T16:45"}]},{"job_id":"JOB-20260707-QDXZ","row":37,"fields":[{"field":"status_since_ts","before":"2026-08-18T15:39:41+02:00","after":"2026-04-22T15:12"}]},{"job_id":"JOB-20260707-DQSL","row":41,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-05-30T09:00"}]},{"job_id":"JOB-20260729-UXVS","row":49,"fields":[{"field":"status_since_ts","before":"2026-07-29T09:00:00+02:00","after":"2026-07-28T17:00"}]},{"job_id":"JOB-20260810-0PBJ","row":50,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:27:17+02:00","after":"2026-08-01T12:01"}]},{"job_id":"JOB-20260818-C79W","row":51,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:46:42+02:00","after":"2026-08-17T09:00"}]},{"job_id":"JOB-20260818-XIM6","row":52,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:13:36+02:00","after":"2026-05-07T15:51"}]},{"job_id":"JOB-20260818-1BE6","row":53,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:37:40+02:00","after":"2026-05-18T07:55"}]},{"job_id":"JOB-20260818-E67E","row":54,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:55:31+02:00","after":"2026-06-22T15:49"}]}]}
+
+Scrittura PROD (18:01:28): {"dry_run":false,"spreadsheet_id":"15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g","spreadsheet_name":"SigmaFlow Database","executed_at":"2026-08-26T18:01:30+02:00","total_rows_scanned":54,"rows_skipped_unparsable":[],"rows_changed":20,"changes_by_field":{"status":1,"status_since_ts":20,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]}],"changes":[{"job_id":"JOB-20260707-GUKC","row":8,"fields":[{"field":"status_since_ts","before":"2026-05-15T15:00","after":"2026-08-12T13:58"}]},{"job_id":"JOB-20260707-EMPA","row":11,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-10T09:00"}]},{"job_id":"JOB-20260707-18H2","row":12,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T12:00"}]},{"job_id":"JOB-20260707-Q0RY","row":14,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T11:47"}]},{"job_id":"JOB-20260707-NZFQ","row":16,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-06T15:00"}]},{"job_id":"JOB-20260707-763N","row":17,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-6QIZ","row":18,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-BGHE","row":19,"fields":[{"field":"status_since_ts","before":"2026-08-19T10:59:21+02:00","after":"2026-07-21T10:00"}]},{"job_id":"JOB-20260707-7YP8","row":20,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T09:00"}]},{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]},{"job_id":"JOB-20260707-AI13","row":26,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-22T09:00"}]},{"job_id":"JOB-20260707-427Q","row":35,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-05T16:45"}]},{"job_id":"JOB-20260707-QDXZ","row":37,"fields":[{"field":"status_since_ts","before":"2026-08-18T15:39:41+02:00","after":"2026-04-22T15:12"}]},{"job_id":"JOB-20260707-DQSL","row":41,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-05-30T09:00"}]},{"job_id":"JOB-20260729-UXVS","row":49,"fields":[{"field":"status_since_ts","before":"2026-07-29T09:00:00+02:00","after":"2026-07-28T17:00"}]},{"job_id":"JOB-20260810-0PBJ","row":50,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:27:17+02:00","after":"2026-08-01T12:01"}]},{"job_id":"JOB-20260818-C79W","row":51,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:46:42+02:00","after":"2026-08-17T09:00"}]},{"job_id":"JOB-20260818-XIM6","row":52,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:13:36+02:00","after":"2026-05-07T15:51"}]},{"job_id":"JOB-20260818-1BE6","row":53,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:37:40+02:00","after":"2026-05-18T07:55"}]},{"job_id":"JOB-20260818-E67E","row":54,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:55:31+02:00","after":"2026-06-22T15:49"}]}]}
+```
+
+**Programma Fase P7 — completo, TEST e PROD.** Tutte le azioni di
+scrittura su PROD eseguite da Marco stesso, dall'editor Apps Script —
+nessuna scrittura dati eseguita da Claude, in nessun momento.
+`docs/DESIGN_lock_ambiente.md` §6 da aggiornare con le caselle P7.
+
+---
+
+## P7 — migrazione una tantum status/status_since_ts/incarico_chiuso_ts: TEST completo, PROD in attesa di Marco (2026-08-26, sessione 6)
+
+Richiesta esplicita di Marco: "deve tutto essere coerente con la
+Cronologia, sempre — se una card viene toccata deve essere aggiornata",
+niente gate, TEST e PROD nella stessa sessione. **Rispettato per TEST,
+non per PROD**: la scrittura su dati reali PROD resta riservata a
+Marco stesso, per regola tecnica di `CLAUDE.md` — nessuna eccezione,
+nemmeno su richiesta esplicita in sessione. Segnalato subito a inizio
+sessione, prima di scrivere codice.
+
+**Codice** (`ActivityLog.gs`, commit `5ebef32`): `recomputeExistingJobsStatus_(ss, dryRun)`
+— riusa `recomputeCurrentStatus_`/`recomputeIncaricoChiusoTs_` (P5)
+così come sono, applicandole retroattivamente a ogni riga di `jobs`.
+`dryRun=true` (default): solo report, nessuna scrittura. `dryRun=false`
+(sempre esplicito): scrive solo i campi che differiscono. Riga con
+`activity_log_json` mancante/non interpretabile: saltata e segnalata,
+non blocca le altre. Wrapper `OnTest`/`SuProd` (stesso pattern di
+sicurezza di `allineaSchemaSuProd`) + wrapper senza parametri per
+l'editor (`...OnTestDryRun`/`...OnTestWrite`/`...SuProdDryRun`/`...SuProdWrite`,
+dato che il menu Esegui chiama sempre a zero argomenti).
+
+**Blocco tecnico incontrato e non risolto**: `clasp run` (Execution
+API) fallisce sempre con "Unable to run script function..." — verificato
+non specifico alla nuova funzione (fallisce anche su una funzione
+banale preesistente), non risolto da un nuovo `clasp login` con
+riautorizzazione completa. Causa più probabile: l'Execution API in
+modalità `MYSELF` richiede che l'account abbia già eseguito almeno una
+funzione dall'editor online per completare il consenso — non coperto
+dal login da riga di comando. **Non bloccante**: Marco ha eseguito
+direttamente dall'editor Apps Script (menu Esegui → Log di esecuzione),
+stesso identico output che avrebbe dato `clasp run`.
+
+**TEST — dry-run eseguito da Marco** (`recomputeExistingJobsStatusOnTestDryRun`,
+17:52:50): 52 job scansionati, 0 righe malformate, **1 solo job
+cambierebbe** (`JOB-DEMO-19`: `status` todo→wip, `status_since_ts`
+2026-07-27T08:38→2026-07-29T08:40; `incarico_chiuso_ts` invariato per
+tutti) — dataset demo/TEST, in gran parte già coerente (diversamente
+da PROD, vedi sotto). **Verificato contro la Cronologia reale** da
+Marco prima di procedere: ultimo evento davvero un move verso WIP
+il 29/07 08:40, confermato.
+
+**TEST — scrittura eseguita da Marco** (`recomputeExistingJobsStatusOnTestWrite`,
+17:55:52): stesso identico risultato del dry-run (1 job, stessi
+valori before/after) — scrittura applicata. **175/175 test
+nell'harness Node** (171 preesistenti + 4 nuovi: dry-run senza
+scrittura, scrittura dei soli campi cambiati, riga malformata non
+blocca le altre, job già consistente non tocca). Push su TEST
+verificato: 16/16 file identici.
+
+**Log delle due esecuzioni reali, conservato per un controllo a
+posteriori** (copiato qui integralmente, non solo riassunto):
+
+```
+Dry-run (17:52:50): {"dry_run":true,"spreadsheet_id":"1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU","spreadsheet_name":"SigmaFlow Database TEST","executed_at":"2026-08-26T17:52:52+02:00","total_rows_scanned":52,"rows_skipped_unparsable":[],"rows_changed":1,"changes_by_field":{"status":1,"status_since_ts":1,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}],"changes":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}]}
+
+Scrittura (17:55:52): {"dry_run":false,"spreadsheet_id":"1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU","spreadsheet_name":"SigmaFlow Database TEST","executed_at":"2026-08-26T17:55:54+02:00","total_rows_scanned":52,"rows_skipped_unparsable":[],"rows_changed":1,"changes_by_field":{"status":1,"status_since_ts":1,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}],"changes":[{"job_id":"JOB-DEMO-19","row":20,"fields":[{"field":"status","before":"todo","after":"wip"},{"field":"status_since_ts","before":"2026-07-27T08:38","after":"2026-07-29T08:40"}]}]}
+```
+
+**PROD — non eseguito da questa sessione, in attesa di Marco.**
+Numeri attesi (già noti da §2.7 del documento, verificati in
+precedenza sui dati reali, da confermare col vero dry-run): **20 job
+su 55 con `status_since_ts` disallineato**, **2 con `status` (la
+colonna sulla board) diverso da dove l'ultimo evento della Cronologia
+dice che dovrebbero essere** — `JOB-20260707-0YXL` e
+`JOB-20260707-QSCD`. Questi due vanno segnalati esplicitamente nel
+report finale quando Marco esegue, non nascosti in un conteggio
+aggregato — per decisione sua esplicita, corretti come tutti gli
+altri, senza eccezione.
+
+**Istruzioni per Marco (stesso procedimento già seguito su TEST)**:
+1. Editor Apps Script → menu funzioni → `recomputeExistingJobsStatusSuProdDryRun` → Esegui → Log di esecuzione, incollarmelo.
+2. Dopo conferma che i numeri tornano (in particolare i due job con `status` diverso): `recomputeExistingJobsStatusSuProdWrite` → Esegui → Log di esecuzione, incollarmelo di nuovo.
+
+**Programma Fase P7 — completo lato Claude.** Codice scritto,
+collaudato nell'harness Node, eseguito e verificato su TEST reale
+(dry-run + scrittura). Manca solo l'esecuzione su PROD, riservata a
+Marco.
+
+---
+
+## P6 — terzo punto aggiunto dopo il merge: fix su renderCardPathSummary_ (2026-08-26, sessione 5)
+
+Dopo il merge/deploy di Fase P (P1-P6, sezione sotto), Marco ha
+segnalato un secondo problema distinto sullo stesso screenshot: il
+pannello "Percorso della card" mostrava una durata impossibile (WIP:
+103g per una card spostata lì 14 giorni prima — caso reale
+`JOB-20260707-GUKC`). Verificato sui dati veri del foglio "SigmaFlow
+Database": `job.status_since_ts` è disallineato dall'ultimo evento
+della Cronologia su **20 job su 55** (scritto in modo inaffidabile
+prima del fix di P5, mai aggiornato sui job già esistenti — P5 corregge
+solo da quel momento in avanti). Due correzioni distinte decise con
+Marco: una difesa lato client qui (**P6, terzo punto**, aggiunta allo
+stesso branch dopo il merge — i primi due punti di P6 erano già
+mergiati/deployati), una migrazione dati lato server in una sotto-fase
+a sé (**P7**, tocca dati reali, fuori scope qui).
+
+**Fix**: `renderCardPathSummary_` (client.html) — il segmento "in corso"
+usava `job.status_since_ts` come inizio senza controllare che fosse
+successivo all'ultimo evento `move` del log. Ora `Math.max(status_since_ts,
+segmentStart)`: `status_since_ts` può solo spostare l'inizio in AVANTI
+rispetto a quanto dice il log, mai indietro. Stesso principio di P5 ("la
+Cronologia comanda"), applicato qui solo alla visualizzazione — **non
+corregge il dato sul foglio** (quello è P7).
+
+**Collaudato nel Browser pane** (server locale di riproduzione, chiamata
+diretta a `renderCardPathSummary_` con un `job.status_since_ts`
+manipolato, per isolare esattamente la funzione toccata):
+- Caso bug reale: `status_since_ts` spostato 103 giorni prima
+  dell'ultimo evento del log → il pannello mostra la durata calcolata
+  dal log (pochi minuti, coerente col tempo reale trascorso nel test),
+  non più 103 giorni.
+- Caso opposto (M0-C, già supportato prima del fix, verificato di non
+  averlo rotto): `status_since_ts` più recente dell'ultimo evento del
+  log (2 minuti dopo) → il pannello rispetta il valore corretto, non lo
+  scavalca con quello del log.
+- Nessun errore in console.
+
+**171/171 test nell'harness Node** (nessuna regressione — fix puramente
+client-side, coerente con P6 punti 1/2 già verificati in precedenza).
+Push su TEST verificato: 16/16 file identici. Nessuna PR aperta, come
+da richiesta — resta sullo stesso branch `fix/fase-p-lock-ambiente-2026-08-26`
+(ora un commit avanti rispetto a `main`, che ha già i primi due punti di
+P6 mergiati/deployati).
+
+---
+
 ## Fase P — CHIUSA (P1-P6 tutte DONE), in attesa di merge/deploy da parte di Marco (2026-08-26)
 
 Tutte le caselle di `docs/DESIGN_lock_ambiente.md` §6 spuntate (P1-P6).

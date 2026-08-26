@@ -385,6 +385,10 @@ function runAllTests() {
     testFixPrepColumnRoleCorrectsGenericMismatch,
     testFixPrepColumnRoleNoOpWhenAlreadyCorrect,
     testEseguiMigrazioneCompletaEndToEndOnOldSchemaData,
+    testRecomputeExistingJobsStatusDryRunReportsWithoutWriting,
+    testRecomputeExistingJobsStatusWriteModeAppliesOnlyChangedFields,
+    testRecomputeExistingJobsStatusSkipsUnparsableLogWithoutStopping,
+    testRecomputeExistingJobsStatusLeavesAlreadyConsistentJobUntouched,
     testReworkFromStandByToBacklogKeepsStartTs,
     testMoveToPrepSetsPrepTsNotStartTs,
     testMoveToWipStillSetsStartTs,
@@ -3996,6 +4000,132 @@ function testEseguiMigrazioneCompletaEndToEndOnOldSchemaData() {
     var visite1 = readVisiteForJob_(ss, 'JOB-OLD-1');
     assertEquals_(1, visite1.length, 'una visita ricostruita per JOB-OLD-1 (mai rientrato)');
     assertEquals_('2026-01-01T09:00:00+02:00', visite1[0].apertura_ts, 'apertura_ts della visita = arrival_ts storico');
+  });
+}
+
+// P7 (DESIGN_lock_ambiente.md §2.7): recomputeExistingJobsStatus_ -
+// migrazione una tantum sui job esistenti, scritti in modo inaffidabile
+// prima del fix di P5. Helper: scrive un job direttamente sulla riga
+// (bypassa l'API, che oggi scriverebbe gia' correttamente grazie a P5)
+// con status/status_since_ts/incarico_chiuso_ts DISALLINEATI a mano
+// rispetto al proprio activity_log_json, per simulare un dato storico
+// pre-P5 - stessa tecnica gia' usata nell'esplorativo di P5.
+function testWriteMisalignedJobForP7_(ss, title, log, badStatus, badStatusSinceTs, badIncaricoChiusoTs) {
+  var created = addJob({ title: title, size_class: 'S', status: 'backlog' }).data;
+  var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+  var row = findRowById_(sheet, 'job_id', created.job_id);
+  var headers = getHeaderMap_(sheet);
+  var job = readJobFromRow_(sheet, row, headers);
+  job.status = badStatus;
+  job.status_since_ts = badStatusSinceTs;
+  job.incarico_chiuso_ts = badIncaricoChiusoTs || '';
+  job.activity_log_json = JSON.stringify(log);
+  writeJobToRow_(sheet, row, headers, job);
+  return created.job_id;
+}
+
+function testRecomputeExistingJobsStatusDryRunReportsWithoutWriting() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+
+    // Cronologia reale: ultimo evento -> wip, 10 minuti fa. status sul
+    // foglio pero' e' rimasto (a mano, come farebbe un dato pre-P5) su
+    // wait_client, con status_since_ts di 200 giorni fa - stesso ordine
+    // di grandezza degli scarti trovati sui dati reali (§2.7).
+    var oldTs = testTsMinutesAgo_(10);
+    var log = [
+      { id: 'e1', ts: testTsMinutesAgo_(20), type: 'move', source: 'auto', from: null, to: 'backlog', note: '' },
+      { id: 'e2', ts: oldTs, type: 'move', source: 'manual', from: 'backlog', to: 'wip' }
+    ];
+    var jobId = testWriteMisalignedJobForP7_(ss, 'Disallineato dry-run', log, 'wait_client', testIsoDaysAgo_(new Date(), 200), '');
+
+    var report = recomputeExistingJobsStatus_(ss, true);
+
+    assertTrue_(report.dry_run, 'dry_run deve essere true');
+    assertEquals_(1, report.rows_changed, 'un solo job cambierebbe');
+    var change = report.changes.filter(function(c) { return c.job_id === jobId; })[0];
+    assertTrue_(Boolean(change), 'il job disallineato deve comparire tra i cambiamenti');
+    var statusField = change.fields.filter(function(f) { return f.field === 'status'; })[0];
+    assertTrue_(Boolean(statusField), 'il campo status deve essere tra quelli cambiati');
+    assertEquals_('wait_client', statusField.before, 'before = valore sporco sul foglio');
+    assertEquals_('wip', statusField.after, 'after = ultimo evento del log');
+    assertEquals_(1, report.status_changes_detail.length, 'status_changes_detail deve elencare questo job (cambia anche status, non solo status_since_ts)');
+
+    // In dry-run NULLA deve essere scritto sul foglio.
+    var stillOnSheet = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
+    assertEquals_('wait_client', stillOnSheet.status, 'dry-run non deve scrivere nulla sul foglio');
+  });
+}
+
+function testRecomputeExistingJobsStatusWriteModeAppliesOnlyChangedFields() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+
+    var log = [
+      { id: 'e1', ts: testTsMinutesAgo_(30), type: 'move', source: 'auto', from: null, to: 'backlog', note: '' },
+      { id: 'e2', ts: testTsMinutesAgo_(5), type: 'move', source: 'manual', from: 'backlog', to: 'todo' }
+    ];
+    var jobId = testWriteMisalignedJobForP7_(ss, 'Disallineato scrittura', log, 'backlog', testIsoDaysAgo_(new Date(), 5), '');
+
+    var report = recomputeExistingJobsStatus_(ss, false);
+
+    assertTrue_(!report.dry_run, 'dry_run deve essere false');
+    assertEquals_(1, report.rows_changed, 'un job scritto');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === jobId; })[0];
+    assertEquals_('todo', job.status, 'status scritto correttamente dal log');
+    var lastMoveTs = log[1].ts;
+    assertEquals_(lastMoveTs, job.status_since_ts, 'status_since_ts scritto correttamente dal log');
+  });
+}
+
+function testRecomputeExistingJobsStatusSkipsUnparsableLogWithoutStopping() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+
+    // Job 1: activity_log_json vuoto/mancante - da saltare, non deve
+    // bloccare l'elaborazione degli altri job.
+    var brokenCreated = addJob({ title: 'Log mancante', size_class: 'S', status: 'backlog' }).data;
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var brokenRow = findRowById_(sheet, 'job_id', brokenCreated.job_id);
+    var headers = getHeaderMap_(sheet);
+    var brokenJob = readJobFromRow_(sheet, brokenRow, headers);
+    brokenJob.activity_log_json = '';
+    writeJobToRow_(sheet, brokenRow, headers, brokenJob);
+
+    // Job 2: disallineato, valido - deve comunque essere processato ed
+    // eventualmente cambiato, nonostante il job 1 rotto.
+    var log = [
+      { id: 'e1', ts: testTsMinutesAgo_(15), type: 'move', source: 'auto', from: null, to: 'backlog', note: '' },
+      { id: 'e2', ts: testTsMinutesAgo_(3), type: 'move', source: 'manual', from: 'backlog', to: 'wip' }
+    ];
+    var goodJobId = testWriteMisalignedJobForP7_(ss, 'Disallineato valido', log, 'backlog', testTsMinutesAgo_(15), '');
+
+    var report = recomputeExistingJobsStatus_(ss, true);
+
+    var skipped = report.rows_skipped_unparsable.filter(function(r) { return r.job_id === brokenCreated.job_id; })[0];
+    assertTrue_(Boolean(skipped), 'il job con log vuoto deve comparire tra i saltati, non far fallire la migrazione');
+
+    var goodChange = report.changes.filter(function(c) { return c.job_id === goodJobId; })[0];
+    assertTrue_(Boolean(goodChange), 'il job valido successivo deve comunque essere processato ed elencato tra i cambiamenti');
+  });
+}
+
+function testRecomputeExistingJobsStatusLeavesAlreadyConsistentJobUntouched() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+
+    var created = addJob({ title: 'Gia consistente', size_class: 'S', status: 'backlog' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var report = recomputeExistingJobsStatus_(ss, true);
+
+    var change = report.changes.filter(function(c) { return c.job_id === created.job_id; })[0];
+    assertTrue_(!change, 'un job gia scritto correttamente da moveJob (P5) non deve comparire tra i cambiamenti');
   });
 }
 

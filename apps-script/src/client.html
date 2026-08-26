@@ -1126,7 +1126,21 @@
         // (M0-C) — stesso campo gia' usato per l'aging della card in
         // board, resta coerente anche se una correzione in Cronologia
         // ha spostato il "da quando" senza aggiungere un nuovo evento.
-        segmentStart = job && job.status_since_ts ? new Date(job.status_since_ts).getTime() : segmentStart;
+        // P6 (DESIGN_lock_ambiente.md §2.7): Math.max, non un uso diretto
+        // - status_since_ts puo' solo spostare l'inizio in AVANTI
+        // rispetto a quello che il log stesso dice essere l'ultimo
+        // ingresso in questa colonna (segmentStart, gia' = moveEvent.ts
+        // qualche riga sopra), mai indietro. Senza questo, un
+        // status_since_ts rimasto disallineato (scritto in modo
+        // inaffidabile prima del fix di P5, mai piu' aggiornato per i
+        // job gia' esistenti - vedi P7) faceva mostrare durate assurde
+        // (es. "WIP: 103g" per una card spostata li' 14 giorni prima -
+        // caso reale JOB-20260707-GUKC). Stesso principio di P5 ("la
+        // Cronologia comanda"), qui solo sulla visualizzazione: non
+        // corregge il dato status_since_ts sul foglio (P7, fuori scope).
+        segmentStart = job && job.status_since_ts
+          ? Math.max(new Date(job.status_since_ts).getTime(), segmentStart)
+          : segmentStart;
         segmentEnd = now;
       }
       var elapsed = Math.max(0, segmentEnd - segmentStart);
