@@ -7,10 +7,18 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+// P3 (DESIGN_lock_ambiente.md §2.3): prima chiamava routeAction_
+// direttamente, bypassando interamente api()/withEnvironment_ — nessuna
+// risoluzione d'ambiente (P1), nessuna classificazione lettura/scrittura
+// per il lock (P2). Ora delega ad api(), la stessa funzione gia' usata
+// da ogni chiamata google.script.run reale — eredita entrambi i
+// meccanismi senza logica nuova. Unico effetto collaterale: la risposta
+// guadagna un campo data.env, come gia' avviene per ogni risposta di
+// api() — nessun consumatore noto di doPost da aggiornare.
 function doPost(e) {
   try {
     var params = parseRequest_(e);
-    return json_(routeAction_(params));
+    return json_(api(params.action, params));
   } catch (err) {
     return json_(fail_(err.message));
   }

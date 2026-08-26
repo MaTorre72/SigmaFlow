@@ -1,6 +1,83 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase P (ambiente e lock globale) — P3 e P4 DONE, programma completo (2026-08-26, sessione 2)
+
+Proseguimento della sessione P1/P2 (stesso branch
+`fix/fase-p-lock-ambiente-2026-08-26`, verificato allineato a
+`origin/main` prima di iniziare — nessuna divergenza). Documento
+aggiornato con le sotto-fasi P3/P4 (commit `741d065`) prima di
+implementarle. Nessun gate su nessuna delle due — indipendenti tra
+loro, eseguite entrambe nella stessa sessione.
+
+**P3 — `doPost` delega ad `api()`** (Kanban.gs): prima chiamava
+`routeAction_(params)` direttamente, bypassando `api()`/`withEnvironment_`
+— nessuna risoluzione d'ambiente (P1), nessuna classificazione
+lettura/scrittura per il lock (P2), per qualunque POST diretta all'URL
+pubblicato. Cambiata una riga: `api(params.action, params)`. Nessun
+consumatore noto di `doPost` da aggiornare (confermato di nuovo:
+`client.html` usa solo `google.script.run`, mai una POST diretta).
+
+**Test aggiunto**: `testDoPostDelegatesToApiInheritingEnvironmentAndLock`
+— verifica con l'evidenza piu' diretta possibile che `doPost` passa
+davvero da `api()`: la risposta guadagna `data.env` (arricchimento che
+solo `api()` fa), e una lettura via `doPost` non prende il lock globale
+mentre una scrittura lo prende esattamente una volta (stesso contatore
+`__sfLockState.waitCalls` gia' usato per i test di P2). **Registrato
+subito nell'array `tests` di `runAllTests()`** — lezione della sessione
+precedente (il conteggio e' salito da 166 a 167, verificato non essere
+un falso positivo).
+
+**P4 — riepilogo visivo del percorso della card** (client.html/
+board.html/style.html, solo frontend, nessun test nell'harness Node —
+coerente col fatto che non tocca nulla lato server): nuovo pannello nel
+tab Informazioni, sopra l'anteprima "ultimi eventi" esistente (che resta
+invariata) — barra orizzontale segmentata con un segmento aggregato per
+colonna (non uno per singolo soggiorno, decisione di Marco per
+leggibilita' con rientri multipli — §2.4 del documento), calcolato
+camminando su `state.activityLog` **gia' caricato** (nessuna nuova
+chiamata `callApi`, nessuna nuova lettura Sheets). Segmento della
+colonna attuale marcato "in corso" (tratteggio diagonale + etichetta),
+durata basata su `job.status_since_ts`. Colori dei segmenti presi da
+`state.columnMeta` (stessi della card in board), fallback grigio per
+colonne rinominate/eliminate nel frattempo (`columnLabelById_` gestisce
+gia' l'etichetta). Ordine dei segmenti: stesso ordine delle colonne in
+board, non per durata. Legenda testuale con etichetta + durata formattata
+(giorni/ore/minuti) accanto a ogni segmento.
+
+**Collaudato nel Browser pane** (server locale di riproduzione, markup
+reale + `routeAction_` via harness — rimosso a fine sessione):
+- Percorso a piu' colonne con un rientro (BACKLOG → TO DO → WIP →
+  ATTESA CLIENTE → TO DO → WIP, eventi backdatati via
+  `addActivityEvent`): segmenti aggregati correttamente per colonna
+  (TO DO e WIP compaiono una volta sola, sommando entrambi i soggiorni),
+  ordine identico a quello delle colonne in board, colori dei segmenti
+  verificati byte per byte contro `column_meta.color`, colonna WIP
+  (quella attuale) marcata "in corso", percentuali e durate coerenti
+  con la somma totale del periodo.
+- Caso base (card appena creata, mai spostata): un solo segmento al
+  100%, marcato "in corso", "0m".
+- Modale "nuova card" (nessun job_id): pannello resta nascosto, stesso
+  comportamento gia' esistente per l'anteprima "ultimi eventi".
+- Nessun errore in console in nessuno dei tre scenari.
+
+**167/167 test nell'harness Node** (166 preesistenti + 1 nuovo, P3 —
+P4 non ha test Node, solo collaudo Browser pane, coerente con "solo
+frontend"). Push su TEST verificato: 16/16 file identici.
+
+**Criteri di accettazione P3/P4 (§6 del documento) — tutti verificati
+TRUE**: elenco completo nel documento, tutti confermati sia da test
+automatici (P3) sia da collaudo manuale nel Browser pane (P4, che non
+ha equivalente nell'harness Node essendo puro rendering client-side).
+
+**Programma Fase P — completo (P1, P2, P3, P4 tutte DONE)**, nessuna
+sotto-fase residua in `docs/DESIGN_lock_ambiente.md` §4.
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) da
+aggiornare con i commit di P3/P4 sullo stesso branch.
+
+---
+
 ## Fase P (ambiente e lock globale) — P1 e P2 DONE, programma completo (2026-08-26)
 
 **P2 — lock globale solo sulle azioni di scrittura**, dopo il gate 🔴 del

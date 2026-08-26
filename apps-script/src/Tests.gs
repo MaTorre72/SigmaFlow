@@ -287,6 +287,7 @@ function runAllTests() {
     testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty,
     testApiTakesLockOnlyForWriteActions,
     testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange,
+    testDoPostDelegatesToApiInheritingEnvironmentAndLock,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
     testGetArchivioReturnsEmptyWhenSheetsMissing,
@@ -1809,6 +1810,37 @@ function testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange() {
 
   var moveEvents = logResponse.data.log.filter(function(event) { return event.type === 'move'; });
   assertTrue_(moveEvents.length > 0, 'anche l\'evento della prima scrittura (move) deve restare nel log, nessuna delle due scritture ha perso l\'altra');
+}
+
+// P3 (DESIGN_lock_ambiente.md §2.3): doPost deve delegare ad api(), non
+// piu' chiamare routeAction_ direttamente — eredita risoluzione
+// d'ambiente (P1) e classificazione lettura/scrittura per il lock (P2)
+// automaticamente, senza logica nuova. Verificato con l'evidenza piu'
+// diretta possibile: la risposta guadagna data.env (arricchimento che
+// SOLO api() fa, mai routeAction_ da solo — se questo campo manca, doPost
+// e' tornato a chiamare routeAction_ direttamente) e una lettura via
+// doPost non prende il lock globale, esattamente come una chiamata
+// google.script.run reale.
+function testDoPostDelegatesToApiInheritingEnvironmentAndLock() {
+  var created;
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    created = addJob({ title: 'P3 doPost', size_class: 'S' }).data;
+  });
+
+  var before = __sfLockState.waitCalls;
+  var readOutput = doPost({ postData: { contents: JSON.stringify({ action: 'getBoard', env: 'test' }) } });
+  var readBody = JSON.parse(readOutput.text);
+  assertTrue_(readBody.success, 'doPost/getBoard deve avere successo: ' + JSON.stringify(readBody));
+  assertEquals_('test', readBody.data.env, 'doPost deve ereditare l\'arricchimento data.env di api(), prova che passa da api() e non piu\' da routeAction_ diretto');
+  assertEquals_(before, __sfLockState.waitCalls, 'doPost/getBoard (lettura) non deve prendere il lock globale — eredita la classificazione di P2');
+
+  var beforeWrite = __sfLockState.waitCalls;
+  var writeOutput = doPost({ postData: { contents: JSON.stringify({ action: 'moveJob', env: 'test', job_id: created.job_id, status: 'wip' }) } });
+  var writeBody = JSON.parse(writeOutput.text);
+  assertTrue_(writeBody.success, 'doPost/moveJob deve avere successo: ' + JSON.stringify(writeBody));
+  assertEquals_(beforeWrite + 1, __sfLockState.waitCalls, 'doPost/moveJob (scrittura) deve prendere il lock globale esattamente una volta — eredita la classificazione di P2');
 }
 
 // --- N4 (DESIGN_archiviazione.md, §6/§6b): viste Archivio/Cestino
