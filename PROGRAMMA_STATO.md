@@ -65,15 +65,29 @@ in P7 (probabile causa: serve un consenso completato dall'editor online,
 non coperto dal login da riga di comando). **Non risolvibile da questa
 sessione.**
 
+**Bug trovato e corretto DOPO la prima esecuzione reale di Marco su
+TEST** (commit `0dbc1bd`): `migrateVisiteFromHistory_` non loggava mai
+il proprio risultato (a differenza di `recomputeExistingJobsStatus_`,
+la funzione equivalente di P7, che usa `Logger.log`) — la prima
+esecuzione di Marco da editor ha mostrato solo "avviata/completata",
+nessun dato da incollare. Aggiunto `Logger.log(JSON.stringify(summary))`
+(stesso pattern di P7), 177/177 test ancora verdi, ripushato e
+riverificato su TEST (16/16 identici).
+
+**TEST — eseguito da Marco** (`migrateVisiteFromHistoryOnTest`,
+19:13:49): `{"jobs_processed":52,"jobs_without_log":0,"visite_written":57,"coherence_warnings":[]}`
+— 52 job scansionati (stesso numero della dry-run P7 su TEST, stesso
+dataset), nessuna riga malformata, 57 visite scritte per 52 job (alcuni
+job hanno piu' di una visita/rientro, come atteso), **zero warning di
+coerenza** (nessun `RIENTRO_DIRETTO_A_WIP` nello storico TEST reale).
+
 **Resta, riservato a Marco — non eseguibile da Claude** (scrittura su
 dati reali TEST/PROD tramite l'unica via disponibile, l'editor Apps
 Script, stesso procedimento gia' seguito per P7):
-1. Editor Apps Script (progetto TEST) → menu funzioni →
-   `migrateVisiteFromHistoryOnTest` → Esegui → Log di esecuzione,
-   incollarmelo.
+1. ~~Editor Apps Script (progetto TEST) → `migrateVisiteFromHistoryOnTest`~~ — FATTO, vedi sopra.
 2. Confronto a mano su un campione di job con piu' rientri (in
-   particolare i casi noti con rientri gia' segnalati in P6/P7) contro
-   la loro Cronologia reale.
+   particolare i casi noti con rientri gia' segnalati in P6/P7, es.
+   `JOB-DEMO-19`) contro la loro Cronologia reale — **in attesa**.
 3. Dopo conferma: editor Apps Script (progetto PROD) →
    `migrateVisiteFromHistorySuProd` → Esegui → Log di esecuzione,
    incollarmelo di nuovo — stessa sessione di lavoro, nessuna attesa
@@ -84,9 +98,10 @@ Script, stesso procedimento gia' seguito per P7):
    dashboard) sui job noti per avere rientri, su TEST e PROD.
 
 **Programma Fase Q — completo lato Claude.** Codice scritto, collaudato
-nell'harness Node (nuovi test compresi), pushato e verificato su TEST.
-Manca solo l'esecuzione della migrazione (TEST poi PROD), riservata a
-Marco per lo stesso motivo tecnico gia' incontrato in P7. Nessuna PR
+nell'harness Node (nuovi test compresi), pushato e verificato su TEST,
+migrazione TEST eseguita da Marco con esito pulito. Manca il confronto
+a campione (punto 2) e l'esecuzione PROD (punto 3), riservata a Marco
+per lo stesso motivo tecnico gia' incontrato in P7. Nessuna PR
 aperta verso `main` (non richiesto in questa sessione).
 
 ---
