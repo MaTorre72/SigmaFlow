@@ -81,13 +81,15 @@ dataset), nessuna riga malformata, 57 visite scritte per 52 job (alcuni
 job hanno piu' di una visita/rientro, come atteso), **zero warning di
 coerenza** (nessun `RIENTRO_DIRETTO_A_WIP` nello storico TEST reale).
 
+**Confronto a campione — eseguito da Marco, coerente**: `JOB-DEMO-19` e
+altri due job con piu' rientri controllati a mano contro la loro
+Cronologia reale su TEST — tutto coerente, nessuna discrepanza.
+
 **Resta, riservato a Marco — non eseguibile da Claude** (scrittura su
 dati reali TEST/PROD tramite l'unica via disponibile, l'editor Apps
 Script, stesso procedimento gia' seguito per P7):
 1. ~~Editor Apps Script (progetto TEST) → `migrateVisiteFromHistoryOnTest`~~ — FATTO, vedi sopra.
-2. Confronto a mano su un campione di job con piu' rientri (in
-   particolare i casi noti con rientri gia' segnalati in P6/P7, es.
-   `JOB-DEMO-19`) contro la loro Cronologia reale — **in attesa**.
+2. ~~Confronto a mano su un campione di job con piu' rientri~~ — FATTO, vedi sopra.
 3. Dopo conferma: editor Apps Script (progetto PROD) →
    `migrateVisiteFromHistorySuProd` → Esegui → Log di esecuzione,
    incollarmelo di nuovo — stessa sessione di lavoro, nessuna attesa
