@@ -78,6 +78,12 @@
 > non bug di dati ma comportamenti da documentare per non farli
 > ritrovare come sorpresa più avanti, sono descritti in §2.6 come
 > esplicitamente fuori scope di questo intervento.
+>
+> **P6 è completata e collaudata** (2026-08-26, stesso branch, commit
+> `8d04b35`, 171/171 test, push su TEST verificato, collaudata nel
+> Browser pane — sei trascinamenti rapidi consecutivi senza mai un nodo
+> duplicato, le quattro famiglie di azioni prima non protette dal poll
+> verificate una per una). **Programma Fase P (P1-P6) completo.**
 
 ---
 
@@ -468,48 +474,57 @@ storico (§2.1-§2.5). Resta da fare P6:
 
 ## 6. Criteri di accettazione
 
-**P1-P5 — già verificati e chiusi** (commit `744b95f`/`89bf7ea`/
-`c94a32c`/`2c5bc49`/`2159cab`, 170/170 test, push su TEST verificato, P4
-anche nel Browser pane): nessuna riga d'azione residua, elenco completo
-nei commit e in `PROGRAMMA_STATO.md`.
+**P1-P6 — tutte verificate e chiuse** (commit `744b95f`/`89bf7ea`/
+`c94a32c`/`2c5bc49`/`2159cab`/`8d04b35`, 171/171 test, push su TEST
+verificato, P4 e P6 anche nel Browser pane): nessuna riga d'azione
+residua, elenco completo nei commit e in `PROGRAMMA_STATO.md`.
 
-**P6 — da verificare** (nessuna riga spuntata finché non collaudato):
+**P6:**
 
-- [ ] `moveJob`: `removeCardEl_(moveResult.job.job_id)` chiamata prima
+- [x] `moveJob`: `removeCardEl_(moveResult.job.job_id)` chiamata prima
       di `placeCardInColumn_(moveResult.job)`, stesso posto dove oggi
       c'è solo quest'ultima
-- [ ] Test manuale nel Browser pane: trascinare ripetutamente una card
+- [x] Test manuale nel Browser pane: trascinare ripetutamente una card
       tra due colonne (avanti e indietro, più volte di seguito, anche
       rapidamente) — in nessun momento la card deve essere visibile in
       più di una colonna; nessun nodo DOM orfano dopo N trascinamenti
       (verificabile con `document.querySelectorAll('[data-job-id="..."]')`
-      dalla console: deve restituire sempre e solo 1 elemento)
-- [ ] `callApi`: nuovo elenco client-side delle azioni di sola lettura
+      dalla console: deve restituire sempre e solo 1 elemento) — 6
+      trascinamenti rapidi consecutivi, sempre `1`, mai `2`
+- [x] `callApi`: nuovo elenco client-side delle azioni di sola lettura
       (stessi cinque nomi di `SF_READ_ACTIONS_` — `getBoard`,
       `getActivityLog`, `getArchivio`, `getCestino`, `getMetrics`);
       `state.pendingWrites` incrementato prima della chiamata e
       decrementato al termine (sia successo che errore, via
       `.finally`) per ogni azione **non** in quell'elenco
-- [ ] L'incremento/decremento manuale di `pendingWrites` in
+- [x] L'incremento/decremento manuale di `pendingWrites` in
       `saveCardFromModal` è stato tolto (ridondante col punto sopra)
-- [ ] Verificato che nessuna azione di sola lettura incrementi
+- [x] Verificato che nessuna azione di sola lettura incrementi
       `pendingWrites` per errore (bloccherebbe il poll anche quando non
-      serve)
-- [ ] Nessuna regressione sui test esistenti dell'harness Node
-      (170/170 più eventuali nuovi test aggiunti per P6)
-- [ ] Collaudo su TEST: push verificato, comportamento osservato nel
-      Browser pane, non solo lettura del diff
-- [ ] Collaudo manuale su TEST delle azioni ora protette dal fix 2 che
+      serve) — `getActivityLog` verificato: 0 prima/durante/dopo
+- [x] Nessuna regressione sui test esistenti dell'harness Node
+      (171/171 — P6 è puramente client-side, nessun nuovo test Node)
+- [x] Collaudo su TEST: push verificato (16/16 file identici),
+      comportamento osservato nel Browser pane, non solo lettura del diff
+- [x] Collaudo manuale su TEST delle azioni ora protette dal fix 2 che
       prima non lo erano — almeno una per famiglia: `deleteJob`,
       `archiveJobFromModal`, un'azione da Archivio (`duplicaJob`) e una
       da Cestino (`ripristinaJob` o `eliminaJobDefinitivamente`) — nessun
       comportamento diverso da prima, solo il poll che ora aspetta
-      correttamente
-- [ ] Confermato (lettura del diff, non solo dei test) che nessuna delle
+      correttamente — tutte e quattro verificate una per una,
+      `pendingWrites` a 1 durante/0 dopo, nessun errore in console
+- [x] Confermato (lettura del diff, non solo dei test) che nessuna delle
       correzioni tocca `saveColumnSettings`/`moveColumn`/
       `renderArchivioList_`/`renderCestinoList_`/
       `applyActivityJobUpdate_` — il censimento di §2.6 li ha confermati
-      già sicuri, non serve modificarli
+      già sicuri, non serve modificarli. **Nota**: la *logica* di
+      `applyActivityJobUpdate_` non è stata toccata, ma il commento
+      accanto (fuorviante dopo il fix di `moveJob`, "a differenza del
+      drag-and-drop reale") è stato riscritto — opzione facoltativa
+      esplicitamente lasciata a discrezione nel prompt di sessione,
+      zero righe di codice eseguibile modificate in quella funzione.
+
+**Programma Fase P (P1-P6) — completo.** Nessuna sotto-fase residua.
 
 ---
 

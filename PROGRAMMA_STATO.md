@@ -1,6 +1,55 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase P — CHIUSA (P1-P6 tutte DONE), in attesa di merge/deploy da parte di Marco (2026-08-26)
+
+Tutte le caselle di `docs/DESIGN_lock_ambiente.md` §6 spuntate (P1-P6).
+Ultima verifica di chiusura, ripetuta da capo su richiesta di Marco
+("chiudiamo la fase P"): **171/171 test** nell'harness Node, push su
+TEST **verificato di nuovo** (16/16 file identici), branch
+`fix/fase-p-lock-ambiente-2026-08-26` allineato a `origin` (nessun
+commit locale non pushato).
+
+**Riepilogo completo della fase**:
+- **P1** (`744b95f`) — Script Property condivisa → variabile
+  per-esecuzione, chiude la classe di incidenti PROD/TEST del 19/08 e
+  25/08.
+- **P2** (`89bf7ea`) — lock globale solo sulle azioni di scrittura,
+  gate confermato da Marco prima dell'implementazione.
+- **P3** (`c94a32c`) — `doPost` delega ad `api()`, eredita P1/P2 anche
+  sulle POST dirette.
+- **P4** (`c94a32c`) — riepilogo visivo del percorso della card, tab
+  Informazioni (feature, non bug).
+- **P5** (`2c5bc49`) — `job.status` derivato sempre dall'evento più
+  recente della Cronologia, non dal candidato appena toccato (due bug
+  distinti corretti).
+- **P5b** (`2159cab`) — stesso principio applicato a
+  `incarico_chiuso_ts`, su richiesta esplicita di Marco dopo il punto
+  esplorativo di P5.
+- **P6** (`8d04b35`) — card orfana in due colonne dopo un drag
+  (`removeCardEl_` mancante in `moveJob`) + `pendingWrites` non
+  centralizzato (poll poteva sovrascrivere lo stato durante scritture
+  non protette).
+
+**Cosa resta, riservato a Marco — non eseguibile da Claude per regola
+tecnica del progetto** (`.claude/settings.local.json` blocca il push su
+`main`/`master` a livello di permessi; la scrittura su PROD, dati o
+deployment, è "sempre riservata a un'azione eseguita da Marco stesso"
+per `CLAUDE.md`, senza eccezioni nemmeno su richiesta esplicita in
+sessione):
+1. Review/merge della PR [#12](https://github.com/MaTorre72/SigmaFlow/pull/12)
+   (`fix/fase-p-lock-ambiente-2026-08-26` → `main`) da GitHub.
+2. Dopo il merge, `clasp push` verso PROD (se il flusso del progetto
+   lo prevede da locale) e/o ripubblicazione del deployment Apps
+   Script PROD (Distribuisci → Gestisci distribuzioni → Nuova versione
+   → Distribuisci) — stessa procedura già seguita per i fix PROD
+   precedenti in questo progetto (vedi sezioni storiche più sotto in
+   questo file).
+
+Nessun'altra azione lato Claude in sospeso su questa fase.
+
+---
+
 ## Fase P (ambiente e lock globale) — P6 DONE, solo client-side (2026-08-26, sessione 4)
 
 Proseguimento sullo stesso branch (`fix/fase-p-lock-ambiente-2026-08-26`,
