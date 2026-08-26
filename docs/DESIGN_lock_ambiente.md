@@ -21,19 +21,27 @@
 > `PROGRAMMA_STATO.md`: `getBoard()` può innescare una scrittura reale
 > (`setupSigmaFlow` via `ensureCurrentSchema_`) nella rara finestra
 > post-deploy con schema non allineato — gestito con un lock dedicato,
-> ristretto a quel solo tratto, per non lasciare quella scrittura
-> sprotetta; e un bug nei test stessi (i casi aggiunti in P1 non erano
-> registrati in `runAllTests()` e non giravano mai — il precedente
-> "163/163" era un falso positivo, ora corretto).
+> ristretto a quel solo tratto; e un bug nei test stessi (i casi
+> aggiunti in P1 non erano registrati in `runAllTests()` e non giravano
+> mai — il precedente "163/163" era un falso positivo, ora corretto).
 >
-> **P3 e P4** sono aggiunte del 2026-08-26, dopo il completamento di
-> P1/P2: P3 chiude un punto segnalato ma non risolto durante l'analisi
-> originale (`doPost`, vedi §2.3); P4 non è imparentata con P1/P2/P3 —
-> è una richiesta di feature di Marco (anteprima visiva del percorso
-> della card nel tab Informazioni), non un problema trovato nel codice.
-> Accorpata qui su sua decisione esplicita, per non aprire una fase a
-> lettera nuova per una sola sotto-fase — stesso principio già
-> applicato al punto G dentro `DESIGN_performance.md`.
+> **P3 e P4 sono completate e collaudate** (2026-08-26, stesso branch,
+> commit `c94a32c`, 167/167 test, push su TEST verificato, P4 collaudata
+> anche nel Browser pane) — verificato di nuovo rileggendo il branch. P3
+> chiudeva un punto segnalato ma non risolto durante l'analisi originale
+> (`doPost`, §2.3); P4 non era imparentata con P1/P2/P3 — richiesta di
+> feature di Marco (anteprima visiva del percorso della card), accorpata
+> qui su sua decisione esplicita per non aprire una fase a lettera nuova
+> per una sola sotto-fase, stesso principio già applicato al punto G
+> dentro `DESIGN_performance.md`.
+>
+> **P5** (aggiunta 2026-08-26) è un bug reale segnalato da Marco durante
+> l'uso — "lo spostamento della card è a risposta molto ritardata... c'è
+> da rivedere l'aggiornamento dello stato attuale delle card" — che
+> l'analisi ha confermato essere due bug distinti nella derivazione di
+> `job.status` dalla Cronologia, non un problema di prestazioni (§2.5).
+> Stesso tema di P4 (`Kanban.gs`, gestione dell'activity log), diversa
+> natura (bug, non feature) — accorpato qui per lo stesso motivo di P3/P4.
 
 ---
 
@@ -47,24 +55,25 @@
   (ActivityLog.gs) e `allineaSchemaSuProd` (Schema.gs). *(P1, completata)*
 - **`api()`/`routeAction_()`** (Kanban.gs) — punto in cui si decide se
   un'azione richiede il lock globale o può farne a meno. *(P2, completata)*
-- **`doPost()`** (Kanban.gs) — oggi bypassa `api()` e quindi anche i fix
-  di P1/P2. *(P3, nuova)*
+- **`doPost()`** (Kanban.gs) — bypassava `api()` e quindi anche i fix di
+  P1/P2. *(P3, completata)*
+- **`client.html`, tab Informazioni** — nuovo pannello, nessuna modifica
+  al backend, nessuna nuova chiamata `callApi`. *(P4, completata)*
+- **`applyManualMoveEffects_`, `addActivityEvent`, `updateActivityEvent`,
+  `deleteActivityEvent`** (Kanban.gs) — dove `job.status`/
+  `status_since_ts` vengono oggi impostati in modo non affidabile.
+  *(P5, nuova)*
 - **Non tocca** i 27+ punti che chiamano `getSpreadsheet_()`
-  ambientalmente (in `Kanban.gs`, `ActivityLog.gs`, `Model.gs`,
-  `Backup.gs`) — continuano a chiamarla esattamente come prima,
+  ambientalmente — continuano a chiamarla esattamente come prima,
   nessuna firma di funzione è cambiata in P1/P2.
 - **Non tocca** il fallback di bootstrap in `setupSigmaFlow()`
-  (Schema.gs): se non è ancora configurato nulla, resta un uso
-  legittimo e volutamente persistente tra esecuzioni — invariato.
+  (Schema.gs) — invariato.
 - **Non tocca** i lock indipendenti già esistenti su
   `moveJobToSheet_`/`eliminaJobDefinitivamente`/`svuotaCestino`
-  (Kanban.gs) e sulle funzioni admin di migrazione — proteggono la
-  concorrenza sulle scritture di archiviazione/cestino/migrazione, non
-  la risoluzione dell'ambiente.
-- **P4, tema diverso**: `client.html`, tab Informazioni della card —
-  nessuna modifica al backend, nessuna nuova chiamata `callApi`. Il
-  calcolo del percorso della card usa dati già scaricati dal client per
-  la Cronologia (`state.activityLog`).
+  (Kanban.gs) e sulle funzioni admin di migrazione.
+- **Non tocca**, in P5: `moveJob` (il drag-and-drop reale) — non ha lo
+  stesso bug, vedi §2.5. Non tocca lo schema dati né il modello
+  caso/visita.
 
 ## 2. Cosa è stato trovato
 
@@ -75,221 +84,231 @@ Script, un valore **persistente e condiviso tra esecuzioni separate**.
 `withEnvironment_` la usava però per un dato che dovrebbe vivere **solo
 dentro la singola chiamata `api()`** — la scriveva all'inizio, la
 ripristinava alla fine nel proprio `finally`. Se un'esecuzione si
-interrompeva prima di raggiungere quel `finally` (un'esecuzione
-lanciata a mano dall'editor, un timeout), il valore sporco sopravviveva
-e veniva ereditato dalla richiesta successiva — di un utente diverso,
-in un momento diverso. Era la causa di fondo, non solo il sintomo,
-degli incidenti del 2026-08-19 e della recidiva del 2026-08-25.
+interrompeva prima di raggiungere quel `finally`, il valore sporco
+sopravviveva e veniva ereditato dalla richiesta successiva — di un
+utente diverso, in un momento diverso. Era la causa di fondo, non solo
+il sintomo, degli incidenti del 2026-08-19 e della recidiva del
+2026-08-25.
 
-Verificato esternamente (non solo per lettura del codice): ogni
-esecuzione di uno script Apps Script — ogni chiamata `api()` inclusa —
-parte in un'isolate V8 **nuova**, scartata per intero alla fine. Non
-c'è memoria condivisa tra esecuzioni separate: una variabile globale
-JavaScript dichiarata in cima a un file è isolata per costruzione a
-quella singola esecuzione, senza bisogno di nessun lock per proteggerla
-dal rischio di essere letta da un'altra chiamata in corso.
+Verificato esternamente: ogni esecuzione Apps Script parte in
+un'isolate V8 **nuova**, scartata per intero alla fine — nessuna
+memoria condivisa tra esecuzioni separate.
 
 **Fatto**: `PROP_SPREADSHEET_ID` sostituita da `__sfRoutedSpreadsheetId_`,
-una variabile globale valorizzata a inizio chiamata e mai persistita
+variabile globale valorizzata a inizio chiamata e mai persistita
 (Utils.gs, commit `744b95f`). Stesso trattamento in
-`eseguiMigrazioneCompleta_`/`allineaSchemaSuProd`. Chiude l'intera
-classe di bug alla radice — non solo verso PROD (già corretto il
-25/08), ma anche verso TEST, e in ogni punto del codice che leggeva
-`PROP_SPREADSHEET_ID` ambientalmente.
+`eseguiMigrazioneCompleta_`/`allineaSchemaSuProd`.
 
 ### 2.2 — P2 (completata): il lock globale era preso una volta per ogni chiamata `api()`, letture comprese
 
-Censimento completo (tutti i file `.gs`): otto punti nel codice
-prendevano `LockService.getScriptLock()`. Uno solo era quello
-rilevante qui — `withEnvironment_`, l'unico varco per **ogni**
-richiesta web (letture e scritture indistintamente). Gli altri sette
-sono lock indipendenti già mirati a scritture specifiche (archiviazione,
-cestino, funzioni admin di migrazione) e sono rimasti fuori da questo
-intervento.
-
-Combaciava con la diagnosi già fatta da Marco il 2026-08-20 (fix
-"elimina il giro di lock extra dopo un salvataggio"): quel fix aveva
-rimosso un giro di lock *aggiuntivo*, ma non la caratteristica di fondo
-— ogni singola lettura si metteva comunque in coda dietro tutte le
-altre richieste in corso, esattamente come una scrittura.
-
-Punto di attenzione decisivo per il rischio: `moveJob`,
-`addActivityEvent`, `updateActivityEvent` e `deleteActivityEvent` — le
-azioni di scrittura più usate — non avevano nessun lock proprio,
-dipendevano al 100% dal lock globale.
+Censimento completo: otto punti nel codice prendevano
+`LockService.getScriptLock()`. Uno solo era quello rilevante qui —
+`withEnvironment_`, l'unico varco per ogni richiesta web. Combaciava
+con la diagnosi già fatta da Marco il 2026-08-20 (fix "elimina il giro
+di lock extra"): quel fix aveva rimosso un giro *aggiuntivo*, ma non la
+caratteristica di fondo.
 
 **Fatto**: `SF_READ_ACTIONS_` (Kanban.gs, commit `89bf7ea`) classifica
-esplicitamente `getBoard`/`getActivityLog`/`getArchivio`/`getCestino`/
-`getMetrics` come uniche azioni di lettura — censite una per una contro
-`routeAction_`, confermate da Marco prima dell'implementazione (gate).
-Solo queste saltano il lock globale; ogni altra azione lo mantiene,
-nessuna eccezione. Caso limite trovato e gestito in corsa: `getBoard()`
-può innescare `setupSigmaFlow()` (scrittura reale) nella rara finestra
-di schema non allineato post-deploy — protetto con un lock dedicato
-solo a quel tratto, non con l'intero lock globale.
+esplicitamente le uniche azioni di sola lettura — censite una per una,
+confermate da Marco prima dell'implementazione (gate). Caso limite
+gestito in corsa: `getBoard()` può innescare `setupSigmaFlow()`
+(scrittura reale) nella rara finestra post-deploy — lock dedicato solo
+a quel tratto.
 
-### 2.3 — P3 (nuova): chiudere il bypass di `doPost`
+### 2.3 — P3 (completata): il bypass di `doPost`
 
-`doPost` (Kanban.gs) chiama `routeAction_` **direttamente**, senza
-passare da `api()` — quindi, anche dopo P1/P2, non beneficia né della
-risoluzione d'ambiente né della classificazione lettura/scrittura per
-il lock. Verificato di nuovo sul branch dove P1/P2 sono state fatte:
-non è stato toccato, resta esattamente come prima. Confermato che il
-frontend (`client.html`) non lo usa — solo `google.script.run` (quindi
-sempre `api()`) — ma resta un endpoint pubblico, raggiungibile da
-chiunque faccia una POST diretta all'URL pubblicato.
+`doPost` chiamava `routeAction_` direttamente, senza passare da `api()`
+— non beneficiava né della risoluzione d'ambiente (P1) né della
+classificazione lettura/scrittura (P2). Confermato che il frontend non
+lo usa (solo `google.script.run`), ma restava un endpoint pubblico
+raggiungibile da una POST diretta.
 
-Fix proposto, il più piccolo possibile: far chiamare a `doPost` la
-stessa `api()` già corretta da P1/P2, al posto di `routeAction_`
-direttamente — `api(params.action, params)` invece di
-`routeAction_(params)`. Zero logica nuova da scrivere: eredita
-automaticamente sia la risoluzione d'ambiente (P1) sia la
-classificazione lettura/scrittura (P2), lo stesso comportamento di
-ogni chiamata `google.script.run`. Unico effetto collaterale, minore e
-non pericoloso: la risposta guadagna un campo `data.env` che prima non
-c'era — stesso arricchimento che `api()` già fa oggi per ogni chiamata
-reale; nessun consumatore noto di `doPost` da rompere (nessuno trovato
-nel frontend).
+**Fatto**: `doPost` chiama `api(params.action, params)` invece di
+`routeAction_(params)` (commit `c94a32c`) — eredita entrambi i
+meccanismi senza logica nuova.
 
-### 2.4 — P4 (nuova): anteprima visiva del percorso della card (richiesta di Marco, non un problema)
+### 2.4 — P4 (completata): anteprima visiva del percorso della card
 
-Idea di Marco: nel tab Informazioni della card, invece di dover aprire
-la Cronologia completa per farsi un'idea, un riepilogo visivo veloce
-di quanto tempo la card ha passato in ciascuna colonna — "un'
-anticipazione del calcolo dei tempi per colonna già presente in
-dashboard", ma per la singola card.
+Idea di Marco: nel tab Informazioni, un riepilogo visivo veloce di
+quanto tempo la card ha passato in ciascuna colonna, calcolato dal log
+già caricato (`state.activityLog`) — zero nuove letture, zero nuove
+chiamate `callApi`. Tre decisioni di Marco: tutta la storia del job
+(non solo la visita aperta); nel tab Informazioni, sopra l'anteprima
+"ultimi eventi" esistente; barra orizzontale segmentata.
 
-**Il materiale c'è già, senza bisogno di leggere nulla di nuovo dal
-foglio.** `activity_log_json` è già una sequenza cronologica di eventi
-`type: 'move'` (`{from, to, ts}`), e viene già caricato per intero sul
-client una sola volta all'apertura della card — `loadActivityLogForModal_`
-(client.html), commento M0-A2: proprio per evitare la doppia chiamata
-che causava "Cronologia lenta". Sia il tab Cronologia sia l'anteprima
-"ultimi eventi" già esistente (`renderRecentActivityPreview_`) leggono
-dallo stesso `state.activityLog`, senza richiamare il server. Il
-prospettino di Marco può agganciarsi allo stesso dato: **zero nuove
-letture Sheets, zero nuove chiamate `callApi`**, solo una nuova
-funzione di rendering client-side.
+**Fatto**: pannello aggiunto (`client.html`/`board.html`/`style.html`,
+commit `c94a32c`) — un segmento per colonna distinta, aggregato su
+tutta la storia, colonna attuale marcata "in corso", colori coerenti
+con la board. Collaudato nel Browser pane su tre casi (percorso con
+rientro, caso base, nuova card).
 
-Verificato che il log è completo fin dalla creazione della card:
-`addJob` scrive già un evento `{type:'move', from:null, to:<colonna
-iniziale>, ts:<arrival>}` (Kanban.gs) — non serve nessun altro campo
-(es. `arrival_ts`) come punto di partenza, il log da solo racconta
-tutta la storia, rientri compresi (`activity_log_json` è un unico
-array continuo per l'intera vita del job, non uno per visita). Il
-segmento "colonna attuale, ancora in corso" può usare `job.status_since_ts`
-come inizio — stesso campo già mantenuto per questo scopo esatto da
-`moveJob`/`addJob` (commento M0-C).
+### 2.5 — P5 (nuova): `job.status` non riflette in modo affidabile l'evento più recente della Cronologia
 
-Verificato anche un punto di consistenza: `correctJobTimestamps`
-corregge solo `arrival_ts` su `jobs`, **non tocca il log** — quindi non
-introduce nessuna discrepanza con il calcolo qui proposto (che legge
-solo il log). Le uniche modifiche che possono cambiare il calcolo sono
-quelle fatte tramite `updateActivityEvent`/`deleteActivityEvent`, che
-editano il log stesso — la stessa fonte usata da Cronologia oggi:
-nessuna doppia fonte di verità da tenere allineata a parte.
+Segnalazione di Marco: lo stato "attuale" della card deve sempre
+corrispondere all'ultima colonna registrata in Cronologia — automatica
+o manuale, di oggi o di mesi fa. Verificato leggendo il codice (non
+solo per il resoconto di un'altra sessione): **due bug distinti**,
+entrambi riprodotti.
 
-Tre decisioni prese da Marco: (1) tutta la storia del job, non solo la
-visita aperta; (2) nel tab Informazioni, sopra l'anteprima "ultimi
-eventi" esistente — le due cose rispondono a domande diverse ("dove
-è andato il tempo" vs. "cosa è successo di recente"), tenerle entrambe
-non è ridondanza; (3) barra orizzontale segmentata, un tratto colorato
-per colonna.
+**Bug 1 — `addActivityEvent`/`updateActivityEvent`**: `applyManualMoveEffects_`
+(chiamata da entrambe tramite `applyStructuralAlignment_`) fa
+incondizionatamente `job.status = candidate.to; job.status_since_ts =
+candidate.ts;` per qualunque evento move appena inserito o corretto —
+senza controllare se è davvero il più recente del log ordinato. Un
+evento con data passata (dimenticato, corretto mesi dopo) finisce nel
+posto giusto nella Cronologia, ma sovrascrive comunque lo stato
+attuale, anche in presenza di eventi successivi più recenti nel log.
 
-Un dettaglio di implementazione non ancora deciso da Marco, qui
-proposto come raccomandazione (non un punto da confermare — reversibile
-in un secondo momento senza impatto sui dati): **un segmento per
-colonna distinta**, aggregando tutte le permanenze in quella colonna su
-tutta la storia — non un segmento per ogni singolo soggiorno. Con
-rientri multipli la stessa colonna può essere visitata più volte in
-momenti non consecutivi; una vera timeline (un blocco per ogni singolo
-soggiorno, ripetuti) sarebbe più fedele alla sequenza reale ma diventa
-larga e poco leggibile con molti rientri o soggiorni brevi — l'aggregato
-per colonna resta sempre leggibile (mai più segmenti delle colonne
-esistenti) e risponde meglio alla domanda "dove se n'è andato il
-tempo", stessa logica già usata in `dashboard-metrics.md` ma applicata
-alla singola card invece che a tutto il sistema. Ordine dei segmenti
-nella barra: stesso ordine delle colonne in board (coerenza visiva con
-la board stessa), non ordinamento per durata.
+**Bug 2 — `deleteActivityEvent`**: la riga che dovrebbe riallineare lo
+stato dopo una cancellazione è `applyStructuralAlignment_(job,
+checkStructuralAlignment_(job, lastMove))` — senza passare `candidate`/
+`log`. Dentro, `applyManualMoveEffects_(job, candidate, log)` riceve
+`candidate` `undefined` e ritorna subito (`if (!candidate ||
+candidate.type !== 'move') return;`) — `job.status` non viene mai
+aggiornato. Cancellando l'evento che determinava la posizione attuale,
+la card resta bloccata lì invece di tornare alla colonna dell'evento
+rimasto più recente.
+
+**`moveJob` (drag-and-drop reale) non ha questo bug**: scrive
+`job.status` direttamente dalla mossa in corso, non passa da questo
+meccanismo — confermato leggendo il codice, nessuna azione richiesta lì.
+Sul rallentamento del drag-and-drop segnalato insieme a questo bug:
+nessuna causa di codice trovata (P1-P4 non hanno toccato `moveJob`,
+l'update lato client resta ottimistico, `ensureCurrentSchema_()` in
+testa a `moveJob` fa solo un controllo di property con ritorno
+immediato, comportamento preesistente non introdotto da P2) — da
+verificare con una misura live su TEST, fuori scope di questo
+documento (è un problema di prestazioni percepite, non un bug di
+codice individuato).
+
+**Fix proposto — separazione delle responsabilità**, confermata da
+Marco come la soluzione logicamente più pulita, da verificare con
+attenzione in fase di implementazione: `applyManualMoveEffects_` oggi
+fa due cose diverse nello stesso posto — imposta `job.status` per il
+candidato appena toccato, **e** applica gli effetti su `visite`
+(apertura/chiusura visita, accumulo attese) specifici di quel
+candidato. Queste due responsabilità vanno separate:
+
+- Una nuova funzione pura, es. `recomputeCurrentStatus_(job, log)` —
+  imposta `job.status`/`status_since_ts` dall'evento `move`
+  cronologicamente più recente del log **intero** ordinato, nessun
+  effetto su `visite`. Chiamata in fondo a `addActivityEvent`,
+  `updateActivityEvent` **e** `deleteActivityEvent`, dopo qualunque
+  altra elaborazione — così lo stato è sempre corretto indipendentemente
+  da cosa ha causato la modifica.
+- `applyManualMoveEffects_` perde le due righe che impostano
+  `job.status`/`status_since_ts` (spostate nella funzione sopra), ma
+  resta **invariata** per tutto il resto — stessa chiamata solo per il
+  candidato specifico in add/update, **mai** in delete. Questo è il
+  punto critico da non sbagliare: se si richiamasse l'intera
+  `applyManualMoveEffects_` (inclusi gli effetti su `visite`)
+  sull'evento-più-recente-rimasto anche in `deleteActivityEvent`, si
+  reintrodurrebbe esattamente il problema che il commento originale del
+  Bug 2 spiega di voler evitare — spostamenti/visite duplicate su
+  cancellazioni non correlate, solo spostato su un altro evento invece
+  che eliminato.
+
+**Punto da verificare durante l'implementazione, non ancora confermato
+come bug**: `applyManualMoveEffects_` azzera anche `job.incarico_chiuso_ts`
+quando il candidato rappresenta un vero rientro — stesso schema di
+Bug 1 ("agisce sul candidato appena toccato"), applicato a un altro
+campo. Inserire un rientro vecchio e dimenticato su un caso già
+richiuso da eventi *più recenti* potrebbe riaprirlo per errore. Non
+riprodotto con uno script isolato come per Bug 1/2 (richiede anche di
+leggere il flusso di "Chiuso" in `updateJob`, non ancora fatto) — va
+scritto un test dedicato prima di decidere se serve un fix analogo o
+se il comportamento attuale è già corretto per altri motivi non ancora
+visti.
+
+**Limitazione correlata, già nota e documentata nel codice, fuori
+scope di P5**: i campi gate della visita (`start_ts`/`prep_ts`/
+`incarico_ts`/`done_ts`) vengono scritti da `alignOpenVisitFields_`
+sempre sulla visita **attualmente aperta**, non su quella storicamente
+pertinente a un evento vecchio corretto/aggiunto. Il commento nel
+codice lo dice esplicitamente: identificare la visita storicamente
+giusta "è compito della migrazione storica autorevole di L5" — scelta
+già presa, non riaperta qui.
 
 ## 3. Approccio
 
-**P1 e P2 sono chiuse** — nessuna azione residua, solo riferimento
-storico (§2.1/§2.2). Restano da fare P3 e P4, indipendenti tra loro e
-da P1/P2 (nessuna delle due dipende da un prerequisito ancora aperto):
+**P1-P4 sono chiuse** — nessuna azione residua, solo riferimento
+storico (§2.1-§2.4). Resta da fare P5:
 
-- **P3 — `doPost` delega ad `api()`.** Rischio molto basso: una riga
-  di codice, zero logica nuova, eredita meccanismi già collaudati
-  (166/166 test). Da verificare solo che nessun test esistente assuma
-  il comportamento precedente di `doPost` (verosimilmente nessuno, dato
-  che non risultava usato da nessun percorso reale).
-- **P4 — riepilogo visivo del percorso, solo client-side.** Rischio
-  basso e di natura diversa da P1/P2/P3: non tocca backend, dati,
-  schema o test dell'harness Node — solo `client.html`.
+- **P5 — separazione delle responsabilità in `applyManualMoveEffects_`.**
+  Rischio contenuto ma non trascurabile: tocca una funzione usata da
+  tre percorsi di scrittura ad alta frequenza (`addActivityEvent`/
+  `updateActivityEvent`/`deleteActivityEvent`). Il rischio vero non è
+  "la separazione in sé" (Marco l'ha confermata come l'approccio più
+  pulito) ma **dove tracciare il confine** — vedi il punto critico in
+  §2.5: la nuova funzione di ricalcolo dello stato deve restare pura
+  (mai effetti su `visite`), altrimenti si rischia di scambiare un bug
+  con un altro. Da accompagnare con test dedicati per entrambi gli
+  scenari riprodotti (§6), non solo con i test di comportamento già
+  esistenti — più il test esplorativo su `incarico_chiuso_ts`.
 
 ## 4. Piano di esecuzione — sotto-fasi atomiche
 
 | Sotto-fase | Contenuto | Stato | Gate |
 |---|---|---|---|
-| **P1** | `getSpreadsheet_()`/`withEnvironment_()` (Utils.gs): Script Property condivisa sostituita da una variabile globale per-esecuzione, mai persistita. Stesso trattamento in `eseguiMigrazioneCompleta_`/`allineaSchemaSuProd`. | ✅ Completata (commit `744b95f`, 2026-08-26) | — |
-| **P2** | `api()`/`routeAction_()` (Kanban.gs): `SF_READ_ACTIONS_` classifica le azioni di sola lettura, solo quelle saltano il lock globale. | ✅ Completata (commit `89bf7ea`, 2026-08-26, gate confermato da Marco) | — |
-| **P3** | `doPost` (Kanban.gs) chiama `api(params.action, params)` invece di `routeAction_(params)` direttamente — eredita risoluzione d'ambiente (P1) e classificazione lettura/scrittura (P2) senza nuova logica. | Da fare | — |
-| **P4** | `client.html`, tab Informazioni: nuova funzione di rendering che cammina su `state.activityLog` (già caricato, nessuna nuova chiamata) e calcola, per l'intera storia del job, il tempo totale trascorso in ciascuna colonna (un segmento aggregato per colonna, non uno per soggiorno — §2.4). Barra orizzontale segmentata sopra l'anteprima "ultimi eventi" esistente (che resta invariata), colori presi da `state.columnMeta` (stessi della board), legenda testuale con il tempo per colonna accanto ai segmenti. Segmento della colonna attuale marcato come "in corso" (base: `job.status_since_ts`). | Da fare | — |
-
-P3 e P4 sono indipendenti tra loro e da P1/P2 — possono essere fatte in
-qualunque ordine, anche nella stessa sessione, senza gate intermedio.
+| **P1** | `getSpreadsheet_()`/`withEnvironment_()`: Script Property → variabile per-esecuzione. | ✅ Completata (commit `744b95f`) | — |
+| **P2** | `SF_READ_ACTIONS_`: lock globale solo sulle azioni di scrittura. | ✅ Completata (commit `89bf7ea`, gate confermato) | — |
+| **P3** | `doPost` delega ad `api(params.action, params)`. | ✅ Completata (commit `c94a32c`) | — |
+| **P4** | Barra segmentata del percorso card, tab Informazioni. | ✅ Completata (commit `c94a32c`) | — |
+| **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts` (nuova funzione pura, dal log intero) dagli effetti su `visite` (restano legati al candidato specifico, mai in delete). Chiamata di ricalcolo in fondo a `addActivityEvent`/`updateActivityEvent`/`deleteActivityEvent`. Test dedicati per Bug 1, Bug 2, e test esplorativo su `incarico_chiuso_ts` (§2.5/§6). | Da fare | — |
 
 ## 5. Fuori scope, per ora
 
-- Un vero indice per `findOpenVisitRow_` — già scartato in O3 per
-  fragilità sugli spostamenti riga di archiviazione/cestino (vedi
+- Un vero indice per `findOpenVisitRow_` — già scartato in O3 (vedi
   `DESIGN_performance.md`, §4/§5).
 - Qualunque cambiamento allo schema dati o al modello caso/visita.
-- P4: una vera timeline con un blocco per ogni singolo soggiorno
-  (invece dell'aggregato per colonna) — scartata per leggibilità con
-  rientri multipli, vedi §2.4. Riconsiderabile se l'aggregato si rivela
-  insufficiente in uso reale.
+- Il rallentamento percepito del drag-and-drop (§2.5) — nessuna causa
+  di codice trovata, richiede misura live su TEST, non un fix di
+  questo documento.
+- La visita storicamente pertinente per i campi gate su eventi vecchi
+  corretti (§2.5) — limitazione nota, deferita a L5.
 
 ## 6. Criteri di accettazione
 
-**P1/P2 — già verificati e chiusi** (commit `744b95f`/`89bf7ea`,
-166/166 test, push su TEST verificato): nessuna riga d'azione residua,
-elenco completo nel commit e in `PROGRAMMA_STATO.md`.
+**P1-P4 — già verificati e chiusi** (commit `744b95f`/`89bf7ea`/
+`c94a32c`, 167/167 test, push su TEST verificato, P4 anche nel Browser
+pane): nessuna riga d'azione residua, elenco completo nei commit e in
+`PROGRAMMA_STATO.md`.
 
-- [ ] `doPost` chiama `api(params.action, params)` invece di
-      `routeAction_(params)` direttamente (P3)
-- [ ] Le richieste POST dirette all'URL pubblicato ereditano
-      risoluzione d'ambiente e classificazione lettura/scrittura, stesso
-      comportamento di una chiamata `google.script.run` (P3)
-- [ ] Nessuna regressione sui test esistenti; nessun consumatore noto
-      di `doPost` da aggiornare (nessuno trovato) (P3)
-- [ ] Il calcolo del percorso usa solo eventi `type: 'move'` di
-      `state.activityLog` già caricato — nessuna nuova lettura Sheets,
-      nessuna nuova chiamata `callApi` introdotta (P4)
-- [ ] Copre l'intera storia del job (tutti i rientri), non solo la
-      visita aperta (P4)
-- [ ] Un segmento per colonna distinta, aggregato su tutte le
-      permanenze in quella colonna — mai più segmenti dei colori/
-      colonne esistenti (P4)
-- [ ] Il segmento della colonna attuale è marcato come "in corso" e la
-      sua durata riflette il tempo trascorso da `status_since_ts` (P4)
-- [ ] Colori dei segmenti coerenti con `state.columnMeta` (stessi
-      colori già usati sulla card in board) (P4)
-- [ ] Colonna eliminata nel frattempo: mostrata con l'id/etichetta di
-      fallback esistente (`columnLabelById_`), nessun errore (P4)
-- [ ] Il riquadro compare nel tab Informazioni, sopra l'anteprima
-      "ultimi eventi" esistente, che resta invariata (P4)
-- [ ] Legenda testuale con il tempo per colonna accanto ai segmenti,
-      non solo il colore (P4)
+- [ ] Nuova funzione (es. `recomputeCurrentStatus_(job, log)`) — imposta
+      `job.status`/`status_since_ts` dall'evento `move` cronologicamente
+      più recente del log ordinato; nessun effetto su `visite` (P5)
+- [ ] Chiamata in fondo a `addActivityEvent`, `updateActivityEvent` e
+      `deleteActivityEvent`, dopo ogni altra elaborazione (P5)
+- [ ] `applyManualMoveEffects_` non imposta più direttamente
+      `job.status`/`status_since_ts` — resta solo per gli effetti su
+      `visite`, invariati per il candidato specifico (P5)
+- [ ] `applyManualMoveEffects_` continua a essere chiamata solo per il
+      candidato in `addActivityEvent`/`updateActivityEvent`, **mai** in
+      `deleteActivityEvent` — nessun effetto collaterale su `visite`
+      reintrodotto dalla cancellazione (P5)
+- [ ] Test Bug 1: inserire un evento move con data passata su un job
+      che ha già eventi più recenti — `job.status` deve riflettere
+      l'evento più recente, non quello appena inserito (P5)
+- [ ] Test Bug 2: cancellare l'evento più recente — `job.status` deve
+      tornare a riflettere il nuovo evento più recente rimasto (P5)
+- [ ] Test esplorativo `incarico_chiuso_ts`: inserire un rientro vecchio
+      (backdated) su un job già richiuso da eventi successivi più
+      recenti — verificare se `incarico_chiuso_ts` viene erroneamente
+      azzerato; se sì, applicare lo stesso principio (derivato dal log
+      intero, non dal solo candidato); se no, documentare come
+      verificato-non-un-problema, non lasciarlo senza risposta (P5)
+- [ ] `moveJob` non modificata — nessuna regressione sul drag-and-drop
+      reale (P5)
+- [ ] Nessuna regressione sui test esistenti (167 attuali) (P5)
 
 ---
 
 **Nota sulla fonte esterna (§2.1)**: la caratteristica "ogni esecuzione
 Apps Script parte in un'isolate V8 nuova, senza memoria condivisa tra
 esecuzioni separate" è confermata da fonti indipendenti sul runtime V8
-di Apps Script, oltre che dalla lettura diretta del codice — non è
-un'assunzione. Riferimenti raccolti nella sessione di analisi
-(2026-08-26): documentazione ufficiale del runtime V8 di Apps Script,
-e articoli tecnici indipendenti sull'uso di `PropertiesService` per
-stato che deve sopravvivere tra esecuzioni separate (a contrasto con
-le variabili globali, che non lo fanno).
+di Apps Script, oltre che dalla lettura diretta del codice.
+Riferimenti raccolti nella sessione di analisi (2026-08-26):
+documentazione ufficiale del runtime V8 di Apps Script, e articoli
+tecnici indipendenti sull'uso di `PropertiesService` per stato che deve
+sopravvivere tra esecuzioni separate (a contrasto con le variabili
+globali, che non lo fanno).
