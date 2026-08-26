@@ -114,7 +114,30 @@
     boardPollTimer_ = null;
   }
 
+  // P6 (DESIGN_lock_ambiente.md, §2.6/§3): specchio client-side di
+  // SF_READ_ACTIONS_ (Kanban.gs) - non e' una fonte di verita' condivisa,
+  // va tenuto allineato a mano se SF_READ_ACTIONS_ cambia lato server.
+  var SF_READ_ACTIONS_CLIENT_ = {
+    getBoard: true,
+    getActivityLog: true,
+    getArchivio: true,
+    getCestino: true,
+    getMetrics: true
+  };
+
   function callApi(action, payload) {
+    // P6: tracciamento centralizzato di state.pendingWrites - prima
+    // affidato a incrementi/decrementi manuali sparsi nei singoli
+    // chiamanti (es. saveCardFromModal), che lasciavano scoperte tutte
+    // le altre azioni di scrittura (deleteJob, archiveJobFromModal,
+    // duplicaJob, ripristinaJob, ...): il poll periodico poteva
+    // sovrascrivere lo stato locale a meta' di una di quelle scritture.
+    // .finally() (non i due handler di google.script.run, che non
+    // coprono simmetricamente successo ed errore) copre entrambi i casi.
+    var isWrite = !SF_READ_ACTIONS_CLIENT_[action];
+    if (isWrite) {
+      state.pendingWrites++;
+    }
     return new Promise(function(resolve, reject) {
       google.script.run
         .withSuccessHandler(function(response) {
@@ -126,6 +149,10 @@
         })
         .withFailureHandler(reject)
         .api(action, Object.assign({}, payload || {}, { env: state.env }));
+    }).finally(function() {
+      if (isWrite) {
+        state.pendingWrites--;
+      }
     });
   }
 
@@ -906,7 +933,6 @@
     }
     var payload = modalPayload_();
     payload.title = title;
-    state.pendingWrites++;
     saveButton.disabled = true;
     saveButton.textContent = 'Salvataggio...';
     var editing = Boolean(state.activeJob);
@@ -938,7 +964,6 @@
       renderToolbarFilters();
       updateLastUpdated();
     }).catch(showError).finally(function() {
-      state.pendingWrites--;
       saveButton.disabled = false;
       saveButton.textContent = state.activeJob ? 'Salva e chiudi' : 'Crea e chiudi';
     });
@@ -1565,9 +1590,12 @@
   // restituiscono ora il job gia' aggiornato (stesso contratto di
   // risposta di moveJob, M0-A2/M0-B): aggiorna la card in stato locale,
   // senza un'altra chiamata al server. removeCardEl_ prima di
-  // placeCardInColumn_ perche' - a differenza del drag-and-drop reale -
-  // qui la card puo' essere cambiata di colonna senza che il DOM lo
-  // sappia ancora.
+  // placeCardInColumn_ perche' la card puo' essere cambiata di colonna
+  // senza che il DOM lo sappia ancora - stesso motivo per cui anche
+  // moveJob (drag-and-drop reale) fa lo stesso, dopo P6
+  // (DESIGN_lock_ambiente.md §2.6): placeCardInColumn_ da sola rimuove
+  // il nodo esistente solo dentro la colonna di ARRIVO, mai da quella
+  // di provenienza.
   function applyActivityJobUpdate_(job) {
     if (!job) { return; }
     var fromStatus = removeJobLocally(job.job_id);
@@ -1602,6 +1630,13 @@
     // colonne coinvolte (provenienza e arrivo), non l'intera board.
     var moveResult = moveJobLocally(jobId, status);
     if (moveResult) {
+      // P6 (DESIGN_lock_ambiente.md §2.6): placeCardInColumn_ rimuove il
+      // nodo esistente solo dentro la colonna di ARRIVO - un trascinamento
+      // rapido puo' lasciare il vecchio nodo orfano nella colonna di
+      // provenienza, visibile in entrambe finche' un renderBoard() completo
+      // non lo ripulisce. removeCardEl_ (board-wide) prima, stesso pattern
+      // gia' in uso in applyActivityJobUpdate_.
+      removeCardEl_(moveResult.job.job_id);
       placeCardInColumn_(moveResult.job);
       updateColumnCounters_(moveResult.fromStatus);
       updateColumnCounters_(status);

@@ -35,13 +35,49 @@
 > per una sola sotto-fase, stesso principio già applicato al punto G
 > dentro `DESIGN_performance.md`.
 >
-> **P5** (aggiunta 2026-08-26) è un bug reale segnalato da Marco durante
-> l'uso — "lo spostamento della card è a risposta molto ritardata... c'è
-> da rivedere l'aggiornamento dello stato attuale delle card" — che
-> l'analisi ha confermato essere due bug distinti nella derivazione di
-> `job.status` dalla Cronologia, non un problema di prestazioni (§2.5).
-> Stesso tema di P4 (`Kanban.gs`, gestione dell'activity log), diversa
-> natura (bug, non feature) — accorpato qui per lo stesso motivo di P3/P4.
+> **P5 è completata e collaudata** (2026-08-26, stesso branch, commit
+> `2c5bc49`/`2159cab`, 170/170 test, push su TEST verificato) — bug reale
+> segnalato da Marco durante l'uso, confermato essere due bug distinti
+> nella derivazione di `job.status`/`incarico_chiuso_ts` dalla
+> Cronologia (§2.5), non un problema di prestazioni. Stesso tema di P4
+> (`Kanban.gs`, gestione dell'activity log), diversa natura (bug, non
+> feature) — accorpato qui per lo stesso motivo di P3/P4.
+>
+> **P6** (aggiunta 2026-08-26) è un secondo bug, distinto da P5 e più
+> piccolo: Marco ha segnalato con uno screenshot una card visibile
+> contemporaneamente in due colonne della board (WIP e ATTESA CLIENTE)
+> per alcuni secondi dopo un trascinamento. Non è lo stesso meccanismo
+> di P5 (quello è lato server, sulla Cronologia; questo è lato client,
+> sul disegno della board) — accorpato qui per lo stesso motivo di
+> P3/P4/P5: stesso file (`client.html`), tema imparentato (percorso di
+> scrittura di una card), non abbastanza per aprire una lettera nuova.
+> Marco ha inoltre segnalato, sullo stesso screenshot, un problema più
+> profondo e distinto: la logica con cui `applyManualMoveEffects_`
+> sceglie *quale* visita aggiornare quando si corregge un evento storico
+> della Cronologia ("è forse frutto di una logica di gate/scrittura/
+> timestamp sbagliata?"). Marco ha deciso esplicitamente di tenere le
+> due cose separate: **P6** è solo il bug piccolo qui sotto; la revisione
+> di quella logica più profonda (derivazione delle `visite` e delle
+> metriche di tempo dalla Cronologia) diventa una fase a sé, **Q** — solo
+> il nome è riservato qui (§5), il documento di design per Q non è stato
+> ancora scritto.
+>
+> **P6, ambito allargato** (2026-08-26, stessa segnalazione): Marco ha
+> chiesto esplicitamente di non richiudere P6 lasciandoci dietro altri
+> bug o incongruenze della stessa famiglia — quindi, oltre alla causa
+> diretta dello screenshot (§2.6), sono stati riletti tutti i punti di
+> scrittura lato client (tutte le chiamate `callApi` in `client.html`,
+> non solo quelle toccate dal sintomo segnalato) per lo stesso tipo di
+> problema: un aggiornamento ottimistico del DOM senza pulizia del nodo
+> precedente. Trovato un solo altro punto reale (il tracciamento non
+> centralizzato di `pendingWrites`, già individuato prima di questo
+> allargamento, §2.6); tutti gli altri punti di scrittura (colonne,
+> opzioni, Archivio, Cestino) si sono confermati già sicuri per
+> costruzione — ridisegnano sempre per intero la loro porzione di DOM,
+> non fanno mai chirurgia incrementale come `moveJob`. Due punti minori,
+> non bug di dati ma comportamenti da documentare per non farli
+> ritrovare come sorpresa più avanti, sono descritti in §2.6 come
+> esplicitamente fuori scope di questo intervento.
 
 ---
 
@@ -61,8 +97,11 @@
   al backend, nessuna nuova chiamata `callApi`. *(P4, completata)*
 - **`applyManualMoveEffects_`, `addActivityEvent`, `updateActivityEvent`,
   `deleteActivityEvent`** (Kanban.gs) — dove `job.status`/
-  `status_since_ts` vengono oggi impostati in modo non affidabile.
-  *(P5, nuova)*
+  `status_since_ts`/`incarico_chiuso_ts` venivano impostati in modo non
+  affidabile. *(P5, completata)*
+- **`moveJob`, `callApi`** (client.html) — dove la card duplicata in due
+  colonne e la mancata protezione del poll periodico durante una
+  scrittura hanno origine. *(P6, nuova)*
 - **Non tocca** i 27+ punti che chiamano `getSpreadsheet_()`
   ambientalmente — continuano a chiamarla esattamente come prima,
   nessuna firma di funzione è cambiata in P1/P2.
@@ -71,9 +110,15 @@
 - **Non tocca** i lock indipendenti già esistenti su
   `moveJobToSheet_`/`eliminaJobDefinitivamente`/`svuotaCestino`
   (Kanban.gs) e sulle funzioni admin di migrazione.
-- **Non tocca**, in P5: `moveJob` (il drag-and-drop reale) — non ha lo
+- **Non tocca**, in P5: `moveJob` lato server (Kanban.gs) — non ha lo
   stesso bug, vedi §2.5. Non tocca lo schema dati né il modello
   caso/visita.
+- **Non tocca**, in P6: nessun file server-side, nessuno schema dati,
+  nessuna delle funzioni toccate da P5. La scelta di *quale* visita
+  aggiornare in `applyManualMoveEffects_`/`ensureOpenVisit_`/
+  `alignOpenVisitFields_` (il punto sollevato da Marco sullo stesso
+  screenshot) è esplicitamente fuori scope qui — è il contenuto
+  riservato per Q (§5).
 
 ## 2. Cosa è stato trovato
 
@@ -142,7 +187,7 @@ tutta la storia, colonna attuale marcata "in corso", colori coerenti
 con la board. Collaudato nel Browser pane su tre casi (percorso con
 rientro, caso base, nuova card).
 
-### 2.5 — P5 (nuova): `job.status` non riflette in modo affidabile l'evento più recente della Cronologia
+### 2.5 — P5 (completata): `job.status` non riflette in modo affidabile l'evento più recente della Cronologia
 
 Segnalazione di Marco: lo stato "attuale" della card deve sempre
 corrispondere all'ultima colonna registrata in Cronologia — automatica
@@ -151,74 +196,53 @@ solo per il resoconto di un'altra sessione): **due bug distinti**,
 entrambi riprodotti.
 
 **Bug 1 — `addActivityEvent`/`updateActivityEvent`**: `applyManualMoveEffects_`
-(chiamata da entrambe tramite `applyStructuralAlignment_`) fa
+(chiamata da entrambe tramite `applyStructuralAlignment_`) faceva
 incondizionatamente `job.status = candidate.to; job.status_since_ts =
 candidate.ts;` per qualunque evento move appena inserito o corretto —
-senza controllare se è davvero il più recente del log ordinato. Un
-evento con data passata (dimenticato, corretto mesi dopo) finisce nel
-posto giusto nella Cronologia, ma sovrascrive comunque lo stato
+senza controllare se fosse davvero il più recente del log ordinato. Un
+evento con data passata (dimenticato, corretto mesi dopo) finiva nel
+posto giusto nella Cronologia, ma sovrascriveva comunque lo stato
 attuale, anche in presenza di eventi successivi più recenti nel log.
 
-**Bug 2 — `deleteActivityEvent`**: la riga che dovrebbe riallineare lo
-stato dopo una cancellazione è `applyStructuralAlignment_(job,
+**Bug 2 — `deleteActivityEvent`**: la riga che doveva riallineare lo
+stato dopo una cancellazione era `applyStructuralAlignment_(job,
 checkStructuralAlignment_(job, lastMove))` — senza passare `candidate`/
-`log`. Dentro, `applyManualMoveEffects_(job, candidate, log)` riceve
-`candidate` `undefined` e ritorna subito (`if (!candidate ||
-candidate.type !== 'move') return;`) — `job.status` non viene mai
+`log`. Dentro, `applyManualMoveEffects_(job, candidate, log)` riceveva
+`candidate` `undefined` e ritornava subito (`if (!candidate ||
+candidate.type !== 'move') return;`) — `job.status` non veniva mai
 aggiornato. Cancellando l'evento che determinava la posizione attuale,
-la card resta bloccata lì invece di tornare alla colonna dell'evento
+la card restava bloccata lì invece di tornare alla colonna dell'evento
 rimasto più recente.
 
-**`moveJob` (drag-and-drop reale) non ha questo bug**: scrive
-`job.status` direttamente dalla mossa in corso, non passa da questo
-meccanismo — confermato leggendo il codice, nessuna azione richiesta lì.
-Sul rallentamento del drag-and-drop segnalato insieme a questo bug:
-nessuna causa di codice trovata (P1-P4 non hanno toccato `moveJob`,
-l'update lato client resta ottimistico, `ensureCurrentSchema_()` in
-testa a `moveJob` fa solo un controllo di property con ritorno
-immediato, comportamento preesistente non introdotto da P2) — da
-verificare con una misura live su TEST, fuori scope di questo
-documento (è un problema di prestazioni percepite, non un bug di
-codice individuato).
+**Fix**: separazione delle responsabilità in `applyManualMoveEffects_`
+— una nuova funzione pura, `recomputeCurrentStatus_(job, log)`, imposta
+`job.status`/`status_since_ts` dall'evento `move` cronologicamente più
+recente del log **intero** ordinato, nessun effetto su `visite`,
+chiamata in fondo a `addActivityEvent`/`updateActivityEvent`/
+`deleteActivityEvent`. `applyManualMoveEffects_` ha perso le due righe
+che impostavano `job.status`/`status_since_ts`, restando invariata per
+tutto il resto — stessa chiamata solo per il candidato specifico in
+add/update, mai in delete (punto critico: richiamare l'intera funzione,
+inclusi gli effetti su `visite`, anche in delete avrebbe reintrodotto
+esattamente il problema che il Bug 2 originale voleva evitare).
 
-**Fix proposto — separazione delle responsabilità**, confermata da
-Marco come la soluzione logicamente più pulita, da verificare con
-attenzione in fase di implementazione: `applyManualMoveEffects_` oggi
-fa due cose diverse nello stesso posto — imposta `job.status` per il
-candidato appena toccato, **e** applica gli effetti su `visite`
-(apertura/chiusura visita, accumulo attese) specifici di quel
-candidato. Queste due responsabilità vanno separate:
+**P5b — stesso schema su `incarico_chiuso_ts`**: il test esplorativo
+richiesto da Marco ha confermato che `applyManualMoveEffects_` azzerava
+`job.incarico_chiuso_ts` per qualunque candidato che rappresentasse un
+rientro, indipendentemente da quando fosse davvero accaduto rispetto a
+una chiusura più recente. Stesso principio di fix:
+`recomputeIncaricoChiusoTs_(job, log)`, funzione pura, riapre solo se
+esiste un vero rientro cronologicamente successivo alla chiusura
+registrata; chiamata in fondo a `addActivityEvent`/`updateActivityEvent`,
+non in `deleteActivityEvent` (il valore originale non è recuperabile
+dal solo log dopo un azzeramento). In corsa, un secondo bug distinto:
+confronto timestamp con `<=` invece di `<`, che scartava un rientro con
+timestamp identico alla chiusura — corretto.
 
-- Una nuova funzione pura, es. `recomputeCurrentStatus_(job, log)` —
-  imposta `job.status`/`status_since_ts` dall'evento `move`
-  cronologicamente più recente del log **intero** ordinato, nessun
-  effetto su `visite`. Chiamata in fondo a `addActivityEvent`,
-  `updateActivityEvent` **e** `deleteActivityEvent`, dopo qualunque
-  altra elaborazione — così lo stato è sempre corretto indipendentemente
-  da cosa ha causato la modifica.
-- `applyManualMoveEffects_` perde le due righe che impostano
-  `job.status`/`status_since_ts` (spostate nella funzione sopra), ma
-  resta **invariata** per tutto il resto — stessa chiamata solo per il
-  candidato specifico in add/update, **mai** in delete. Questo è il
-  punto critico da non sbagliare: se si richiamasse l'intera
-  `applyManualMoveEffects_` (inclusi gli effetti su `visite`)
-  sull'evento-più-recente-rimasto anche in `deleteActivityEvent`, si
-  reintrodurrebbe esattamente il problema che il commento originale del
-  Bug 2 spiega di voler evitare — spostamenti/visite duplicate su
-  cancellazioni non correlate, solo spostato su un altro evento invece
-  che eliminato.
-
-**Punto da verificare durante l'implementazione, non ancora confermato
-come bug**: `applyManualMoveEffects_` azzera anche `job.incarico_chiuso_ts`
-quando il candidato rappresenta un vero rientro — stesso schema di
-Bug 1 ("agisce sul candidato appena toccato"), applicato a un altro
-campo. Inserire un rientro vecchio e dimenticato su un caso già
-richiuso da eventi *più recenti* potrebbe riaprirlo per errore. Non
-riprodotto con uno script isolato come per Bug 1/2 (richiede anche di
-leggere il flusso di "Chiuso" in `updateJob`, non ancora fatto) — va
-scritto un test dedicato prima di decidere se serve un fix analogo o
-se il comportamento attuale è già corretto per altri motivi non ancora
-visti.
+**`moveJob` lato server (drag-and-drop reale) non aveva questo bug**:
+scrive `job.status` direttamente dalla mossa in corso, non passa da
+questo meccanismo — confermato leggendo il codice, nessuna azione
+richiesta lì.
 
 **Limitazione correlata, già nota e documentata nel codice, fuori
 scope di P5**: i campi gate della visita (`start_ts`/`prep_ts`/
@@ -227,24 +251,189 @@ sempre sulla visita **attualmente aperta**, non su quella storicamente
 pertinente a un evento vecchio corretto/aggiunto. Il commento nel
 codice lo dice esplicitamente: identificare la visita storicamente
 giusta "è compito della migrazione storica autorevole di L5" — scelta
-già presa, non riaperta qui.
+già presa, non riaperta qui. **Questo è lo stesso meccanismo che Marco
+ha rimesso sul tavolo con lo screenshot del 2026-08-26** (§2.6) — resta
+fuori scope, ma non più "per sempre": diventa il contenuto di Q (§5).
+
+### 2.6 — P6 (nuova): card visibile in due colonne dopo un trascinamento
+
+Segnalazione di Marco con screenshot: dopo aver trascinato una card da
+WIP ad ATTESA CLIENTE, la card resta visibile **in entrambe le colonne
+contemporaneamente** per alcuni secondi. Sullo stesso screenshot Marco
+ha anche rimesso sul tavolo, con forza, il problema della visita
+"live" scelta da `applyManualMoveEffects_`/`ensureOpenVisit_` — quel
+punto è distinto (lato server, sulle `visite`) e diventa Q; qui si
+tratta solo del disegno della board lato client, verificato leggendo
+il codice.
+
+**Causa confermata — nodo DOM orfano lasciato nella colonna di
+provenienza**. `moveJob(jobId, status)` (client.html) aggiorna
+`state.board` con `moveJobLocally` (corretto: rimuove il job da ogni
+colonna, lo aggiunge a quella di arrivo), poi chiama
+`placeCardInColumn_(moveResult.job)` per disegnare la card nella
+colonna di arrivo. Ma `placeCardInColumn_` cerca ed eventualmente
+rimuove un nodo esistente **solo dentro la colonna di arrivo**
+(`cardsRoot.querySelector(...)`, con `cardsRoot` preso dalla colonna
+di destinazione) — non tocca mai il nodo che si trova ancora, intatto,
+nella colonna di provenienza. `renderCard(job, column)` crea sempre un
+elemento DOM **nuovo** (`document.createElement('article')`), non
+sposta quello esistente: il risultato è che dopo ogni trascinamento
+esistono due nodi DOM per la stessa card — quello vecchio, orfano,
+nella colonna di provenienza, e quello nuovo in quella di arrivo — fino
+al prossimo `renderBoard()` completo (svuota-e-ricostruisce tutto il
+DOM), che è quello che li riconcilia e fa sparire il duplicato. La
+durata "di alcuni secondi" segnalata da Marco è quindi il tempo che
+passa prima del prossimo `renderBoard()` reale (un cambiamento vero
+rilevato dal poll periodico dei 45s, o un'altra azione dell'utente) —
+non è un problema di timing di per sé, è un nodo che non viene mai
+tolto finché qualcos'altro non ridisegna tutto da capo.
+
+Il codice ha già, altrove, il pattern corretto per questo esatto
+scenario — `applyActivityJobUpdate_` (usata per gli aggiornamenti da
+Cronologia) chiama `removeCardEl_(job.job_id)` **prima** di
+`placeCardInColumn_(job)`, con un commento che lo spiega: *"a differenza
+del drag-and-drop reale, qui la card può essere cambiata di colonna
+senza che il DOM lo sappia ancora"*. È l'assunzione opposta a quella
+corretta: il drag-and-drop reale (`moveJob`) crea un nodo nuovo
+esattamente come `applyActivityJobUpdate_` (stesso `renderCard`), quindi
+ha bisogno della stessa protezione — non ce l'ha, ed è la causa diretta
+del bug.
+
+**Causa correlata, meno certa come origine del sintomo visibile ma
+reale — poll periodico non protetto durante una scrittura**. La
+protezione esistente `state.pendingWrites` (che fa saltare
+`loadBoard(false)` durante una scrittura in corso, vedi guardia in
+testa a `loadBoard`) è incrementata/decrementata **a mano, un caso
+solo**: dentro `saveCardFromModal`, attorno a `updateJob`/`addJob`.
+Nessun altro punto di scrittura la tocca — non `moveJob`, non
+`deleteJob`, non `archiveJobFromModal` (che tra l'altro chiude il modal
+*prima* di chiamare l'API, perdendo anche la protezione indiretta della
+guardia "modal aperto"), non `duplicaJob`/`ripristinaJob`/
+`eliminaJobDefinitivamente`/`svuotaCestino` (Archivio/Cestino — stessa
+pagina, stesso `state`, stesso timer di poll: confermato leggendo
+`index.html`, le quattro viste sono sezioni nascoste della stessa SPA,
+non pagine separate), non `updateColumn`/`addColumn`/`moveColumn`/
+`updateOptionList`. In pratica il backend distingue esplicitamente
+letture da scritture (`SF_READ_ACTIONS_`, §2.2) ma lato client
+l'equivalente non esiste: `callApi` non sa se l'azione che sta
+eseguendo è una scrittura, quindi non può proteggere il poll da sé.
+Questo non crea da solo il nodo DOM duplicato (quello è indipendente
+dal timing, vedi sopra), ma **aggrava** la finestra in cui può
+succedere qualcosa di simile per le altre azioni di scrittura non
+protette, e in più fa sì che un poll che arriva a metà di una
+scrittura possa sovrascrivere silenziosamente `state.board`/`state.jobs`
+con un dato del server non ancora aggiornato (il confronto
+"`unchanged`" che decide se saltare il ridisegno confronta con
+l'ultimo stato **renderizzato**, mai aggiornato dagli update ottimistici
+mirati come `placeCardInColumn_` — quindi un poll che arriva ancora
+con il dato vecchio risulta "invariato" e salta il ridisegno, ma
+`state.board` viene comunque riassegnato per intero al dato vecchio,
+prima ancora di quel controllo).
+
+Una volta che il fix 2 centralizza `pendingWrites` per **ogni** azione
+di scrittura (non solo quella di `saveCardFromModal`), questo secondo
+problema si chiude come conseguenza diretta: `loadBoard(false)` non
+arriva mai più a leggere `getBoard()` mentre una scrittura è in corso,
+quindi la riassegnazione silenziosa di `state.board`/`state.jobs` a un
+dato vecchio non può più succedere nella finestra che il fix copre. Non
+serve un terzo intervento separato su `loadBoard` — è lo stesso motivo
+per cui i due fix, pur nascendo da osservazioni distinte, vanno fatti
+insieme in questa sotto-fase.
+
+**Censimento allargato (2026-08-26, su richiesta esplicita di Marco:
+"mettere quante più cose nello scope, non portiamoci a seguito ancora
+bug o incongruenze")** — riletti tutti i punti di scrittura di
+`client.html` (ogni chiamata `callApi` che non sia una delle cinque di
+sola lettura), cercando lo stesso schema del bug principale
+(aggiornamento incrementale del DOM senza rimuovere il nodo
+precedente):
+
+- **Colonne** (`saveColumnSettings`/`moveColumn`, tramite
+  `applyColumnsResponse_`) e **cambio ordinamento** (`toggleColumnSort`):
+  tutti chiamano `renderBoard()` per intero dopo la risposta del
+  server — nessun aggiornamento incrementale, nessun nodo orfano
+  possibile per costruzione. Verificato, nessuna azione necessaria.
+- **Archivio** (`duplicaJobFromArchivio`) e **Cestino**
+  (`ripristinaJobFromCestino`, `eliminaJobDefinitivamenteFromCestino`,
+  `svuotaCestino`): `renderArchivioList_`/`renderCestinoList_` fanno
+  `body.innerHTML = ''` e ricostruiscono l'intera tabella a ogni
+  chiamata — stesso motivo, nessun rischio di duplicazione. Verificato,
+  nessuna azione necessaria.
+- **Cronologia** (`submitActivityPayload_`/`confirmActivityDelete_`,
+  tramite `applyActivityJobUpdate_`): già il pattern corretto (§2.6,
+  sopra) — `removeCardEl_` prima di `placeCardInColumn_`. Verificato,
+  nessuna azione necessaria.
+
+Nessun altro punto con lo stesso bug di `moveJob`, quindi nessuna terza
+correzione di codice da aggiungere per questo motivo — ma il
+censimento ha fatto emergere due punti minori, entrambi **fuori scope
+volontariamente**, documentati qui apposta per non farli ritrovare come
+sorpresa in futuro:
+
+- **Residuo teorico su `pendingWrites`**: il fix 2 impedisce a un poll
+  di *partire* mentre una scrittura è in corso, ma non protegge dal
+  caso (raro) in cui un poll già partito prima dell'inizio di una
+  scrittura torni indietro *dopo* che la scrittura è già finita,
+  portando comunque un dato catturato a metà della scrittura sul
+  server. Richiederebbe un identificatore di versione/timestamp sulla
+  risposta di `getBoard()` per essere chiuso del tutto — cambio lato
+  server, fuori scope per una sotto-fase "client-only, senza rischi".
+  Probabilità bassissima (richiede che un poll di ~45s in corso e una
+  scrittura interamente si sovrappongano proprio in quell'ordine), non
+  reintroduce il sintomo segnalato da Marco (quello è risolto dal fix
+  1, indipendente dal timing), voluto qui come nota per Q o per un
+  intervento dedicato futuro, non come azione di P6.
+- **`duplicaJobFromArchivio` non aggiorna la board**: creare un nuovo
+  caso da un caso archiviato lo scrive correttamente sul server, ma
+  `state.board` (e quindi la vista Board, se già aperta) non lo
+  riflette finché non arriva il prossimo poll o un refresh esplicito —
+  non è un bug di dati (il caso esiste, è corretto, va solo aspettato
+  o cercato aprendo la tab Board), è una lacuna di UX distinta dal tema
+  di questa sotto-fase (qui si tratta di duplicazione visiva, non di
+  dati mancanti) — segnalata qui, non inclusa nel fix.
 
 ## 3. Approccio
 
-**P1-P4 sono chiuse** — nessuna azione residua, solo riferimento
-storico (§2.1-§2.4). Resta da fare P5:
+**P1-P5 sono chiuse** — nessuna azione residua, solo riferimento
+storico (§2.1-§2.5). Resta da fare P6:
 
-- **P5 — separazione delle responsabilità in `applyManualMoveEffects_`.**
-  Rischio contenuto ma non trascurabile: tocca una funzione usata da
-  tre percorsi di scrittura ad alta frequenza (`addActivityEvent`/
-  `updateActivityEvent`/`deleteActivityEvent`). Il rischio vero non è
-  "la separazione in sé" (Marco l'ha confermata come l'approccio più
-  pulito) ma **dove tracciare il confine** — vedi il punto critico in
-  §2.5: la nuova funzione di ricalcolo dello stato deve restare pura
-  (mai effetti su `visite`), altrimenti si rischia di scambiare un bug
-  con un altro. Da accompagnare con test dedicati per entrambi gli
-  scenari riprodotti (§6), non solo con i test di comportamento già
-  esistenti — più il test esplorativo su `incarico_chiuso_ts`.
+- **P6 — due correzioni indipendenti, entrambe piccole, solo
+  `client.html`.** Rischio molto contenuto: nessuna modifica al
+  backend, nessuna modifica allo schema dati, nessuna delle funzioni
+  toccate da P1-P5.
+  1. In `moveJob`: aggiungere `removeCardEl_(moveResult.job.job_id)`
+     prima di `placeCardInColumn_(moveResult.job)` — stesso pattern già
+     usato in `applyActivityJobUpdate_` (§2.6). Corregge il sintomo
+     segnalato da Marco in modo diretto e deterministico, non legato al
+     timing del poll.
+  2. In `callApi`: tracciare `state.pendingWrites` in un unico punto
+     centrale, invece che a mano in ogni chiamante — un elenco
+     client-side delle sole azioni di lettura (specchio di
+     `SF_READ_ACTIONS_`, Kanban.gs) decide se l'azione è una scrittura;
+     se lo è, `pendingWrites` viene incrementato prima della chiamata e
+     decrementato al termine (successo o errore), qualunque sia
+     l'azione. L'incremento/decremento oggi presente in
+     `saveCardFromModal` diventa ridondante e va tolto, per non avere
+     due meccanismi paralleli che fanno la stessa cosa in punti diversi
+     — è esattamente il tipo di manutenzione-a-mano-sparsa che ha
+     causato il problema (un solo chiamante se n'era ricordato).
+  Le due correzioni sono indipendenti (si possono collaudare e, se
+  necessario, fare accettare separatamente) ma stanno bene nella stessa
+  sotto-fase: stesso file, stessa area, stesso "bug piccolo" per
+  decisione di Marco.
+- **Perché non c'è una terza correzione**, nonostante l'ambito
+  allargato richiesto da Marco: il censimento di tutti gli altri punti
+  di scrittura (§2.6) ha confermato che sono già sicuri per costruzione
+  (ridisegno completo della loro porzione di DOM, mai chirurgia
+  incrementale) — aggiungere protezioni dove il rischio non esiste
+  avrebbe solo aumentato la superficie toccata senza chiudere altri
+  bug reali. I due punti minori trovati e non inclusi nel fix (il
+  residuo teorico su `pendingWrites` e la board non aggiornata dopo
+  "Usa come nuovo caso") sono documentati sopra apposta per non
+  scomparire — non "portati a seguito" in silenzio, ma tenuti fuori
+  scope con motivazione esplicita, com'è la richiesta di Marco intesa
+  correttamente: non "risolvi tutto", ma "non lasciare cose trovate e
+  non dette".
 
 ## 4. Piano di esecuzione — sotto-fasi atomiche
 
@@ -254,7 +443,8 @@ storico (§2.1-§2.4). Resta da fare P5:
 | **P2** | `SF_READ_ACTIONS_`: lock globale solo sulle azioni di scrittura. | ✅ Completata (commit `89bf7ea`, gate confermato) | — |
 | **P3** | `doPost` delega ad `api(params.action, params)`. | ✅ Completata (commit `c94a32c`) | — |
 | **P4** | Barra segmentata del percorso card, tab Informazioni. | ✅ Completata (commit `c94a32c`) | — |
-| **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts` (nuova funzione pura, dal log intero) dagli effetti su `visite` (restano legati al candidato specifico, mai in delete). Chiamata di ricalcolo in fondo a `addActivityEvent`/`updateActivityEvent`/`deleteActivityEvent`. Test dedicati per Bug 1, Bug 2, e test esplorativo su `incarico_chiuso_ts` (§2.5/§6). | ✅ Completata (Bug 1/Bug 2 + P5b `incarico_chiuso_ts`, sessione 2026-08-26) | — |
+| **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts`/`incarico_chiuso_ts` (funzioni pure, dal log intero) dagli effetti su `visite`. | ✅ Completata (Bug 1/Bug 2 + P5b, commit `2c5bc49`/`2159cab`) | — |
+| **P6** | `moveJob`: `removeCardEl_` prima di `placeCardInColumn_` (nodo DOM orfano). `callApi`: tracciamento centralizzato di `pendingWrites` per ogni azione di scrittura, specchio client-side di `SF_READ_ACTIONS_`. Censimento allargato di tutti i punti di scrittura di `client.html` (§2.6): nessun altro bug dello stesso tipo, due punti minori documentati e lasciati fuori scope. | Da fare | — |
 
 ## 5. Fuori scope, per ora
 
@@ -264,58 +454,62 @@ storico (§2.1-§2.4). Resta da fare P5:
 - Il rallentamento percepito del drag-and-drop (§2.5) — nessuna causa
   di codice trovata, richiede misura live su TEST, non un fix di
   questo documento.
-- La visita storicamente pertinente per i campi gate su eventi vecchi
-  corretti (§2.5) — limitazione nota, deferita a L5.
+- **La visita storicamente pertinente scelta da
+  `applyManualMoveEffects_`/`ensureOpenVisit_`/`alignOpenVisitFields_`
+  per un evento vecchio corretto/aggiunto** (§2.5, rimessa sul tavolo
+  da Marco in §2.6) — limitazione nota, non più deferita "a L5" in modo
+  indefinito: **riservato qui il nome Fase Q** per la revisione
+  organica di questa logica (derivazione delle `visite` e delle
+  metriche di tempo — lavorazione/attesa/rientri — dalla Cronologia,
+  col principio esplicito di Marco che la storia della card prevale
+  sempre sul calcolo delle metriche). Solo il nome è riservato: nessun
+  documento di design per Q esiste ancora, nessuna analisi qui sotto è
+  da intendersi come tale.
 
 ## 6. Criteri di accettazione
 
-**P1-P4 — già verificati e chiusi** (commit `744b95f`/`89bf7ea`/
-`c94a32c`, 167/167 test, push su TEST verificato, P4 anche nel Browser
-pane): nessuna riga d'azione residua, elenco completo nei commit e in
-`PROGRAMMA_STATO.md`.
+**P1-P5 — già verificati e chiusi** (commit `744b95f`/`89bf7ea`/
+`c94a32c`/`2c5bc49`/`2159cab`, 170/170 test, push su TEST verificato, P4
+anche nel Browser pane): nessuna riga d'azione residua, elenco completo
+nei commit e in `PROGRAMMA_STATO.md`.
 
-**P5 — tutti verificati TRUE** (170/170 test, push su TEST verificato):
+**P6 — da verificare** (nessuna riga spuntata finché non collaudato):
 
-- [x] Nuova funzione (`recomputeCurrentStatus_(job, log)`) — imposta
-      `job.status`/`status_since_ts` dall'evento `move` cronologicamente
-      più recente del log ordinato; nessun effetto su `visite` (P5)
-- [x] Chiamata in fondo a `addActivityEvent`, `updateActivityEvent` e
-      `deleteActivityEvent`, dopo ogni altra elaborazione (P5)
-- [x] `applyManualMoveEffects_` non imposta più direttamente
-      `job.status`/`status_since_ts` — resta solo per gli effetti su
-      `visite`, invariati per il candidato specifico (P5)
-- [x] `applyManualMoveEffects_` continua a essere chiamata solo per il
-      candidato in `addActivityEvent`/`updateActivityEvent`, **mai** in
-      `deleteActivityEvent` — nessun effetto collaterale su `visite`
-      reintrodotto dalla cancellazione (P5)
-- [x] Test Bug 1: inserire un evento move con data passata su un job
-      che ha già eventi più recenti — `job.status` deve riflettere
-      l'evento più recente, non quello appena inserito (P5) —
-      `testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus`
-- [x] Test Bug 2: cancellare l'evento più recente — `job.status` deve
-      tornare a riflettere il nuovo evento più recente rimasto (P5) —
-      `testDeleteActivityEventRevertsStatusToNewMostRecentMove`
-- [x] Test esplorativo `incarico_chiuso_ts`: inserire un rientro vecchio
-      (backdated) su un job già richiuso da eventi successivi più
-      recenti — **verificato: SÌ, si riproduce lo stesso schema di
-      Bug 1** (`incarico_chiuso_ts` azzerato per errore); segnalato a
-      Marco, che ha confermato di volerlo corretto (P5b) — nuova
-      funzione pura `recomputeIncaricoChiusoTs_(job, log)`, stesso
-      principio di `recomputeCurrentStatus_`: riapre solo se esiste un
-      vero rientro cronologicamente successivo alla chiusura registrata.
-      Chiamata in fondo a `addActivityEvent`/`updateActivityEvent`, **non**
-      in `deleteActivityEvent` (deliberato — il valore originale non è
-      recuperabile dal solo log dopo un azzeramento). Test aggiornato
-      (`testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob`)
-      più il test simmetrico del caso legittimo
-      (`testAddActivityEventRecentReentryAfterClosureStillReopensJob`,
-      che ha trovato un secondo bug — un confronto di timestamp troppo
-      stretto che scartava un rientro con ts identico alla chiusura,
-      corretto usando `<` invece di `<=`) (P5)
-- [x] `moveJob` non modificata — nessuna regressione sul drag-and-drop
-      reale (P5) — verificato con `git diff`, zero righe toccate
-- [x] Nessuna regressione sui test esistenti (170/170, 167 preesistenti
-      + 3 nuovi) (P5)
+- [ ] `moveJob`: `removeCardEl_(moveResult.job.job_id)` chiamata prima
+      di `placeCardInColumn_(moveResult.job)`, stesso posto dove oggi
+      c'è solo quest'ultima
+- [ ] Test manuale nel Browser pane: trascinare ripetutamente una card
+      tra due colonne (avanti e indietro, più volte di seguito, anche
+      rapidamente) — in nessun momento la card deve essere visibile in
+      più di una colonna; nessun nodo DOM orfano dopo N trascinamenti
+      (verificabile con `document.querySelectorAll('[data-job-id="..."]')`
+      dalla console: deve restituire sempre e solo 1 elemento)
+- [ ] `callApi`: nuovo elenco client-side delle azioni di sola lettura
+      (stessi cinque nomi di `SF_READ_ACTIONS_` — `getBoard`,
+      `getActivityLog`, `getArchivio`, `getCestino`, `getMetrics`);
+      `state.pendingWrites` incrementato prima della chiamata e
+      decrementato al termine (sia successo che errore, via
+      `.finally`) per ogni azione **non** in quell'elenco
+- [ ] L'incremento/decremento manuale di `pendingWrites` in
+      `saveCardFromModal` è stato tolto (ridondante col punto sopra)
+- [ ] Verificato che nessuna azione di sola lettura incrementi
+      `pendingWrites` per errore (bloccherebbe il poll anche quando non
+      serve)
+- [ ] Nessuna regressione sui test esistenti dell'harness Node
+      (170/170 più eventuali nuovi test aggiunti per P6)
+- [ ] Collaudo su TEST: push verificato, comportamento osservato nel
+      Browser pane, non solo lettura del diff
+- [ ] Collaudo manuale su TEST delle azioni ora protette dal fix 2 che
+      prima non lo erano — almeno una per famiglia: `deleteJob`,
+      `archiveJobFromModal`, un'azione da Archivio (`duplicaJob`) e una
+      da Cestino (`ripristinaJob` o `eliminaJobDefinitivamente`) — nessun
+      comportamento diverso da prima, solo il poll che ora aspetta
+      correttamente
+- [ ] Confermato (lettura del diff, non solo dei test) che nessuna delle
+      correzioni tocca `saveColumnSettings`/`moveColumn`/
+      `renderArchivioList_`/`renderCestinoList_`/
+      `applyActivityJobUpdate_` — il censimento di §2.6 li ha confermati
+      già sicuri, non serve modificarli
 
 ---
 

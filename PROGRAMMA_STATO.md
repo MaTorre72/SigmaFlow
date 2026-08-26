@@ -1,6 +1,98 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase P (ambiente e lock globale) — P6 DONE, solo client-side (2026-08-26, sessione 4)
+
+Proseguimento sullo stesso branch (`fix/fase-p-lock-ambiente-2026-08-26`,
+verificato allineato all'ultimo commit `2159cab` prima di iniziare —
+`git pull` senza nulla da scaricare). Bug segnalato da Marco con uno
+screenshot: card visibile contemporaneamente in due colonne (WIP e
+ATTESA CLIENTE) per alcuni secondi dopo un trascinamento. Documento
+già aggiornato con P6 (§2.6/§3/§4/§6) prima di questa sessione — solo
+implementazione, nessuna scrittura al documento in questa fase (lettura
+e implementazione secondo un prompt operativo dettagliato).
+
+**Causa reale (`moveJob`, client.html)**: `placeCardInColumn_` rimuove
+il nodo esistente della card solo **dentro la colonna di arrivo**
+(`cardsRoot.querySelector(...)`, `cardsRoot` è già scoping sulla
+colonna target) — mai da quella di provenienza. Un trascinamento reale
+lasciava quindi il vecchio nodo orfano nella colonna di provenienza,
+visibile insieme al nuovo finché un `renderBoard()` completo (poll a
+45s o refresh) non lo ripuliva. Stesso bug già risolto altrove
+(`applyActivityJobUpdate_`, fix precedente) con `removeCardEl_`
+(rimozione board-wide) prima di `placeCardInColumn_` — pattern non
+applicato al drag-and-drop reale per un'assunzione sbagliata nel
+commento originale ("a differenza del drag-and-drop reale"), ora
+corretta.
+
+**Fix 1 — `moveJob`**: `removeCardEl_(moveResult.job.job_id)` aggiunta
+subito prima di `placeCardInColumn_(moveResult.job)` nell'update
+ottimistico. Commento fuorviante in `applyActivityJobUpdate_` corretto
+di conseguenza.
+
+**Fix 2 — `callApi`/`pendingWrites`**: il conteggio delle scritture in
+corso (usato da `loadBoard` per non sovrascrivere lo stato locale con
+un poll a metà di una scrittura) era affidato a incrementi/decrementi
+manuali sparsi nei singoli chiamanti — solo `saveCardFromModal` lo
+faceva, lasciando **tutte le altre azioni di scrittura** (`deleteJob`,
+`archiveJobFromModal`, `duplicaJob`, `ripristinaJob`,
+`eliminaJobDefinitivamente`, `updateOptionList`, ...) senza protezione
+dal poll periodico. Centralizzato in `callApi`: nuova mappa
+`SF_READ_ACTIONS_CLIENT_` (specchio client-side di `SF_READ_ACTIONS_`,
+Kanban.gs — annotato esplicitamente come da tenere allineato a mano se
+cambia lato server), incremento prima della chiamata per ogni azione
+non in quella mappa, decremento via `.finally()` sulla Promise
+(copertura simmetrica successo/errore). Rimosso l'incremento/decremento
+manuale ridondante in `saveCardFromModal`.
+
+**Censimento allargato** (richiesto esplicitamente da Marco, non solo
+la causa diretta dello screenshot): riletti tutti i punti di scrittura
+client-side (`client.html`) per lo stesso tipo di problema (aggiornamento
+ottimistico del DOM senza pulizia del nodo precedente). Trovato solo il
+punto sopra (`pendingWrites`); tutti gli altri (colonne, opzioni,
+Archivio, Cestino) confermati già sicuri per costruzione — ridisegnano
+sempre per intero la loro porzione di DOM. Due punti minori, non bug di
+dati, documentati come esplicitamente fuori scope (§2.6 del documento):
+un residuo teorico su `pendingWrites` (poll partito prima di una
+scrittura molto veloce, richiederebbe un identificatore di versione
+lato server) e `duplicaJobFromArchivio` che non aggiorna subito
+`state.board` (lacuna di UX — il caso nuovo compare solo al prossimo
+poll/refresh, non un bug di dati). Nessuno dei due offriva un modo
+economico e a basso rischio di chiuderlo in questa sessione — non
+proposto, lasciato come documentato.
+
+**Collaudato nel Browser pane** (server locale di riproduzione,
+rimosso a fine sessione):
+- Sei trascinamenti rapidi avanti e indietro tra WIP e ATTESA CLIENTE
+  (chiamate sincrone consecutive a `moveJob`, senza attendere la
+  risposta server tra l'una e l'altra, per simulare un drag reale
+  veloce): `document.querySelectorAll('[data-job-id="..."]').length`
+  sempre `1`, mai `2`, sia durante sia dopo tutte le risposte server.
+- `getActivityLog` (lettura): `state.pendingWrites` invariato (0)
+  prima, durante e dopo la chiamata.
+- `moveJob` (scrittura): `state.pendingWrites` correttamente `1`
+  durante la chiamata, tornato a `0` dopo.
+- Le quattro famiglie di azioni prima non protette, una per una:
+  `deleteJob`, `archiveJobFromModal`, `duplicaJob` (Archivio),
+  `ripristinaJob` (Cestino) — tutte e quattro `pendingWrites` a `1`
+  durante, `0` dopo, nessun errore in console, stesso comportamento
+  funzionale di prima (card spostata/duplicata/ripristinata
+  correttamente).
+
+**171/171 test nell'harness Node** (nessuna regressione — P6 è
+puramente client-side, non coperto dall'harness Node per costruzione).
+Push su TEST verificato: 16/16 file identici.
+
+**Programma Fase P — P1-P6 tutte DONE.** Nessuna PR aperta per questa
+sotto-fase (richiesta esplicita di Marco — resta sullo stesso branch
+`fix/fase-p-lock-ambiente-2026-08-26`, PR [#12](https://github.com/MaTorre72/SigmaFlow/pull/12)
+da aggiornare quando deciso). Fase **Q** riservata (nome soltanto, §5
+del documento) per la revisione più profonda della logica di
+`ensureOpenVisit_`/`alignOpenVisitFields_` — segnalata da Marco sullo
+stesso screenshot, esplicitamente fuori scope qui.
+
+---
+
 ## Fase P (ambiente e lock globale) — P5b: fix anche su incarico_chiuso_ts, su richiesta di Marco (2026-08-26, sessione 3 continua)
 
 Marco ha confermato di voler applicare anche il fix sul punto
