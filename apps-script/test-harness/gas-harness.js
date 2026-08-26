@@ -283,9 +283,16 @@ function createHarness() {
     }
   };
 
+  // P2 (DESIGN_lock_ambiente.md): il mock e' un no-op per definizione
+  // (Node e' single-thread, non c'e' vera concorrenza da mediare), ma
+  // conta le acquisizioni per permettere ai test di verificare
+  // direttamente QUALI azioni prendono il lock globale — il vero
+  // meccanismo introdotto da P2, non simulabile con una gara di
+  // concorrenza reale in questo harness.
+  const sfLockState = { waitCalls: 0 };
   const LockService = {
     getScriptLock() {
-      return { waitLock() {}, releaseLock() {} };
+      return { waitLock() { sfLockState.waitCalls++; }, releaseLock() {} };
     }
   };
 
@@ -316,7 +323,8 @@ function createHarness() {
   const context = {
     console,
     SpreadsheetApp, PropertiesService, LockService, Utilities, ContentService, HtmlService, Logger, DriveApp,
-    Math, Date, JSON, Object, Array, String, Number, Boolean, isNaN, parseInt, parseFloat
+    Math, Date, JSON, Object, Array, String, Number, Boolean, isNaN, parseInt, parseFloat,
+    __sfLockState: sfLockState
   };
   vm.createContext(context);
 

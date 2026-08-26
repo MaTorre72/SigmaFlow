@@ -1,6 +1,102 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase P (ambiente e lock globale) — P1 e P2 DONE, programma completo (2026-08-26)
+
+**P2 — lock globale solo sulle azioni di scrittura**, dopo il gate 🔴 del
+documento: elenco delle 24 azioni di `routeAction_` classificate
+lettura/scrittura mostrato a Marco in chat, confermato ("sì, procedi")
+prima di scrivere codice.
+
+**Trovato durante la verifica del gate** (non ancora nel documento): la
+classificazione "5 letture" da sola non bastava — `getBoard()` chiama
+`ensureCurrentSchema_()` in testa, che nella rara finestra post-deploy in
+cui `PROP_SCHEMA_VERSION` non e' ancora allineata chiama `setupSigmaFlow()`,
+una SCRITTURA reale (crea fogli, backfilla colonne). Senza gestirlo,
+togliere il lock a `getBoard()` avrebbe permesso a piu' `getBoard()`
+concorrenti di scrivere lo schema in parallelo in quella finestra —
+esattamente il tipo di rischio che P2 dovrebbe eliminare. Presentato a
+Marco con tre opzioni, scelta la piu' conservativa in termini di
+prestazioni normali: **lock dedicato, ristretto al solo tratto che puo'
+scrivere** (`ensureCurrentSchema_(acquireOwnLock)` — `true` solo da
+`getBoard()`, che gira senza il lock globale; `moveJob()` continua a
+chiamarla senza `acquireOwnLock`, dato che gira gia' dentro il lock
+globale come scrittura — evita di dover assumere che `LockService` di
+Apps Script sia rientrante nella stessa esecuzione, mai verificato).
+
+**Implementato**:
+- `withEnvironment_(env, callback, requiresLock)` (Utils.gs): terzo
+  parametro opzionale, default `true` — nessun chiamante esistente
+  cambia comportamento senza passarlo esplicitamente (es.
+  `eseguiArchiviazioneAutomaticaGiornaliera` continua a prendere il lock
+  come prima).
+- `SF_READ_ACTIONS_` (Kanban.gs) — mappa esplicita delle 5 azioni di
+  lettura (`getBoard`, `getActivityLog`, `getArchivio`, `getCestino`,
+  `getMetrics`). `api()` calcola `requiresLock = !SF_READ_ACTIONS_[action]`
+  e lo passa a `withEnvironment_`.
+- `ensureCurrentSchema_(acquireOwnLock)` (Schema.gs): doppio controllo
+  della versione schema (prima e dopo aver preso l'eventuale lock
+  proprio) per evitare una seconda chiamata ridondante a
+  `setupSigmaFlow()` se un'altra esecuzione concorrente ha gia'
+  allineato lo schema nel frattempo.
+- `doPost` (§2.3 del documento, fuori scope) — non toccato, come da
+  documento.
+
+**Bug trovato e corretto nella stessa sessione, non di P2**: i due test
+aggiunti in P1 (`testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty`
+e, a scoppio ritardato, gli altri) non erano registrati nell'array
+`tests` dentro `runAllTests()` (Tests.gs) — la suite li ignorava
+silenziosamente, il conteggio "163/163" riportato per P1 era quindi
+**falso positivo** (163 era gia' il totale prima, il nuovo test non
+girava affatto). Scoperto scrivendo i test di P2 (il conteggio non
+saliva a 166 come atteso). **Corretto**: tutti e tre i test aggiunti in
+P1 registrati nell'array. Nessun problema nel codice di P1 stesso — solo
+nella registrazione del test, ora corretta. **Lezione per sessioni
+future**: dopo aver aggiunto un test a `Tests.gs`, verificare che il
+conteggio totale sia effettivamente salito (non solo che l'output dica
+"N/N passati" — un totale invariato con un test in piu' scritto e' il
+segnale dello stesso bug).
+
+**Test aggiunti** (`Tests.gs`), registrati e verificati:
+`testApiTakesLockOnlyForWriteActions` — chiama `api()` (il vero entry
+point di produzione) per le 5 letture e per `moveJob`/`addActivityEvent`
+(le due scritture piu' usate senza lock proprio), contando le
+acquisizioni del lock tramite un contatore aggiunto al mock
+`LockService` dell'harness (`__sfLockState.waitCalls`, gas-harness.js) —
+verifica DIRETTAMENTE il meccanismo introdotto da P2 (quali azioni
+prendono il lock), non simulabile con una vera gara di concorrenza in
+un harness Node sincrono a singolo thread.
+`testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange` — due
+scritture consecutive sullo stesso job (moveJob poi addActivityEvent)
+via `api()`, verifica che nessuna delle due perda l'effetto dell'altra
+(limite onesto documentato nel test: verifica la correttezza del
+percorso di scrittura in sequenza, non una vera sovrapposizione —
+quella resta garantita dal lock, verificato dal test precedente).
+
+**166/166 test nell'harness Node** (163 preesistenti + 3 nuovi — 2 di
+P2 piu' 1 di P1 rimasto orfano, ora tutti registrati). Push su TEST
+verificato: 16/16 file identici.
+
+**Criteri di accettazione P2 (§6 del documento) — tutti verificati
+TRUE**: `moveJob`/`addActivityEvent`/`updateActivityEvent`/
+`deleteActivityEvent` restano sotto lock globale (verificato
+esplicitamente per i primi due, gli altri due condividono lo stesso
+percorso `api()`/`SF_READ_ACTIONS_` non modificato per loro);
+`getBoard`/`getActivityLog`/`getArchivio`/`getCestino`/`getMetrics` non
+prendono piu' il lock globale; nuovo test di concorrenza aggiunto; nessun
+cambio di risultato osservabile su nessun test esistente (166/166,
+nessuna regressione sui 163 preesistenti).
+
+**Programma Fase P — completo.** P1 e P2 entrambi DONE, nessuna
+sotto-fase residua in `docs/DESIGN_lock_ambiente.md` §4. `doPost` (§2.3,
+§5) resta fuori scope come da documento — segnalazione tracciata, non
+un'azione richiesta.
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) aggiornata
+con il commit di P2 sullo stesso branch `fix/fase-p-lock-ambiente-2026-08-26`.
+
+---
+
 ## Fase P (ambiente e lock globale) — P1 DONE, in pausa al gate di P2 (2026-08-26)
 
 Sessione autonoma (runbook `docs/RUNBOOK_esecuzione_autonoma.md`), su

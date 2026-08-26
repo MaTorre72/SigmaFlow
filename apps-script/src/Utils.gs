@@ -67,9 +67,21 @@ function normalizeEnv_(env) {
   return env === 'test' ? 'test' : 'prod';
 }
 
-function withEnvironment_(env, callback) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+// P2 (DESIGN_lock_ambiente.md, §2.2/§4): il lock globale protegge la
+// concorrenza sulle SCRITTURE (jobs/visite/config) — le azioni di sola
+// lettura (getBoard/getActivityLog/getArchivio/getCestino/getMetrics,
+// vedi SF_READ_ACTIONS_ in Kanban.gs) non hanno bisogno di mettersi in
+// coda dietro le altre richieste in corso su tutto lo script. requiresLock
+// e' un terzo parametro OPZIONALE (default true — nessun chiamante
+// esistente cambia comportamento senza passarlo esplicitamente): solo
+// api() lo valorizza a false per le azioni di lettura classificate.
+function withEnvironment_(env, callback, requiresLock) {
+  var needsLock = requiresLock !== false;
+  var lock = null;
+  if (needsLock) {
+    lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+  }
   var previousId = __sfRoutedSpreadsheetId_;
   var ss = getSpreadsheetForEnv_(normalizeEnv_(env));
 
@@ -78,7 +90,9 @@ function withEnvironment_(env, callback) {
     return callback(ss);
   } finally {
     __sfRoutedSpreadsheetId_ = previousId;
-    lock.releaseLock();
+    if (lock) {
+      lock.releaseLock();
+    }
   }
 }
 

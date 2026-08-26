@@ -284,6 +284,9 @@ function runAllTests() {
     testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty,
     testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty,
     testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent,
+    testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty,
+    testApiTakesLockOnlyForWriteActions,
+    testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
     testGetArchivioReturnsEmptyWhenSheetsMissing,
@@ -1728,6 +1731,84 @@ function testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent() {
       props.deleteProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
     }
   }
+}
+
+// P2 (DESIGN_lock_ambiente.md §2.2/§4, gate confermato da Marco
+// 2026-08-26): il lock globale deve proteggere SOLO le azioni di
+// scrittura di routeAction_, non piu' anche le letture. Verificato
+// chiamando api() (il vero entry point di produzione, non le funzioni
+// di business logic direttamente) e contando le acquisizioni del lock
+// tramite __sfLockState.waitCalls (gas-harness.js) — il mock e' un
+// no-op (Node e' single-thread, nessuna vera concorrenza da mediare),
+// ma questo verifica esattamente il meccanismo introdotto da P2: QUALI
+// azioni prendono il lock, non una gara di concorrenza reale
+// (irriproducibile in un harness sincrono — vedi il test successivo per
+// cosa resta comunque verificabile).
+function testApiTakesLockOnlyForWriteActions() {
+  var created;
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    created = addJob({ title: 'P2 lock lettura/scrittura', size_class: 'S' }).data;
+  });
+
+  var reads = ['getBoard', 'getActivityLog', 'getArchivio', 'getCestino', 'getMetrics'];
+  reads.forEach(function(action) {
+    var payload = { env: 'test' };
+    if (action === 'getActivityLog') { payload.job_id = created.job_id; }
+    var before = __sfLockState.waitCalls;
+    var response = api(action, payload);
+    assertTrue_(response.success, action + ' via api() deve avere successo: ' + JSON.stringify(response));
+    assertEquals_(before, __sfLockState.waitCalls, action + ' (lettura) non deve prendere il lock globale');
+  });
+
+  // moveJob/addActivityEvent: le due scritture piu' usate che NON hanno
+  // un lock proprio (§2.2 del documento) — dipendono al 100% dal lock
+  // globale di withEnvironment_ per la sicurezza in concorrenza.
+  var beforeMove = __sfLockState.waitCalls;
+  var moveResponse = api('moveJob', { env: 'test', job_id: created.job_id, status: 'wip' });
+  assertTrue_(moveResponse.success, 'moveJob via api() deve avere successo: ' + JSON.stringify(moveResponse));
+  assertEquals_(beforeMove + 1, __sfLockState.waitCalls, 'moveJob (scrittura) deve prendere il lock globale esattamente una volta');
+
+  var beforeNote = __sfLockState.waitCalls;
+  var noteResponse = api('addActivityEvent', { env: 'test', job_id: created.job_id, type: 'note', ts: nowIso_(), note: 'nota P2' });
+  assertTrue_(noteResponse.success, 'addActivityEvent via api() deve avere successo: ' + JSON.stringify(noteResponse));
+  assertEquals_(beforeNote + 1, __sfLockState.waitCalls, 'addActivityEvent (scrittura) deve prendere il lock globale esattamente una volta');
+}
+
+// P2, criterio §6: "due scritture simulate sullo stesso job in rapida
+// sequenza non perdono nessuna delle due modifiche". Limite onesto
+// dell'harness Node: e' sincrono a singolo thread, quindi due chiamate
+// non possono davvero SOVRAPPORSI — cio' che resta verificabile qui e'
+// che il percorso di scrittura (letto-modifica-scrivo su jobs, via
+// writeJobToRow_ con originalJob/diff — O1, DESIGN_performance.md)
+// applica correttamente due scritture consecutive sullo stesso job
+// senza che la seconda perda l'effetto della prima. La garanzia contro
+// una vera sovrapposizione in produzione resta il lock globale,
+// verificato sopra (testApiTakesLockOnlyForWriteActions).
+function testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange() {
+  var created;
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    created = addJob({ title: 'P2 scritture rapide', size_class: 'S' }).data;
+  });
+
+  var moveResponse = api('moveJob', { env: 'test', job_id: created.job_id, status: 'wip' });
+  var noteResponse = api('addActivityEvent', { env: 'test', job_id: created.job_id, type: 'note', ts: nowIso_(), note: 'nota subito dopo la mossa' });
+  assertTrue_(moveResponse.success, 'prima scrittura (moveJob) deve avere successo');
+  assertTrue_(noteResponse.success, 'seconda scrittura (addActivityEvent) deve avere successo');
+
+  var boardResponse = api('getBoard', { env: 'test' });
+  var job = boardResponse.data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
+  assertEquals_('wip', job.status, 'l\'effetto della prima scrittura (spostamento a wip) non deve andare perso dopo la seconda');
+
+  var logResponse = api('getActivityLog', { env: 'test', job_id: created.job_id });
+  var noteEvents = logResponse.data.log.filter(function(event) { return event.type === 'note' && event.note === 'nota subito dopo la mossa'; });
+  assertEquals_(1, noteEvents.length, 'l\'effetto della seconda scrittura (nota in Cronologia) deve essere presente, non sovrascritto dalla prima');
+
+  var moveEvents = logResponse.data.log.filter(function(event) { return event.type === 'move'; });
+  assertTrue_(moveEvents.length > 0, 'anche l\'evento della prima scrittura (move) deve restare nel log, nessuna delle due scritture ha perso l\'altra');
 }
 
 // --- N4 (DESIGN_archiviazione.md, §6/§6b): viste Archivio/Cestino

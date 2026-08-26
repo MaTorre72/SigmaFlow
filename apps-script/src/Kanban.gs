@@ -16,17 +16,34 @@ function doPost(e) {
   }
 }
 
+// P2 (DESIGN_lock_ambiente.md §2.2/§4, gate confermato da Marco
+// 2026-08-26): uniche azioni classificate lettura — mai scrivono
+// jobs/visite/config/archivio/cestino, censite una per una contro
+// routeAction_, non dedotte per intuito. Ogni altra azione di
+// routeAction_ resta di scrittura e sotto lock globale, nessuna
+// eccezione (moveJob/addActivityEvent/updateActivityEvent/
+// deleteActivityEvent inclusi — non hanno un lock proprio, dipendono al
+// 100% da questo per la sicurezza in concorrenza).
+var SF_READ_ACTIONS_ = {
+  getBoard: true,
+  getActivityLog: true,
+  getArchivio: true,
+  getCestino: true,
+  getMetrics: true
+};
+
 function api(action, payload) {
   try {
     payload = payload || {};
     payload.action = action;
+    var requiresLock = !SF_READ_ACTIONS_[action];
     return withEnvironment_(payload.env, function() {
       var response = routeAction_(payload);
       if (response && response.success && response.data) {
         response.data.env = normalizeEnv_(payload.env);
       }
       return response;
-    });
+    }, requiresLock);
   } catch (err) {
     return fail_(err.message);
   }
@@ -84,7 +101,10 @@ function routeAction_(params) {
 }
 
 function getBoard() {
-  ensureCurrentSchema_();
+  // P2: getBoard e' una lettura, gira SENZA il lock globale (vedi api())
+  // — acquireOwnLock=true fa si' che ensureCurrentSchema_() prenda un
+  // lock proprio, ma solo nella rara finestra in cui deve scrivere.
+  ensureCurrentSchema_(true);
   var jobs = loadJobsWithVisitSummary_();
   var columns = readColumns_();
   var board = {};
