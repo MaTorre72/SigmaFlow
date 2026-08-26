@@ -199,10 +199,42 @@ function setupSigmaFlowOnTest() {
   });
 }
 
-function ensureCurrentSchema_() {
+// P2 (DESIGN_lock_ambiente.md, gate confermato da Marco 2026-08-26):
+// getBoard() e' classificata lettura e non prende piu' il lock globale
+// (vedi api()/withEnvironment_ in Kanban.gs/Utils.gs) — ma nella rara
+// finestra post-deploy in cui PROP_SCHEMA_VERSION non e' ancora
+// allineata, questa funzione chiama setupSigmaFlow(), che SCRIVE per
+// davvero (crea fogli, backfilla colonne). Senza un lock, piu' getBoard()
+// concorrenti in quella finestra scriverebbero lo schema in parallelo.
+//
+// acquireOwnLock (default false, nessun chiamante esistente cambia
+// comportamento senza passarlo esplicitamente): true solo dal chiamante
+// che gira SENZA gia' avere il lock globale (getBoard). moveJob() la
+// chiama invece senza passare true — gira gia' dentro il lock globale
+// di withEnvironment_ (azione di scrittura, resta sotto lock come
+// prima di P2), quindi una seconda acquisizione qui sarebbe ridondante
+// e non testabile per certo come rientrante nel vero runtime Apps
+// Script (mai assunta senza verificarla). Doppio controllo dopo aver
+// preso il proprio lock: un'altra esecuzione concorrente potrebbe aver
+// gia' allineato lo schema nel frattempo, evita una seconda chiamata
+// ridondante a setupSigmaFlow().
+function ensureCurrentSchema_(acquireOwnLock) {
   var properties = PropertiesService.getScriptProperties();
   if (properties.getProperty(SIGMAFLOW.PROP_SCHEMA_VERSION) === SIGMAFLOW.SCHEMA_VERSION) { return; }
-  setupSigmaFlow();
+
+  if (!acquireOwnLock) {
+    setupSigmaFlow();
+    return;
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (properties.getProperty(SIGMAFLOW.PROP_SCHEMA_VERSION) === SIGMAFLOW.SCHEMA_VERSION) { return; }
+    setupSigmaFlow();
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Bugfix: PROP_SCHEMA_VERSION e' una Script Property CONDIVISA su tutto
@@ -231,17 +263,12 @@ function allineaSchemaSuProd() {
 
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  var props = PropertiesService.getScriptProperties();
-  var previousSpreadsheetId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+  var previousSpreadsheetId = __sfRoutedSpreadsheetId_;
+  __sfRoutedSpreadsheetId_ = ss.getId();
   try {
     return setupSigmaFlow();
   } finally {
-    if (previousSpreadsheetId) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetId);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-    }
+    __sfRoutedSpreadsheetId_ = previousSpreadsheetId;
     lock.releaseLock();
   }
 }

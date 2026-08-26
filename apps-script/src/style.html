@@ -585,6 +585,63 @@
     border-bottom: none;
   }
 
+  /* P4 (DESIGN_lock_ambiente.md §2.4): riepilogo visivo del percorso
+     della card, tab Informazioni — stesso linguaggio visivo del
+     riquadro "Cronologia recente" subito sotto. */
+  .path-summary-panel {
+    background: #f6f8fa;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin: 0 0 16px;
+    padding: 12px 16px;
+  }
+
+  .path-summary-panel h3 {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 0 0 8px;
+    text-transform: uppercase;
+  }
+
+  .path-summary-bar {
+    border-radius: 4px;
+    display: flex;
+    height: 14px;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .path-summary-segment {
+    height: 100%;
+    min-width: 2px;
+  }
+
+  .path-summary-segment-current {
+    background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.35) 0, rgba(255,255,255,0.35) 4px, transparent 4px, transparent 8px);
+  }
+
+  .path-summary-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: 10px;
+  }
+
+  .path-summary-legend-item {
+    align-items: center;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .path-summary-legend-dot {
+    border-radius: 50%;
+    flex: none;
+    height: 10px;
+    width: 10px;
+  }
+
   .modal-context {
     color: var(--muted);
     font-size: 12px;

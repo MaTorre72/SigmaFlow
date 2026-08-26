@@ -284,6 +284,10 @@ function runAllTests() {
     testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty,
     testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty,
     testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent,
+    testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty,
+    testApiTakesLockOnlyForWriteActions,
+    testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange,
+    testDoPostDelegatesToApiInheritingEnvironmentAndLock,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
     testGetArchivioReturnsEmptyWhenSheetsMissing,
@@ -344,6 +348,10 @@ function runAllTests() {
     testUpdateActivityEventReentrySameEventDoesNotDuplicateVisit,
     testAddActivityEventPlainManualMoveUpdatesStatus,
     testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus,
+    testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus,
+    testDeleteActivityEventRevertsStatusToNewMostRecentMove,
+    testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob,
+    testAddActivityEventRecentReentryAfterClosureStillReopensJob,
     testAddActivityEventColonnaNonTrovata,
     testAddActivityEventReasonObbligatoria,
     testAddActivityEventSequenceWarningsSenzaForce,
@@ -1594,13 +1602,17 @@ function testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult() {
   });
 }
 
-// Bugfix 2026-08-19: regressione sull'incidente reale — la Script Property
-// condivisa SIGMAFLOW_SPREADSHEET_ID e' rimasta bloccata su un valore
-// sporco (un'esecuzione precedente interrotta prima del proprio finally di
-// ripristino). Simulato qui sporcando la property con un id chiaramente
-// diverso da TEST/PROD prima di far scattare il trigger: con il bug
-// presente, archiveEligibleJobs_() avrebbe risolto quello stesso id
-// sporco (via getSpreadsheet_() ambientale) invece del foglio TEST vero.
+// Bugfix 2026-08-19, riscritto per P1 (2026-08-26, DESIGN_lock_ambiente.md
+// §2.1): l'incidente originale nasceva da un valore sporco lasciato nella
+// Script Property condivisa SIGMAFLOW_SPREADSHEET_ID, ereditato dalla
+// richiesta successiva. Con P1, getSpreadsheet_()/withEnvironment_() non
+// leggono ne' scrivono piu' quella property per instradare una chiamata —
+// usano solo una variabile per-esecuzione (__sfRoutedSpreadsheetId_,
+// Utils.gs), quindi una property sporca lasciata da fuori (un vecchio
+// script, una modifica manuale) non puo' piu' essere letta da questo
+// percorso: il test verifica esattamente questo, non piu' "la property
+// sporca viene ripristinata" (non ha piu' senso: il codice non la tocca
+// affatto).
 function testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -1623,7 +1635,7 @@ function testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsh
     var archivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO)).filter(function(j) { return j.job_id === created.job_id; });
     assertEquals_(1, archivio.length, 'il caso deve trovarsi nell\'Archivio del vero foglio TEST');
 
-    assertEquals_('id-sporco-non-test-non-prod', props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID), 'la property sporca preesistente deve restare intatta dopo l\'esecuzione (withEnvironment_ la ripristina sempre)');
+    assertEquals_('id-sporco-non-test-non-prod', props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID), 'la property sporca non deve essere ne\' letta ne\' scritta da questo percorso (P1: instradamento solo tramite variabile per-esecuzione) — resta esattamente al valore impostato dal test');
 
     props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
   });
@@ -1664,6 +1676,34 @@ function testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty() {
   }
 }
 
+// P1 (2026-08-26, DESIGN_lock_ambiente.md, §2.1/§6): copertura diretta
+// della causa di fondo — getSpreadsheet_() (chiamata ambientalmente da
+// 27+ punti in Kanban.gs/ActivityLog.gs/Model.gs/Backup.gs) non deve piu'
+// leggere la Script Property condivisa PROP_SPREADSHEET_ID per
+// instradare, solo la variabile per-esecuzione __sfRoutedSpreadsheetId_
+// (Utils.gs). Chiamata qui FUORI da qualunque withEnvironment_/
+// withTestSpreadsheet_ (quindi con la variabile a null, come sarebbe
+// l'inizio di una qualunque esecuzione reale): con una property sporca
+// preesistente, il bug ora chiuso avrebbe fatto risolvere quell'id
+// sporco — la versione corretta deve invece ricadere su
+// DEFAULT_SPREADSHEET_ID, ignorando del tutto la property.
+function testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty() {
+  var props = PropertiesService.getScriptProperties();
+  var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, 'id-sporco-non-test-non-prod');
+
+  try {
+    var resolved = getSpreadsheet_();
+    assertEquals_(SIGMAFLOW.DEFAULT_SPREADSHEET_ID, resolved.getId(), 'getSpreadsheet_() non deve piu\' leggere PROP_SPREADSHEET_ID per instradare — senza una chiamata withEnvironment_/withTestSpreadsheet_ che valorizzi la variabile per-esecuzione, deve ricadere su DEFAULT_SPREADSHEET_ID, mai sulla property sporca');
+  } finally {
+    if (previousId) {
+      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);
+    } else {
+      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+    }
+  }
+}
+
 // Bugfix 2026-08-25 (richiesta di Marco): dopo aver eliminato
 // SIGMAFLOW_SPREADSHEET_ID (property PROD, incidente sopra), ha chiesto
 // se poteva eliminare anche SIGMAFLOW_TEST_SPREADSHEET_ID. Diversa da
@@ -1674,10 +1714,13 @@ function testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty() {
 // DEFAULT_TEST_SPREADSHEET_ID. Verifica che la property possa restare
 // assente senza rompere l'esecuzione di test/migrazioni dall'editor
 // (throw "Script Property mancante" prima di questo fix).
+// P1 (2026-08-26): non ripristina piu' SIGMAFLOW.PROP_SPREADSHEET_ID —
+// withTestSpreadsheet_ non la tocca affatto (instrada tramite la
+// variabile per-esecuzione __sfRoutedSpreadsheetId_, Utils.gs), quindi
+// non c'e' piu' nulla da salvare/ripristinare su quella property qui.
 function testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent() {
   var props = PropertiesService.getScriptProperties();
   var previousTestProp = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
-  var previousSpreadsheetProp = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
   props.deleteProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
 
   try {
@@ -1692,12 +1735,116 @@ function testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent() {
     } else {
       props.deleteProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
     }
-    if (previousSpreadsheetProp) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetProp);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-    }
   }
+}
+
+// P2 (DESIGN_lock_ambiente.md §2.2/§4, gate confermato da Marco
+// 2026-08-26): il lock globale deve proteggere SOLO le azioni di
+// scrittura di routeAction_, non piu' anche le letture. Verificato
+// chiamando api() (il vero entry point di produzione, non le funzioni
+// di business logic direttamente) e contando le acquisizioni del lock
+// tramite __sfLockState.waitCalls (gas-harness.js) — il mock e' un
+// no-op (Node e' single-thread, nessuna vera concorrenza da mediare),
+// ma questo verifica esattamente il meccanismo introdotto da P2: QUALI
+// azioni prendono il lock, non una gara di concorrenza reale
+// (irriproducibile in un harness sincrono — vedi il test successivo per
+// cosa resta comunque verificabile).
+function testApiTakesLockOnlyForWriteActions() {
+  var created;
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    created = addJob({ title: 'P2 lock lettura/scrittura', size_class: 'S' }).data;
+  });
+
+  var reads = ['getBoard', 'getActivityLog', 'getArchivio', 'getCestino', 'getMetrics'];
+  reads.forEach(function(action) {
+    var payload = { env: 'test' };
+    if (action === 'getActivityLog') { payload.job_id = created.job_id; }
+    var before = __sfLockState.waitCalls;
+    var response = api(action, payload);
+    assertTrue_(response.success, action + ' via api() deve avere successo: ' + JSON.stringify(response));
+    assertEquals_(before, __sfLockState.waitCalls, action + ' (lettura) non deve prendere il lock globale');
+  });
+
+  // moveJob/addActivityEvent: le due scritture piu' usate che NON hanno
+  // un lock proprio (§2.2 del documento) — dipendono al 100% dal lock
+  // globale di withEnvironment_ per la sicurezza in concorrenza.
+  var beforeMove = __sfLockState.waitCalls;
+  var moveResponse = api('moveJob', { env: 'test', job_id: created.job_id, status: 'wip' });
+  assertTrue_(moveResponse.success, 'moveJob via api() deve avere successo: ' + JSON.stringify(moveResponse));
+  assertEquals_(beforeMove + 1, __sfLockState.waitCalls, 'moveJob (scrittura) deve prendere il lock globale esattamente una volta');
+
+  var beforeNote = __sfLockState.waitCalls;
+  var noteResponse = api('addActivityEvent', { env: 'test', job_id: created.job_id, type: 'note', ts: nowIso_(), note: 'nota P2' });
+  assertTrue_(noteResponse.success, 'addActivityEvent via api() deve avere successo: ' + JSON.stringify(noteResponse));
+  assertEquals_(beforeNote + 1, __sfLockState.waitCalls, 'addActivityEvent (scrittura) deve prendere il lock globale esattamente una volta');
+}
+
+// P2, criterio §6: "due scritture simulate sullo stesso job in rapida
+// sequenza non perdono nessuna delle due modifiche". Limite onesto
+// dell'harness Node: e' sincrono a singolo thread, quindi due chiamate
+// non possono davvero SOVRAPPORSI — cio' che resta verificabile qui e'
+// che il percorso di scrittura (letto-modifica-scrivo su jobs, via
+// writeJobToRow_ con originalJob/diff — O1, DESIGN_performance.md)
+// applica correttamente due scritture consecutive sullo stesso job
+// senza che la seconda perda l'effetto della prima. La garanzia contro
+// una vera sovrapposizione in produzione resta il lock globale,
+// verificato sopra (testApiTakesLockOnlyForWriteActions).
+function testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange() {
+  var created;
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    created = addJob({ title: 'P2 scritture rapide', size_class: 'S' }).data;
+  });
+
+  var moveResponse = api('moveJob', { env: 'test', job_id: created.job_id, status: 'wip' });
+  var noteResponse = api('addActivityEvent', { env: 'test', job_id: created.job_id, type: 'note', ts: nowIso_(), note: 'nota subito dopo la mossa' });
+  assertTrue_(moveResponse.success, 'prima scrittura (moveJob) deve avere successo');
+  assertTrue_(noteResponse.success, 'seconda scrittura (addActivityEvent) deve avere successo');
+
+  var boardResponse = api('getBoard', { env: 'test' });
+  var job = boardResponse.data.jobs.filter(function(j) { return j.job_id === created.job_id; })[0];
+  assertEquals_('wip', job.status, 'l\'effetto della prima scrittura (spostamento a wip) non deve andare perso dopo la seconda');
+
+  var logResponse = api('getActivityLog', { env: 'test', job_id: created.job_id });
+  var noteEvents = logResponse.data.log.filter(function(event) { return event.type === 'note' && event.note === 'nota subito dopo la mossa'; });
+  assertEquals_(1, noteEvents.length, 'l\'effetto della seconda scrittura (nota in Cronologia) deve essere presente, non sovrascritto dalla prima');
+
+  var moveEvents = logResponse.data.log.filter(function(event) { return event.type === 'move'; });
+  assertTrue_(moveEvents.length > 0, 'anche l\'evento della prima scrittura (move) deve restare nel log, nessuna delle due scritture ha perso l\'altra');
+}
+
+// P3 (DESIGN_lock_ambiente.md §2.3): doPost deve delegare ad api(), non
+// piu' chiamare routeAction_ direttamente — eredita risoluzione
+// d'ambiente (P1) e classificazione lettura/scrittura per il lock (P2)
+// automaticamente, senza logica nuova. Verificato con l'evidenza piu'
+// diretta possibile: la risposta guadagna data.env (arricchimento che
+// SOLO api() fa, mai routeAction_ da solo — se questo campo manca, doPost
+// e' tornato a chiamare routeAction_ direttamente) e una lettura via
+// doPost non prende il lock globale, esattamente come una chiamata
+// google.script.run reale.
+function testDoPostDelegatesToApiInheritingEnvironmentAndLock() {
+  var created;
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    created = addJob({ title: 'P3 doPost', size_class: 'S' }).data;
+  });
+
+  var before = __sfLockState.waitCalls;
+  var readOutput = doPost({ postData: { contents: JSON.stringify({ action: 'getBoard', env: 'test' }) } });
+  var readBody = JSON.parse(readOutput.text);
+  assertTrue_(readBody.success, 'doPost/getBoard deve avere successo: ' + JSON.stringify(readBody));
+  assertEquals_('test', readBody.data.env, 'doPost deve ereditare l\'arricchimento data.env di api(), prova che passa da api() e non piu\' da routeAction_ diretto');
+  assertEquals_(before, __sfLockState.waitCalls, 'doPost/getBoard (lettura) non deve prendere il lock globale — eredita la classificazione di P2');
+
+  var beforeWrite = __sfLockState.waitCalls;
+  var writeOutput = doPost({ postData: { contents: JSON.stringify({ action: 'moveJob', env: 'test', job_id: created.job_id, status: 'wip' }) } });
+  var writeBody = JSON.parse(writeOutput.text);
+  assertTrue_(writeBody.success, 'doPost/moveJob deve avere successo: ' + JSON.stringify(writeBody));
+  assertEquals_(beforeWrite + 1, __sfLockState.waitCalls, 'doPost/moveJob (scrittura) deve prendere il lock globale esattamente una volta — eredita la classificazione di P2');
 }
 
 // --- N4 (DESIGN_archiviazione.md, §6/§6b): viste Archivio/Cestino
@@ -2951,6 +3098,145 @@ function testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus() {
   });
 }
 
+// P5 (DESIGN_lock_ambiente.md §2.5, Bug 1 - segnalato da Marco): un
+// evento move con data passata (dimenticato, corretto mesi dopo) non
+// deve piu' sovrascrivere lo stato attuale se non e' l'evento piu'
+// recente del log intero ordinato. Prima del fix, applyManualMoveEffects_
+// impostava job.status incondizionatamente sul candidato appena
+// toccato, indipendentemente da dove finisse nel log dopo il sort.
+function testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Bug1 stato non affidabile', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'todo' });
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var beforeCorrection = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', beforeCorrection.status, 'precondizione: la card e\' in wip prima della correzione storica');
+
+    var oldTs = testIsoDaysAgo_(new Date(), 90);
+    var result = addActivityEvent({ job_id: created.job_id, type: 'move', ts: oldTs, to: 'wait_client' });
+    assertTrue_(result.data.ok === true, 'l\'evento storico dimenticato deve comunque registrarsi in Cronologia: ' + JSON.stringify(result.data));
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'lo stato attuale deve restare wip (l\'evento davvero piu\' recente), non saltare a wait_client solo perche\' appena corretto in Cronologia');
+  });
+}
+
+// P5 (DESIGN_lock_ambiente.md §2.5, Bug 2 - segnalato da Marco):
+// cancellare l'evento move piu' recente deve far tornare lo stato
+// all'evento move rimasto piu' recente, non lasciarlo bloccato sul
+// valore dell'evento appena cancellato. Prima del fix, deleteActivityEvent
+// non ricalcolava mai job.status (applyManualMoveEffects_ era esclusa
+// di proposito, per non duplicare effetti su visite - vedi commento in
+// Kanban.gs - ma nessun altro codice colmava il vuoto sullo status).
+function testDeleteActivityEventRevertsStatusToNewMostRecentMove() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Bug2 cancellazione non riallinea', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'todo' });
+    moveJob({ job_id: created.job_id, status: 'wip' });
+
+    var correction = addActivityEvent({ job_id: created.job_id, type: 'move', ts: nowIso_(), to: 'wait_client' });
+    assertTrue_(correction.data.ok === true, 'la correzione manuale deve riuscire: ' + JSON.stringify(correction.data));
+    var afterCorrection = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wait_client', afterCorrection.status, 'precondizione: la correzione manuale ha spostato la card');
+
+    var log = getActivityLog({ job_id: created.job_id }).data.log;
+    var manualEvent = log.filter(function(event) { return event.source === 'manual'; }).slice(-1)[0];
+    var deleteResult = deleteActivityEvent({ job_id: created.job_id, event_id: manualEvent.id });
+    assertTrue_(deleteResult.success, 'la cancellazione deve riuscire');
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('wip', job.status, 'cancellato l\'evento piu\' recente, lo stato deve tornare a quello rimasto piu\' recente (wip), non restare bloccato su wait_client');
+  });
+}
+
+// P5b (DESIGN_lock_ambiente.md §2.5, punto esplorativo di P5 CONFERMATO
+// come bug e corretto su richiesta esplicita di Marco): stesso schema
+// del Bug 1 ("agisce sul candidato invece che sul piu' recente del log
+// intero"), qui applicato a incarico_chiuso_ts invece che a job.status.
+// Riprodotto con un log costruito direttamente sulla riga (gli eventi
+// automatici dell'API sono sempre stampati "ora", non backdatabili via
+// parametro - stesso limite gia' aggirato da testAddJobWithPastArrival_
+// per il solo campo arrival_ts, qui esteso al log intero).
+//
+// Corretto con recomputeIncaricoChiusoTs_ (Kanban.gs): un rientro vecchio
+// backdated, precedente alla chiusura gia' registrata, non deve piu'
+// riaprire l'incarico per errore.
+function testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Esplorativo incarico_chiuso_ts', size_class: 'S', status: 'backlog' }).data;
+    var jobId = created.job_id;
+
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(sheet, 'job_id', jobId);
+    var headers = getHeaderMap_(sheet);
+    var job = readJobFromRow_(sheet, row, headers);
+
+    // Storia interamente manuale, ben separata nel tempo (300/250/200/100
+    // minuti fa): backlog -> wait_client -> todo (rientro vero, gia'
+    // registrato) -> wip.
+    var log = [
+      { id: 'e1', ts: testTsMinutesAgo_(300), type: 'move', source: 'auto', from: null, to: 'backlog', note: '' },
+      { id: 'e2', ts: testTsMinutesAgo_(250), type: 'move', source: 'manual', from: 'backlog', to: 'wait_client' },
+      { id: 'e3', ts: testTsMinutesAgo_(200), type: 'move', source: 'manual', from: 'wait_client', to: 'todo' },
+      { id: 'e4', ts: testTsMinutesAgo_(100), type: 'move', source: 'manual', from: 'todo', to: 'wip' }
+    ];
+    job.arrival_ts = testTsMinutesAgo_(300);
+    job.status = 'wip';
+    job.status_since_ts = testTsMinutesAgo_(100);
+    job.activity_log_json = JSON.stringify(log);
+    writeJobToRow_(sheet, row, headers, job);
+
+    var closed = updateJob({ job_id: jobId, invoiced: true });
+    assertTrue_(closed.success, 'la chiusura recente ("ora") deve riuscire');
+    var beforeCorrection = readTable_(sheet).filter(function(j) { return j.job_id === jobId; })[0];
+    assertTrue_(Boolean(beforeCorrection.incarico_chiuso_ts), 'precondizione: l\'incarico e\' chiuso di recente prima della correzione storica');
+
+    // Rientro VECCHIO dimenticato, tra e2 (wait_client, -250min) ed e3
+    // (todo, -200min) - un vero pattern di rientro (from si ricalcola
+    // dal log, deve risolvere wait_client), ma ampiamente precedente
+    // alla chiusura recente sopra.
+    var oldTs = testTsMinutesAgo_(225);
+    var result = addActivityEvent({ job_id: jobId, type: 'move', ts: oldTs, to: 'backlog', force: true });
+    assertTrue_(result.data.ok === true, 'l\'evento storico dimenticato deve registrarsi: ' + JSON.stringify(result.data));
+    assertEquals_('wait_client', result.data.event.from, 'precondizione: il candidato deve risolvere from=wait_client (vero pattern di rientro, non un caso degenere)');
+
+    var job2 = readTable_(sheet).filter(function(j) { return j.job_id === jobId; })[0];
+    assertTrue_(Boolean(job2.incarico_chiuso_ts), 'un rientro vecchio backdated, precedente alla chiusura gia\' registrata, non deve riaprire l\'incarico per errore (P5b)');
+    assertEquals_(beforeCorrection.incarico_chiuso_ts, job2.incarico_chiuso_ts, 'la chiusura deve restare esattamente quella gia\' registrata, non una nuova');
+    assertEquals_('wip', job2.status, 'lo status non e\' toccato da questo evento vecchio (P5 gia\' corretto)');
+  });
+}
+
+// P5b: verifica il caso legittimo simmetrico - un rientro VERO,
+// successivo alla chiusura gia' registrata, deve continuare a riaprire
+// l'incarico esattamente come prima di questo fix. Senza questo test,
+// un fix troppo conservativo su recomputeIncaricoChiusoTs_ potrebbe
+// smettere di riaprire MAI l'incarico, scambiando un bug con un altro.
+function testAddActivityEventRecentReentryAfterClosureStillReopensJob() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro vero dopo chiusura', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var closed = updateJob({ job_id: created.job_id, invoiced: true });
+    assertTrue_(closed.success, 'la chiusura deve riuscire');
+    var beforeReentry = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertTrue_(Boolean(beforeReentry.incarico_chiuso_ts), 'precondizione: l\'incarico e\' chiuso');
+
+    // Rientro vero, REGISTRATO ORA - successivo alla chiusura appena fatta.
+    var reentry = addActivityEvent({ job_id: created.job_id, type: 'move', ts: nowIso_(), to: 'backlog' });
+    assertTrue_(reentry.data.ok === true, 'il rientro deve registrarsi: ' + JSON.stringify(reentry.data));
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('', job.incarico_chiuso_ts, 'un rientro vero SUCCESSIVO alla chiusura deve continuare a riaprire l\'incarico, esattamente come prima di P5b');
+  });
+}
+
 function testAddActivityEventColonnaNonTrovata() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -3910,14 +4196,20 @@ function runSingleTest_(testFn) {
 // docs/testing-and-security.md — resta un override legittimo, non
 // rimosso), ricade su DEFAULT_TEST_SPREADSHEET_ID (id fisso) se la
 // property e' assente — cosi' quella property puo' restare eliminata a
-// riposo (stesso stato "pulito" ora scelto per PROP_SPREADSHEET_ID)
-// senza rompere l'esecuzione di test/migrazioni dall'editor, che prima
-// si fermava con "Script Property mancante".
+// riposo senza rompere l'esecuzione di test/migrazioni dall'editor, che
+// prima si fermava con "Script Property mancante".
+//
+// P1 (2026-08-26, DESIGN_lock_ambiente.md): l'instradamento verso il
+// foglio TEST per la durata del callback non passa piu' dalla Script
+// Property condivisa PROP_SPREADSHEET_ID (letta da getSpreadsheet_() nei
+// 27+ punti che la chiamano ambientalmente), ma dalla stessa variabile
+// per-esecuzione __sfRoutedSpreadsheetId_ (Utils.gs) usata da
+// withEnvironment_ — stesso principio, stesso meccanismo.
 function withTestSpreadsheet_(callback) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   var props = PropertiesService.getScriptProperties();
-  var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  var previousId = __sfRoutedSpreadsheetId_;
   var testId = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
 
   if (!testId) {
@@ -3925,15 +4217,11 @@ function withTestSpreadsheet_(callback) {
     throw new Error('Script Property mancante: ' + SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
   }
 
-  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, testId);
+  __sfRoutedSpreadsheetId_ = testId;
   try {
     return callback(SpreadsheetApp.openById(testId));
   } finally {
-    if (previousId) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-    }
+    __sfRoutedSpreadsheetId_ = previousId;
     lock.releaseLock();
   }
 }

@@ -114,7 +114,30 @@
     boardPollTimer_ = null;
   }
 
+  // P6 (DESIGN_lock_ambiente.md, §2.6/§3): specchio client-side di
+  // SF_READ_ACTIONS_ (Kanban.gs) - non e' una fonte di verita' condivisa,
+  // va tenuto allineato a mano se SF_READ_ACTIONS_ cambia lato server.
+  var SF_READ_ACTIONS_CLIENT_ = {
+    getBoard: true,
+    getActivityLog: true,
+    getArchivio: true,
+    getCestino: true,
+    getMetrics: true
+  };
+
   function callApi(action, payload) {
+    // P6: tracciamento centralizzato di state.pendingWrites - prima
+    // affidato a incrementi/decrementi manuali sparsi nei singoli
+    // chiamanti (es. saveCardFromModal), che lasciavano scoperte tutte
+    // le altre azioni di scrittura (deleteJob, archiveJobFromModal,
+    // duplicaJob, ripristinaJob, ...): il poll periodico poteva
+    // sovrascrivere lo stato locale a meta' di una di quelle scritture.
+    // .finally() (non i due handler di google.script.run, che non
+    // coprono simmetricamente successo ed errore) copre entrambi i casi.
+    var isWrite = !SF_READ_ACTIONS_CLIENT_[action];
+    if (isWrite) {
+      state.pendingWrites++;
+    }
     return new Promise(function(resolve, reject) {
       google.script.run
         .withSuccessHandler(function(response) {
@@ -126,6 +149,10 @@
         })
         .withFailureHandler(reject)
         .api(action, Object.assign({}, payload || {}, { env: state.env }));
+    }).finally(function() {
+      if (isWrite) {
+        state.pendingWrites--;
+      }
     });
   }
 
@@ -814,6 +841,9 @@
     // omonimo (nascosto poco sotto): niente anteprima in creazione.
     document.getElementById('modal-recent-activity').hidden = true;
     document.getElementById('modal-recent-activity-list').innerHTML = '';
+    document.getElementById('modal-path-summary').hidden = true;
+    document.getElementById('modal-path-summary-bar').innerHTML = '';
+    document.getElementById('modal-path-summary-legend').innerHTML = '';
     document.getElementById('modal-create-button').hidden = false;
     document.getElementById('modal-create-button').textContent = 'Crea e chiudi';
     updateArchiveButtonState_(null);
@@ -903,7 +933,6 @@
     }
     var payload = modalPayload_();
     payload.title = title;
-    state.pendingWrites++;
     saveButton.disabled = true;
     saveButton.textContent = 'Salvataggio...';
     var editing = Boolean(state.activeJob);
@@ -935,7 +964,6 @@
       renderToolbarFilters();
       updateLastUpdated();
     }).catch(showError).finally(function() {
-      state.pendingWrites--;
       saveButton.disabled = false;
       saveButton.textContent = state.activeJob ? 'Salva e chiudi' : 'Crea e chiudi';
     });
@@ -1060,6 +1088,119 @@
     });
   }
 
+  // P4 (DESIGN_lock_ambiente.md §2.4): riepilogo visivo di quanto tempo
+  // la card ha passato in ciascuna colonna, su tutta la storia del job
+  // (tutti i rientri, non solo la visita aperta) — un segmento aggregato
+  // per colonna, non uno per singolo soggiorno (scelta di leggibilita',
+  // vedi documento). Legge solo state.activityLog gia' in mano (nessuna
+  // nuova chiamata callApi, nessuna nuova lettura Sheets) — stesso dato
+  // gia' usato da renderActivityLog_/renderRecentActivityPreview_ sopra.
+  var PATH_SUMMARY_FALLBACK_COLOR_ = '#B5B5B5';
+
+  function renderCardPathSummary_(events, job) {
+    var root = document.getElementById('modal-path-summary');
+    var bar = document.getElementById('modal-path-summary-bar');
+    var legend = document.getElementById('modal-path-summary-legend');
+    if (!root || !bar || !legend) { return; }
+
+    var moves = (events || []).filter(function(event) { return event.type === 'move'; });
+    bar.innerHTML = '';
+    legend.innerHTML = '';
+    if (!moves.length) {
+      root.hidden = true;
+      return;
+    }
+
+    var now = new Date().getTime();
+    var durations = {};
+    var firstSeenOrder = [];
+
+    moves.forEach(function(moveEvent, index) {
+      var columnId = moveEvent.to;
+      var segmentStart = new Date(moveEvent.ts).getTime();
+      var segmentEnd;
+      if (index < moves.length - 1) {
+        segmentEnd = new Date(moves[index + 1].ts).getTime();
+      } else {
+        // Segmento corrente, ancora in corso: base status_since_ts
+        // (M0-C) — stesso campo gia' usato per l'aging della card in
+        // board, resta coerente anche se una correzione in Cronologia
+        // ha spostato il "da quando" senza aggiungere un nuovo evento.
+        segmentStart = job && job.status_since_ts ? new Date(job.status_since_ts).getTime() : segmentStart;
+        segmentEnd = now;
+      }
+      var elapsed = Math.max(0, segmentEnd - segmentStart);
+      if (!durations.hasOwnProperty(columnId)) {
+        durations[columnId] = 0;
+        firstSeenOrder.push(columnId);
+      }
+      durations[columnId] += elapsed;
+    });
+
+    var total = firstSeenOrder.reduce(function(sum, id) { return sum + durations[id]; }, 0);
+    if (total <= 0) {
+      root.hidden = true;
+      return;
+    }
+
+    // Ordine di visualizzazione: stesso ordine delle colonne in board
+    // (coerenza visiva con la board), non ordinamento per durata. Le
+    // colonne toccate dal log ma non piu' presenti in state.columnMeta
+    // (rinominate/eliminate nel frattempo) restano in coda, nell'ordine
+    // in cui compaiono nel log — columnLabelById_ gia' gestisce il
+    // fallback su id/'-' per queste.
+    var boardOrder = (state.columnMeta || []).slice().sort(function(a, b) {
+      return (a.order || 0) - (b.order || 0);
+    }).map(function(column) { return column.id; });
+    var displayOrder = boardOrder.filter(function(id) { return durations.hasOwnProperty(id); })
+      .concat(firstSeenOrder.filter(function(id) { return boardOrder.indexOf(id) === -1; }));
+
+    var currentColumnId = (job && job.status) || moves[moves.length - 1].to;
+
+    root.hidden = false;
+    displayOrder.forEach(function(columnId) {
+      var ms = durations[columnId];
+      var pct = (ms / total) * 100;
+      var meta = (state.columnMeta || []).filter(function(column) { return column.id === columnId; })[0];
+      var color = meta ? meta.color : PATH_SUMMARY_FALLBACK_COLOR_;
+      var label = columnLabelById_(columnId);
+      var isCurrent = columnId === currentColumnId;
+      var durationLabel = label + ': ' + formatDurationLabel_(ms) + (isCurrent ? ' (in corso)' : '');
+
+      var segment = document.createElement('span');
+      segment.className = 'path-summary-segment' + (isCurrent ? ' path-summary-segment-current' : '');
+      segment.style.width = pct + '%';
+      segment.style.backgroundColor = color;
+      segment.title = durationLabel;
+      bar.appendChild(segment);
+
+      var legendItem = document.createElement('span');
+      legendItem.className = 'path-summary-legend-item';
+      var dot = document.createElement('span');
+      dot.className = 'path-summary-legend-dot';
+      dot.style.backgroundColor = color;
+      var text = document.createElement('span');
+      text.textContent = durationLabel;
+      legendItem.appendChild(dot);
+      legendItem.appendChild(text);
+      legend.appendChild(legendItem);
+    });
+  }
+
+  function formatDurationLabel_(ms) {
+    var totalMinutes = Math.round(ms / 60000);
+    var days = Math.floor(totalMinutes / 1440);
+    var hours = Math.floor((totalMinutes % 1440) / 60);
+    var minutes = totalMinutes % 60;
+    if (days > 0) {
+      return days + 'g' + (hours > 0 ? ' ' + hours + 'h' : '');
+    }
+    if (hours > 0) {
+      return hours + 'h' + (minutes > 0 ? ' ' + minutes + 'm' : '');
+    }
+    return minutes + 'm';
+  }
+
   var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
   var STRUCTURAL_FIELD_LABELS_ = {
     arrival_ts: 'Data creazione (arrival_ts)',
@@ -1145,12 +1286,16 @@
       state.activityLog = data.log || [];
       renderActivityLog_(state.activityLog);
       renderRecentActivityPreview_(state.activityLog);
+      renderCardPathSummary_(state.activityLog, state.activeJob);
     }).catch(function(error) {
       document.getElementById('modal-activity-list').innerHTML = '<p class="activity-log-status">Impossibile caricare la cronologia. Riprovare.</p>';
       document.getElementById('modal-recent-activity-list').innerHTML = '';
       var empty = document.getElementById('modal-recent-activity-empty');
       empty.hidden = false;
       empty.textContent = 'Impossibile caricare la cronologia.';
+      document.getElementById('modal-path-summary').hidden = true;
+      document.getElementById('modal-path-summary-bar').innerHTML = '';
+      document.getElementById('modal-path-summary-legend').innerHTML = '';
       showError(error);
     });
   }
@@ -1445,9 +1590,12 @@
   // restituiscono ora il job gia' aggiornato (stesso contratto di
   // risposta di moveJob, M0-A2/M0-B): aggiorna la card in stato locale,
   // senza un'altra chiamata al server. removeCardEl_ prima di
-  // placeCardInColumn_ perche' - a differenza del drag-and-drop reale -
-  // qui la card puo' essere cambiata di colonna senza che il DOM lo
-  // sappia ancora.
+  // placeCardInColumn_ perche' la card puo' essere cambiata di colonna
+  // senza che il DOM lo sappia ancora - stesso motivo per cui anche
+  // moveJob (drag-and-drop reale) fa lo stesso, dopo P6
+  // (DESIGN_lock_ambiente.md §2.6): placeCardInColumn_ da sola rimuove
+  // il nodo esistente solo dentro la colonna di ARRIVO, mai da quella
+  // di provenienza.
   function applyActivityJobUpdate_(job) {
     if (!job) { return; }
     var fromStatus = removeJobLocally(job.job_id);
@@ -1482,6 +1630,13 @@
     // colonne coinvolte (provenienza e arrivo), non l'intera board.
     var moveResult = moveJobLocally(jobId, status);
     if (moveResult) {
+      // P6 (DESIGN_lock_ambiente.md §2.6): placeCardInColumn_ rimuove il
+      // nodo esistente solo dentro la colonna di ARRIVO - un trascinamento
+      // rapido puo' lasciare il vecchio nodo orfano nella colonna di
+      // provenienza, visibile in entrambe finche' un renderBoard() completo
+      // non lo ripulisce. removeCardEl_ (board-wide) prima, stesso pattern
+      // gia' in uso in applyActivityJobUpdate_.
+      removeCardEl_(moveResult.job.job_id);
       placeCardInColumn_(moveResult.job);
       updateColumnCounters_(moveResult.fromStatus);
       updateColumnCounters_(status);

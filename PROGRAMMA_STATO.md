@@ -1,5 +1,557 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-25
+Aggiornato: 2026-08-26
+
+## Fase P — CHIUSA (P1-P6 tutte DONE), in attesa di merge/deploy da parte di Marco (2026-08-26)
+
+Tutte le caselle di `docs/DESIGN_lock_ambiente.md` §6 spuntate (P1-P6).
+Ultima verifica di chiusura, ripetuta da capo su richiesta di Marco
+("chiudiamo la fase P"): **171/171 test** nell'harness Node, push su
+TEST **verificato di nuovo** (16/16 file identici), branch
+`fix/fase-p-lock-ambiente-2026-08-26` allineato a `origin` (nessun
+commit locale non pushato).
+
+**Riepilogo completo della fase**:
+- **P1** (`744b95f`) — Script Property condivisa → variabile
+  per-esecuzione, chiude la classe di incidenti PROD/TEST del 19/08 e
+  25/08.
+- **P2** (`89bf7ea`) — lock globale solo sulle azioni di scrittura,
+  gate confermato da Marco prima dell'implementazione.
+- **P3** (`c94a32c`) — `doPost` delega ad `api()`, eredita P1/P2 anche
+  sulle POST dirette.
+- **P4** (`c94a32c`) — riepilogo visivo del percorso della card, tab
+  Informazioni (feature, non bug).
+- **P5** (`2c5bc49`) — `job.status` derivato sempre dall'evento più
+  recente della Cronologia, non dal candidato appena toccato (due bug
+  distinti corretti).
+- **P5b** (`2159cab`) — stesso principio applicato a
+  `incarico_chiuso_ts`, su richiesta esplicita di Marco dopo il punto
+  esplorativo di P5.
+- **P6** (`8d04b35`) — card orfana in due colonne dopo un drag
+  (`removeCardEl_` mancante in `moveJob`) + `pendingWrites` non
+  centralizzato (poll poteva sovrascrivere lo stato durante scritture
+  non protette).
+
+**Cosa resta, riservato a Marco — non eseguibile da Claude per regola
+tecnica del progetto** (`.claude/settings.local.json` blocca il push su
+`main`/`master` a livello di permessi; la scrittura su PROD, dati o
+deployment, è "sempre riservata a un'azione eseguita da Marco stesso"
+per `CLAUDE.md`, senza eccezioni nemmeno su richiesta esplicita in
+sessione):
+1. Review/merge della PR [#12](https://github.com/MaTorre72/SigmaFlow/pull/12)
+   (`fix/fase-p-lock-ambiente-2026-08-26` → `main`) da GitHub.
+2. Dopo il merge, `clasp push` verso PROD (se il flusso del progetto
+   lo prevede da locale) e/o ripubblicazione del deployment Apps
+   Script PROD (Distribuisci → Gestisci distribuzioni → Nuova versione
+   → Distribuisci) — stessa procedura già seguita per i fix PROD
+   precedenti in questo progetto (vedi sezioni storiche più sotto in
+   questo file).
+
+Nessun'altra azione lato Claude in sospeso su questa fase.
+
+---
+
+## Fase P (ambiente e lock globale) — P6 DONE, solo client-side (2026-08-26, sessione 4)
+
+Proseguimento sullo stesso branch (`fix/fase-p-lock-ambiente-2026-08-26`,
+verificato allineato all'ultimo commit `2159cab` prima di iniziare —
+`git pull` senza nulla da scaricare). Bug segnalato da Marco con uno
+screenshot: card visibile contemporaneamente in due colonne (WIP e
+ATTESA CLIENTE) per alcuni secondi dopo un trascinamento. Documento
+già aggiornato con P6 (§2.6/§3/§4/§6) prima di questa sessione — solo
+implementazione, nessuna scrittura al documento in questa fase (lettura
+e implementazione secondo un prompt operativo dettagliato).
+
+**Causa reale (`moveJob`, client.html)**: `placeCardInColumn_` rimuove
+il nodo esistente della card solo **dentro la colonna di arrivo**
+(`cardsRoot.querySelector(...)`, `cardsRoot` è già scoping sulla
+colonna target) — mai da quella di provenienza. Un trascinamento reale
+lasciava quindi il vecchio nodo orfano nella colonna di provenienza,
+visibile insieme al nuovo finché un `renderBoard()` completo (poll a
+45s o refresh) non lo ripuliva. Stesso bug già risolto altrove
+(`applyActivityJobUpdate_`, fix precedente) con `removeCardEl_`
+(rimozione board-wide) prima di `placeCardInColumn_` — pattern non
+applicato al drag-and-drop reale per un'assunzione sbagliata nel
+commento originale ("a differenza del drag-and-drop reale"), ora
+corretta.
+
+**Fix 1 — `moveJob`**: `removeCardEl_(moveResult.job.job_id)` aggiunta
+subito prima di `placeCardInColumn_(moveResult.job)` nell'update
+ottimistico. Commento fuorviante in `applyActivityJobUpdate_` corretto
+di conseguenza.
+
+**Fix 2 — `callApi`/`pendingWrites`**: il conteggio delle scritture in
+corso (usato da `loadBoard` per non sovrascrivere lo stato locale con
+un poll a metà di una scrittura) era affidato a incrementi/decrementi
+manuali sparsi nei singoli chiamanti — solo `saveCardFromModal` lo
+faceva, lasciando **tutte le altre azioni di scrittura** (`deleteJob`,
+`archiveJobFromModal`, `duplicaJob`, `ripristinaJob`,
+`eliminaJobDefinitivamente`, `updateOptionList`, ...) senza protezione
+dal poll periodico. Centralizzato in `callApi`: nuova mappa
+`SF_READ_ACTIONS_CLIENT_` (specchio client-side di `SF_READ_ACTIONS_`,
+Kanban.gs — annotato esplicitamente come da tenere allineato a mano se
+cambia lato server), incremento prima della chiamata per ogni azione
+non in quella mappa, decremento via `.finally()` sulla Promise
+(copertura simmetrica successo/errore). Rimosso l'incremento/decremento
+manuale ridondante in `saveCardFromModal`.
+
+**Censimento allargato** (richiesto esplicitamente da Marco, non solo
+la causa diretta dello screenshot): riletti tutti i punti di scrittura
+client-side (`client.html`) per lo stesso tipo di problema (aggiornamento
+ottimistico del DOM senza pulizia del nodo precedente). Trovato solo il
+punto sopra (`pendingWrites`); tutti gli altri (colonne, opzioni,
+Archivio, Cestino) confermati già sicuri per costruzione — ridisegnano
+sempre per intero la loro porzione di DOM. Due punti minori, non bug di
+dati, documentati come esplicitamente fuori scope (§2.6 del documento):
+un residuo teorico su `pendingWrites` (poll partito prima di una
+scrittura molto veloce, richiederebbe un identificatore di versione
+lato server) e `duplicaJobFromArchivio` che non aggiorna subito
+`state.board` (lacuna di UX — il caso nuovo compare solo al prossimo
+poll/refresh, non un bug di dati). Nessuno dei due offriva un modo
+economico e a basso rischio di chiuderlo in questa sessione — non
+proposto, lasciato come documentato.
+
+**Collaudato nel Browser pane** (server locale di riproduzione,
+rimosso a fine sessione):
+- Sei trascinamenti rapidi avanti e indietro tra WIP e ATTESA CLIENTE
+  (chiamate sincrone consecutive a `moveJob`, senza attendere la
+  risposta server tra l'una e l'altra, per simulare un drag reale
+  veloce): `document.querySelectorAll('[data-job-id="..."]').length`
+  sempre `1`, mai `2`, sia durante sia dopo tutte le risposte server.
+- `getActivityLog` (lettura): `state.pendingWrites` invariato (0)
+  prima, durante e dopo la chiamata.
+- `moveJob` (scrittura): `state.pendingWrites` correttamente `1`
+  durante la chiamata, tornato a `0` dopo.
+- Le quattro famiglie di azioni prima non protette, una per una:
+  `deleteJob`, `archiveJobFromModal`, `duplicaJob` (Archivio),
+  `ripristinaJob` (Cestino) — tutte e quattro `pendingWrites` a `1`
+  durante, `0` dopo, nessun errore in console, stesso comportamento
+  funzionale di prima (card spostata/duplicata/ripristinata
+  correttamente).
+
+**171/171 test nell'harness Node** (nessuna regressione — P6 è
+puramente client-side, non coperto dall'harness Node per costruzione).
+Push su TEST verificato: 16/16 file identici.
+
+**Programma Fase P — P1-P6 tutte DONE.** Nessuna PR aperta per questa
+sotto-fase (richiesta esplicita di Marco — resta sullo stesso branch
+`fix/fase-p-lock-ambiente-2026-08-26`, PR [#12](https://github.com/MaTorre72/SigmaFlow/pull/12)
+da aggiornare quando deciso). Fase **Q** riservata (nome soltanto, §5
+del documento) per la revisione più profonda della logica di
+`ensureOpenVisit_`/`alignOpenVisitFields_` — segnalata da Marco sullo
+stesso screenshot, esplicitamente fuori scope qui.
+
+---
+
+## Fase P (ambiente e lock globale) — P5b: fix anche su incarico_chiuso_ts, su richiesta di Marco (2026-08-26, sessione 3 continua)
+
+Marco ha confermato di voler applicare anche il fix sul punto
+esplorativo di P5 (`incarico_chiuso_ts`). Stesso principio di
+`recomputeCurrentStatus_`: nuova funzione pura
+`recomputeIncaricoChiusoTs_(job, log)` (Kanban.gs) — un incarico chiuso
+viene riaperto (`incarico_chiuso_ts` azzerato) solo se nel log esiste
+un vero rientro (move da stand_by/done verso backlog/prep)
+**cronologicamente successivo alla chiusura registrata**, non per
+qualunque candidato che rappresenti quel pattern indipendentemente da
+quando è davvero accaduto. Le due righe che facevano l'azzeramento
+incondizionato sono state tolte da `applyManualMoveEffects_` (che resta
+solo per gli altri effetti su `visite`, invariati). Chiamata in fondo a
+`addActivityEvent`/`updateActivityEvent`, **non** in
+`deleteActivityEvent` — deliberatamente fuori scope: una volta azzerato,
+il valore originale di `incarico_chiuso_ts` non è più recuperabile dal
+solo log, stesso limite (per lo stesso motivo) per cui
+`applyManualMoveEffects_` già non tocca gli effetti su `visite` in
+cancellazione.
+
+**Bug reale trovato scrivendo il test del caso legittimo** (non solo
+"sembra corretto" — verificato con un secondo test dedicato, prima
+mancante): la prima versione confrontava gli istanti con `< / <=`
+stretto, scartando un rientro con timestamp **identico** alla chiusura
+(caso reale: un rientro registrato "ora" subito dopo una chiusura fatta
+anch'essa "ora" — capita spesso, la precisione dei timestamp non
+garantisce mai un ordinamento stretto tra due azioni ravvicinate nello
+stesso secondo). Corretto usando `< 0` invece di `<= 0` nel confronto
+(un pareggio conta come "successivo", non viene scartato).
+
+**Test aggiornati/aggiunti** (`Tests.gs`), entrambi registrati e
+verificati: il test esplorativo di P5 è stato rinominato e la sua
+asserzione capovolta (da "documenta il bug" a "verifica il fix") —
+`testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob`.
+Aggiunto il test simmetrico per il caso legittimo, che ha trovato il
+bug del pareggio sopra —
+`testAddActivityEventRecentReentryAfterClosureStillReopensJob` (un
+rientro vero, registrato "ora" subito dopo una chiusura fatta anch'essa
+"ora", deve continuare a riaprire l'incarico esattamente come prima di
+questo fix).
+
+**171/171 test nell'harness Node** (170 preesistenti + 1 nuovo — il test
+esplorativo di P5 è stato riusato/rinominato, non duplicato). Push su
+TEST verificato: 16/16 file identici. `moveJob`/`deleteActivityEvent`
+non toccate (verificato con `git diff`, zero righe modificate in
+entrambe).
+
+**Programma Fase P — P1-P5 tutte DONE, nessun residuo aperto.**
+`docs/DESIGN_lock_ambiente.md` §6 aggiornato, tutte le spunte a TRUE.
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) da
+aggiornare con questo commit.
+
+---
+
+## Fase P (ambiente e lock globale) — P5 DONE, due bug reali corretti + un terzo confermato in attesa di decisione (2026-08-26, sessione 3)
+
+Proseguimento della sessione P1-P4 (stesso branch, verificato allineato
+all'ultimo commit `c94a32c` prima di iniziare). Bug segnalato da Marco:
+lo stato "attuale" della card non riflette in modo affidabile l'ultima
+colonna registrata in Cronologia — automatica o manuale, di oggi o di
+mesi fa. Documento aggiornato con la sotto-fase P5 (§2.5/§4/§6) prima
+di implementare.
+
+**Causa reale, in `applyManualMoveEffects_` (Kanban.gs)**: la funzione
+faceva due cose diverse nello stesso posto — impostava `job.status`/
+`status_since_ts` sul candidato appena toccato dalla chiamata in corso
+**e** applicava gli effetti su `visite` (apertura/chiusura, accumulo
+attese) specifici di quel candidato. La prima parte era sbagliata:
+un evento move non è detto sia il più recente del log solo perché è
+quello appena inserito/corretto/cancellato.
+
+**Due bug distinti riprodotti e corretti**:
+- **Bug 1** (`addActivityEvent`/`updateActivityEvent`): un evento move
+  con data passata (dimenticato, corretto mesi dopo) sovrascriveva
+  comunque lo stato attuale, anche con eventi successivi più recenti
+  già nel log.
+- **Bug 2** (`deleteActivityEvent`): cancellare l'evento che determinava
+  la posizione attuale lasciava la card bloccata lì, invece di tornare
+  alla colonna dell'evento rimasto più recente (la funzione non
+  ricalcolava mai `job.status` dopo una cancellazione).
+
+**Fix implementato**: nuova funzione pura `recomputeCurrentStatus_(job, log)`
+(Kanban.gs) — imposta `job.status`/`status_since_ts` dall'evento `move`
+cronologicamente più recente dell'intero log ordinato (`log` arriva già
+ordinato per ts da ogni chiamante), nessun effetto su `visite`. Chiamata
+in fondo a `addActivityEvent`, `updateActivityEvent` **e**
+`deleteActivityEvent`, dopo ogni altra elaborazione. `applyManualMoveEffects_`
+ha perso le due righe che impostavano `job.status`/`status_since_ts` —
+resta **solo** per gli effetti su `visite`, invariata per il resto,
+chiamata solo per il candidato specifico in add/update, **mai** in
+delete (già strutturalmente vero prima di questa sessione — `deleteActivityEvent`
+passa `applyStructuralAlignment_` senza `candidate`/`log`, quindi
+`applyManualMoveEffects_` riceve `candidate` `undefined` e ritorna
+subito; verificato di non aver introdotto nessuna chiamata nuova lì).
+
+**`moveJob` (drag-and-drop reale) non toccata** — non ha questo bug
+(scrive `job.status` direttamente dalla mossa in corso, non passa da
+questo meccanismo), confermato con `git diff` (zero righe modificate in
+quella funzione).
+
+**Punto esplorativo su `incarico_chiuso_ts` — CONFERMATO UN BUG ANALOGO,
+NON CORRETTO in questa sessione** (richiesta esplicita di Marco, in
+attesa di una sua decisione): `applyManualMoveEffects_` azzera
+`incarico_chiuso_ts` incondizionatamente quando il candidato rappresenta
+un vero rientro (stesso schema del Bug 1, applicato a un altro campo).
+Riprodotto con un log costruito direttamente sulla riga (gli eventi
+automatici sono sempre stampati "ora" dall'API, non backdatabili via
+parametro): job chiuso di recente (`invoiced: true`, "ora"), poi
+aggiunto un rientro vecchio dimenticato (tra due eventi già esistenti,
+`from` ricalcolato correttamente a `wait_client` — un vero pattern di
+rientro, non un caso degenere) — `incarico_chiuso_ts` viene azzerato
+per errore, riaprendo un incarico che avrebbe dovuto restare chiuso.
+`job.status` invece resta corretto (`wip`, non toccato da questo evento
+vecchio) — conferma che il fix di P5 funziona correttamente anche in
+questo scenario più complesso, il problema residuo è isolato al solo
+campo `incarico_chiuso_ts`. Documentato con un test dedicato
+(`testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed`)
+che **asserisce il comportamento attuale (il bug)**, non quello
+desiderato — commentato esplicitamente come tale, da aggiornare insieme
+a un eventuale fix futuro, non lasciato così per sempre.
+
+**Test aggiunti** (`Tests.gs`), tutti registrati nell'array `tests` di
+`runAllTests()` (verificato che il conteggio sia salito, non solo che
+dicesse "N/N" — lezione della sessione precedente):
+`testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus` (Bug 1),
+`testDeleteActivityEventRevertsStatusToNewMostRecentMove` (Bug 2),
+`testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed`
+(esplorativo). **170/170 test nell'harness Node** (167 preesistenti + 3
+nuovi, nessuna regressione). Push su TEST verificato: 16/16 file
+identici.
+
+**Nota metodologica per sessioni future**: le prime riproduzioni di
+Bug 2 e del punto esplorativo sono fallite per un problema del mock
+timestamp dell'harness (non un bug prodotto) — mescolare `new
+Date().toISOString()` reale con `nowIso_()`/`Utilities.formatDate` del
+mock (che etichetta l'ora locale della macchina con un offset fisso
+"+02:00", indipendentemente dal vero fuso) produce istanti assoluti
+incoerenti tra loro. Soluzione: usare sempre gli helper già esistenti
+in `Tests.gs` per questo scopo (`testTsMinutesAgo_`, `testIsoDaysAgo_`,
+`testAddJobWithPastArrival_`) o, quando serve controllo totale su una
+sequenza storica con eventi ben separati nel tempo, costruire il log
+direttamente sulla riga (`readJobFromRow_`/`writeJobToRow_`) invece di
+affidarsi a eventi automatici dell'API (sempre stampati "ora").
+
+**Criteri di accettazione P5 (§6 del documento) — tutti verificati
+TRUE**, incluso il punto esplorativo (riportato, non lasciato senza
+risposta).
+
+**Programma Fase P — P1-P5 tutte DONE.** Residuo aperto, in attesa di
+decisione di Marco: fix di `incarico_chiuso_ts` (stesso principio di
+P5, applicabile in una sotto-fase successiva se confermato).
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) da
+aggiornare con il commit di P5.
+
+---
+
+## Fase P (ambiente e lock globale) — P3 e P4 DONE, programma completo (2026-08-26, sessione 2)
+
+Proseguimento della sessione P1/P2 (stesso branch
+`fix/fase-p-lock-ambiente-2026-08-26`, verificato allineato a
+`origin/main` prima di iniziare — nessuna divergenza). Documento
+aggiornato con le sotto-fasi P3/P4 (commit `741d065`) prima di
+implementarle. Nessun gate su nessuna delle due — indipendenti tra
+loro, eseguite entrambe nella stessa sessione.
+
+**P3 — `doPost` delega ad `api()`** (Kanban.gs): prima chiamava
+`routeAction_(params)` direttamente, bypassando `api()`/`withEnvironment_`
+— nessuna risoluzione d'ambiente (P1), nessuna classificazione
+lettura/scrittura per il lock (P2), per qualunque POST diretta all'URL
+pubblicato. Cambiata una riga: `api(params.action, params)`. Nessun
+consumatore noto di `doPost` da aggiornare (confermato di nuovo:
+`client.html` usa solo `google.script.run`, mai una POST diretta).
+
+**Test aggiunto**: `testDoPostDelegatesToApiInheritingEnvironmentAndLock`
+— verifica con l'evidenza piu' diretta possibile che `doPost` passa
+davvero da `api()`: la risposta guadagna `data.env` (arricchimento che
+solo `api()` fa), e una lettura via `doPost` non prende il lock globale
+mentre una scrittura lo prende esattamente una volta (stesso contatore
+`__sfLockState.waitCalls` gia' usato per i test di P2). **Registrato
+subito nell'array `tests` di `runAllTests()`** — lezione della sessione
+precedente (il conteggio e' salito da 166 a 167, verificato non essere
+un falso positivo).
+
+**P4 — riepilogo visivo del percorso della card** (client.html/
+board.html/style.html, solo frontend, nessun test nell'harness Node —
+coerente col fatto che non tocca nulla lato server): nuovo pannello nel
+tab Informazioni, sopra l'anteprima "ultimi eventi" esistente (che resta
+invariata) — barra orizzontale segmentata con un segmento aggregato per
+colonna (non uno per singolo soggiorno, decisione di Marco per
+leggibilita' con rientri multipli — §2.4 del documento), calcolato
+camminando su `state.activityLog` **gia' caricato** (nessuna nuova
+chiamata `callApi`, nessuna nuova lettura Sheets). Segmento della
+colonna attuale marcato "in corso" (tratteggio diagonale + etichetta),
+durata basata su `job.status_since_ts`. Colori dei segmenti presi da
+`state.columnMeta` (stessi della card in board), fallback grigio per
+colonne rinominate/eliminate nel frattempo (`columnLabelById_` gestisce
+gia' l'etichetta). Ordine dei segmenti: stesso ordine delle colonne in
+board, non per durata. Legenda testuale con etichetta + durata formattata
+(giorni/ore/minuti) accanto a ogni segmento.
+
+**Collaudato nel Browser pane** (server locale di riproduzione, markup
+reale + `routeAction_` via harness — rimosso a fine sessione):
+- Percorso a piu' colonne con un rientro (BACKLOG → TO DO → WIP →
+  ATTESA CLIENTE → TO DO → WIP, eventi backdatati via
+  `addActivityEvent`): segmenti aggregati correttamente per colonna
+  (TO DO e WIP compaiono una volta sola, sommando entrambi i soggiorni),
+  ordine identico a quello delle colonne in board, colori dei segmenti
+  verificati byte per byte contro `column_meta.color`, colonna WIP
+  (quella attuale) marcata "in corso", percentuali e durate coerenti
+  con la somma totale del periodo.
+- Caso base (card appena creata, mai spostata): un solo segmento al
+  100%, marcato "in corso", "0m".
+- Modale "nuova card" (nessun job_id): pannello resta nascosto, stesso
+  comportamento gia' esistente per l'anteprima "ultimi eventi".
+- Nessun errore in console in nessuno dei tre scenari.
+
+**167/167 test nell'harness Node** (166 preesistenti + 1 nuovo, P3 —
+P4 non ha test Node, solo collaudo Browser pane, coerente con "solo
+frontend"). Push su TEST verificato: 16/16 file identici.
+
+**Criteri di accettazione P3/P4 (§6 del documento) — tutti verificati
+TRUE**: elenco completo nel documento, tutti confermati sia da test
+automatici (P3) sia da collaudo manuale nel Browser pane (P4, che non
+ha equivalente nell'harness Node essendo puro rendering client-side).
+
+**Programma Fase P — completo (P1, P2, P3, P4 tutte DONE)**, nessuna
+sotto-fase residua in `docs/DESIGN_lock_ambiente.md` §4.
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) da
+aggiornare con i commit di P3/P4 sullo stesso branch.
+
+---
+
+## Fase P (ambiente e lock globale) — P1 e P2 DONE, programma completo (2026-08-26)
+
+**P2 — lock globale solo sulle azioni di scrittura**, dopo il gate 🔴 del
+documento: elenco delle 24 azioni di `routeAction_` classificate
+lettura/scrittura mostrato a Marco in chat, confermato ("sì, procedi")
+prima di scrivere codice.
+
+**Trovato durante la verifica del gate** (non ancora nel documento): la
+classificazione "5 letture" da sola non bastava — `getBoard()` chiama
+`ensureCurrentSchema_()` in testa, che nella rara finestra post-deploy in
+cui `PROP_SCHEMA_VERSION` non e' ancora allineata chiama `setupSigmaFlow()`,
+una SCRITTURA reale (crea fogli, backfilla colonne). Senza gestirlo,
+togliere il lock a `getBoard()` avrebbe permesso a piu' `getBoard()`
+concorrenti di scrivere lo schema in parallelo in quella finestra —
+esattamente il tipo di rischio che P2 dovrebbe eliminare. Presentato a
+Marco con tre opzioni, scelta la piu' conservativa in termini di
+prestazioni normali: **lock dedicato, ristretto al solo tratto che puo'
+scrivere** (`ensureCurrentSchema_(acquireOwnLock)` — `true` solo da
+`getBoard()`, che gira senza il lock globale; `moveJob()` continua a
+chiamarla senza `acquireOwnLock`, dato che gira gia' dentro il lock
+globale come scrittura — evita di dover assumere che `LockService` di
+Apps Script sia rientrante nella stessa esecuzione, mai verificato).
+
+**Implementato**:
+- `withEnvironment_(env, callback, requiresLock)` (Utils.gs): terzo
+  parametro opzionale, default `true` — nessun chiamante esistente
+  cambia comportamento senza passarlo esplicitamente (es.
+  `eseguiArchiviazioneAutomaticaGiornaliera` continua a prendere il lock
+  come prima).
+- `SF_READ_ACTIONS_` (Kanban.gs) — mappa esplicita delle 5 azioni di
+  lettura (`getBoard`, `getActivityLog`, `getArchivio`, `getCestino`,
+  `getMetrics`). `api()` calcola `requiresLock = !SF_READ_ACTIONS_[action]`
+  e lo passa a `withEnvironment_`.
+- `ensureCurrentSchema_(acquireOwnLock)` (Schema.gs): doppio controllo
+  della versione schema (prima e dopo aver preso l'eventuale lock
+  proprio) per evitare una seconda chiamata ridondante a
+  `setupSigmaFlow()` se un'altra esecuzione concorrente ha gia'
+  allineato lo schema nel frattempo.
+- `doPost` (§2.3 del documento, fuori scope) — non toccato, come da
+  documento.
+
+**Bug trovato e corretto nella stessa sessione, non di P2**: i due test
+aggiunti in P1 (`testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty`
+e, a scoppio ritardato, gli altri) non erano registrati nell'array
+`tests` dentro `runAllTests()` (Tests.gs) — la suite li ignorava
+silenziosamente, il conteggio "163/163" riportato per P1 era quindi
+**falso positivo** (163 era gia' il totale prima, il nuovo test non
+girava affatto). Scoperto scrivendo i test di P2 (il conteggio non
+saliva a 166 come atteso). **Corretto**: tutti e tre i test aggiunti in
+P1 registrati nell'array. Nessun problema nel codice di P1 stesso — solo
+nella registrazione del test, ora corretta. **Lezione per sessioni
+future**: dopo aver aggiunto un test a `Tests.gs`, verificare che il
+conteggio totale sia effettivamente salito (non solo che l'output dica
+"N/N passati" — un totale invariato con un test in piu' scritto e' il
+segnale dello stesso bug).
+
+**Test aggiunti** (`Tests.gs`), registrati e verificati:
+`testApiTakesLockOnlyForWriteActions` — chiama `api()` (il vero entry
+point di produzione) per le 5 letture e per `moveJob`/`addActivityEvent`
+(le due scritture piu' usate senza lock proprio), contando le
+acquisizioni del lock tramite un contatore aggiunto al mock
+`LockService` dell'harness (`__sfLockState.waitCalls`, gas-harness.js) —
+verifica DIRETTAMENTE il meccanismo introdotto da P2 (quali azioni
+prendono il lock), non simulabile con una vera gara di concorrenza in
+un harness Node sincrono a singolo thread.
+`testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange` — due
+scritture consecutive sullo stesso job (moveJob poi addActivityEvent)
+via `api()`, verifica che nessuna delle due perda l'effetto dell'altra
+(limite onesto documentato nel test: verifica la correttezza del
+percorso di scrittura in sequenza, non una vera sovrapposizione —
+quella resta garantita dal lock, verificato dal test precedente).
+
+**166/166 test nell'harness Node** (163 preesistenti + 3 nuovi — 2 di
+P2 piu' 1 di P1 rimasto orfano, ora tutti registrati). Push su TEST
+verificato: 16/16 file identici.
+
+**Criteri di accettazione P2 (§6 del documento) — tutti verificati
+TRUE**: `moveJob`/`addActivityEvent`/`updateActivityEvent`/
+`deleteActivityEvent` restano sotto lock globale (verificato
+esplicitamente per i primi due, gli altri due condividono lo stesso
+percorso `api()`/`SF_READ_ACTIONS_` non modificato per loro);
+`getBoard`/`getActivityLog`/`getArchivio`/`getCestino`/`getMetrics` non
+prendono piu' il lock globale; nuovo test di concorrenza aggiunto; nessun
+cambio di risultato osservabile su nessun test esistente (166/166,
+nessuna regressione sui 163 preesistenti).
+
+**Programma Fase P — completo.** P1 e P2 entrambi DONE, nessuna
+sotto-fase residua in `docs/DESIGN_lock_ambiente.md` §4. `doPost` (§2.3,
+§5) resta fuori scope come da documento — segnalazione tracciata, non
+un'azione richiesta.
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) aggiornata
+con il commit di P2 sullo stesso branch `fix/fase-p-lock-ambiente-2026-08-26`.
+
+---
+
+## Fase P (ambiente e lock globale) — P1 DONE, in pausa al gate di P2 (2026-08-26)
+
+Sessione autonoma (runbook `docs/RUNBOOK_esecuzione_autonoma.md`), su
+[docs/DESIGN_lock_ambiente.md](docs/DESIGN_lock_ambiente.md) — nuovo
+documento, allegato da Marco in questa sessione, aggiunto al repo su
+branch dedicato `fix/fase-p-lock-ambiente-2026-08-26` (creato da
+`origin/main` aggiornato, commit `3e13ba2`, verificato con `git fetch` +
+`git status` prima di iniziare — nessuna divergenza).
+
+**P1 — variabile per-esecuzione al posto della Script Property
+condivisa**, causa di fondo degli incidenti del 2026-08-19 e 2026-08-25
+(vedi sezioni sotto): `PROP_SPREADSHEET_ID` era letta/scritta da
+`getSpreadsheet_()`/`withEnvironment_()` (Utils.gs) per instradare
+l'ambiente di ogni singola chiamata `api()` — un dato che dovrebbe vivere
+solo dentro quella chiamata, ma persisteva tra esecuzioni separate
+(Script Property, per progettazione condivisa su tutto il progetto Apps
+Script). Se un'esecuzione si interrompeva prima del proprio `finally`, il
+valore sporco sopravviveva ed era ereditato dalla richiesta successiva —
+di un utente diverso, in un momento diverso.
+
+**Implementato**: nuova variabile globale `__sfRoutedSpreadsheetId_`
+(Utils.gs) — per costruzione isolata alla singola esecuzione (ogni
+esecuzione Apps Script parte in un'isolate V8 nuova, nessuna memoria
+condivisa tra esecuzioni separate), mai persistita. `getSpreadsheet_()`
+la legge al posto della property; `withEnvironment_()` la valorizza a
+inizio chiamata e la ripristina nel proprio `finally` (stesso pattern di
+prima, lock incluso — P1 non tocca il lock, solo l'instradamento).
+Stesso trattamento in `eseguiMigrazioneCompleta_` (ActivityLog.gs),
+`allineaSchemaSuProd` (Schema.gs) e `withTestSpreadsheet_` (Tests.gs —
+non elencata esplicitamente in §1 del documento ma necessaria: e' il
+meccanismo che instrada praticamente ogni test verso il foglio TEST,
+sarebbe rimasta orfana altrimenti). Il fallback di bootstrap in
+`setupSigmaFlow()` (Schema.gs, righe 178-179) resta invariato, sulla
+Script Property — comportamento persistente voluto, non toccato da P1
+come da documento.
+
+**Test aggiornati/aggiunti** (`Tests.gs`): i tre test che manipolavano
+`PROP_SPREADSHEET_ID` direttamente per verificare il vecchio meccanismo
+sono stati riscritti per il nuovo —
+`testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty`
+(l'assert finale non verifica piu' "la property sporca viene ripristinata"
+ma "non viene ne' letta ne' scritta da questo percorso"),
+`testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent`
+(rimosso il salvataggio/ripristino di `PROP_SPREADSHEET_ID`, ormai
+irrilevante per quella funzione). Nuovo test aggiunto, copertura diretta
+della causa di fondo:
+`testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty` — chiama
+`getSpreadsheet_()` fuori da qualunque `withEnvironment_`/
+`withTestSpreadsheet_` (variabile a `null`, come l'inizio di
+un'esecuzione reale) con la property sporcata a mano, verifica che
+risolva `DEFAULT_SPREADSHEET_ID` e non la property.
+`testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty`
+(regressione del fix 08-25 su `getSpreadsheetForEnv_('prod')`) lasciato
+invariato — funzione diversa, non toccata da P1, gia' non passava mai da
+`getSpreadsheet_()` nel ramo 'prod'.
+
+**163/163 test nell'harness Node** (161 preesistenti + 2 nuovi, nessuna
+regressione). Push su TEST verificato: 16/16 file identici tra TEST e
+`apps-script/src`.
+
+**Criteri di accettazione P1 (§6 del documento) — tutti verificati
+TRUE**: `getSpreadsheet_()`/`withEnvironment_()` non leggono/scrivono
+piu' `PROP_SPREADSHEET_ID` per instradare; `eseguiMigrazioneCompleta_`/
+`allineaSchemaSuProd` aggiornate allo stesso meccanismo, stesso
+comportamento osservabile (confermato da
+`testEseguiMigrazioneCompletaEndToEndOnOldSchemaData`, gia' esistente,
+passata invariata); il fallback di bootstrap in `setupSigmaFlow()`
+funziona come prima, invariato; tutti i test esistenti restano verdi,
+quelli che manipolavano la property riscritti con stessa copertura;
+nessun cambio di risultato osservabile su nessun test esistente.
+
+**P2 (lock solo sulle scritture) — in pausa al gate 🔴 esplicito del
+documento**: prima di scrivere qualunque codice, l'elenco delle azioni di
+`routeAction_` classificate lettura/scrittura va confermato da Marco.
+Non best-guessato. In attesa.
+
+**PR**: da aprire su `fix/fase-p-lock-ambiente-2026-08-26` per la
+review di P1, senza aspettare la chiusura di P2 (richiesta esplicita di
+Marco in sessione).
 
 ## Incidente di sessione — checkout locale disallineato da `origin/main`, riconciliazione (2026-08-25)
 

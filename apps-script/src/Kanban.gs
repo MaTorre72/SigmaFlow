@@ -7,26 +7,51 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+// P3 (DESIGN_lock_ambiente.md §2.3): prima chiamava routeAction_
+// direttamente, bypassando interamente api()/withEnvironment_ — nessuna
+// risoluzione d'ambiente (P1), nessuna classificazione lettura/scrittura
+// per il lock (P2). Ora delega ad api(), la stessa funzione gia' usata
+// da ogni chiamata google.script.run reale — eredita entrambi i
+// meccanismi senza logica nuova. Unico effetto collaterale: la risposta
+// guadagna un campo data.env, come gia' avviene per ogni risposta di
+// api() — nessun consumatore noto di doPost da aggiornare.
 function doPost(e) {
   try {
     var params = parseRequest_(e);
-    return json_(routeAction_(params));
+    return json_(api(params.action, params));
   } catch (err) {
     return json_(fail_(err.message));
   }
 }
 
+// P2 (DESIGN_lock_ambiente.md §2.2/§4, gate confermato da Marco
+// 2026-08-26): uniche azioni classificate lettura — mai scrivono
+// jobs/visite/config/archivio/cestino, censite una per una contro
+// routeAction_, non dedotte per intuito. Ogni altra azione di
+// routeAction_ resta di scrittura e sotto lock globale, nessuna
+// eccezione (moveJob/addActivityEvent/updateActivityEvent/
+// deleteActivityEvent inclusi — non hanno un lock proprio, dipendono al
+// 100% da questo per la sicurezza in concorrenza).
+var SF_READ_ACTIONS_ = {
+  getBoard: true,
+  getActivityLog: true,
+  getArchivio: true,
+  getCestino: true,
+  getMetrics: true
+};
+
 function api(action, payload) {
   try {
     payload = payload || {};
     payload.action = action;
+    var requiresLock = !SF_READ_ACTIONS_[action];
     return withEnvironment_(payload.env, function() {
       var response = routeAction_(payload);
       if (response && response.success && response.data) {
         response.data.env = normalizeEnv_(payload.env);
       }
       return response;
-    });
+    }, requiresLock);
   } catch (err) {
     return fail_(err.message);
   }
@@ -84,7 +109,10 @@ function routeAction_(params) {
 }
 
 function getBoard() {
-  ensureCurrentSchema_();
+  // P2: getBoard e' una lettura, gira SENZA il lock globale (vedi api())
+  // — acquireOwnLock=true fa si' che ensureCurrentSchema_() prenda un
+  // lock proprio, ma solo nella rara finestra in cui deve scrivere.
+  ensureCurrentSchema_(true);
   var jobs = loadJobsWithVisitSummary_();
   var columns = readColumns_();
   var board = {};
@@ -739,11 +767,78 @@ function addActivityEvent(params) {
   // registrato, senza chiedere conferma all'utente. I dettagli di questi
   // campi restano interni: l'utente cura solo la cronologia.
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, log);
+  // P5/P5b: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_/
+  // recomputeIncaricoChiusoTs_.
+  recomputeCurrentStatus_(job, log);
+  recomputeIncaricoChiusoTs_(job, log);
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job, originalJob);
 
   return ok_({ ok: true, job_id: jobId, event: candidate, job: attachOpenVisitSummary_(job) });
+}
+
+// P5 (DESIGN_lock_ambiente.md §2.5): job.status/status_since_ts devono
+// sempre riflettere l'evento 'move' cronologicamente PIU' RECENTE
+// dell'intero log ordinato - non l'ultimo evento toccato dalla chiamata
+// in corso, che puo' essere un evento vecchio appena corretto/aggiunto
+// (Bug 1) o l'evento appena cancellato, lasciando lo stato bloccato sul
+// suo valore (Bug 2). Funzione pura: nessun effetto su 'visite' (quelli
+// restano in applyManualMoveEffects_, legati al candidato specifico).
+// 'log' deve arrivare gia' ordinato per ts (stesso sort gia' fatto da
+// ogni chiamante prima di invocarla) - l'ultimo elemento dell'array e'
+// per costruzione il piu' recente anche a parita' di ts.
+function recomputeCurrentStatus_(job, log) {
+  var moves = (log || []).filter(function(event) { return event.type === 'move'; });
+  if (!moves.length) {
+    return;
+  }
+  var mostRecentMove = moves[moves.length - 1];
+  job.status = mostRecentMove.to;
+  job.status_since_ts = mostRecentMove.ts;
+}
+
+// P5b (DESIGN_lock_ambiente.md §2.5, richiesto da Marco dopo il punto
+// esplorativo di P5 - stesso principio di recomputeCurrentStatus_,
+// applicato a incarico_chiuso_ts): un incarico chiuso va riaperto solo
+// se nel log esiste un vero rientro (move da una colonna stand_by/done
+// verso backlog/prep) SUCCESSIVO alla chiusura registrata - non per
+// qualunque candidato che rappresenti quel pattern, indipendentemente
+// da quando e' davvero accaduto rispetto alla chiusura. Un rientro
+// vecchio dimenticato, corretto in Cronologia DOPO che il caso e' gia'
+// stato richiuso da eventi piu' recenti, non deve riaprirlo per errore.
+// Funzione pura: nessun effetto su 'visite'. Chiamata solo da
+// addActivityEvent/updateActivityEvent (mai da deleteActivityEvent:
+// una volta azzerato, il valore originale di incarico_chiuso_ts non e'
+// piu' recuperabile dal solo log - stesso limite, per lo stesso motivo,
+// di applyManualMoveEffects_ che gia' non tocca gli effetti su visite
+// in cancellazione).
+function recomputeIncaricoChiusoTs_(job, log) {
+  if (!job.incarico_chiuso_ts) {
+    return;
+  }
+  var columns = readColumns_();
+  var moves = (log || []).filter(function(event) { return event.type === 'move'; });
+  var reopenedAfterClosure = moves.some(function(event) {
+    // < 0 (non <=): a parita' esatta di istante (es. rientro registrato
+    // "ora" subito dopo una chiusura fatta anch'essa "ora") il rientro
+    // deve comunque contare come successivo, non essere scartato per un
+    // pareggio - la precisione dei timestamp non garantisce mai un vero
+    // ordinamento stretto tra due azioni ravvicinate nello stesso secondo.
+    if (compareTs_(event.ts, job.incarico_chiuso_ts) < 0) {
+      return false;
+    }
+    var sourceColumn = event.from ? findColumn_(columns, event.from) : null;
+    var targetColumn = findColumn_(columns, event.to);
+    if (!sourceColumn || !targetColumn) {
+      return false;
+    }
+    var sourceClosesTowardActive = sourceColumn.role === 'stand_by' || sourceColumn.role === 'done';
+    return sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
+  });
+  if (reopenedAfterClosure) {
+    job.incarico_chiuso_ts = '';
+  }
 }
 
 function applyStructuralAlignment_(job, warnings, candidate, log) {
@@ -796,6 +891,16 @@ function applyStructuralAlignment_(job, warnings, candidate, log) {
 // chiudono la visita - stessa condizione di updateVisiteForMove_),
 // richiede il log completo (4o parametro, gia' disponibile in
 // addActivityEvent/updateActivityEvent dopo il push del candidato).
+// P5 (DESIGN_lock_ambiente.md §2.5): NON imposta piu' job.status/
+// status_since_ts (spostato in recomputeCurrentStatus_, che li ricalcola
+// sempre dal log INTERO ordinato, non dal solo candidato qui passato -
+// un candidato con data passata non e' detto sia il piu' recente).
+// Resta solo per gli effetti su 'visite' specifici di QUESTO candidato
+// (apertura/chiusura, accumulo attese) - chiamata solo da
+// addActivityEvent/updateActivityEvent, MAI da deleteActivityEvent
+// (vedi commento li' - richiamarla sull'evento-piu'-recente-rimasto
+// dopo una cancellazione duplicherebbe/sposterebbe visite su
+// cancellazioni non correlate).
 function applyManualMoveEffects_(job, candidate, log) {
   if (!candidate || candidate.type !== 'move') {
     return;
@@ -806,9 +911,6 @@ function applyManualMoveEffects_(job, candidate, log) {
   if (!targetColumn) {
     return;
   }
-
-  job.status = candidate.to;
-  job.status_since_ts = candidate.ts;
 
   var sourceColumn = candidate.from ? findColumn_(columns, candidate.from) : null;
   // Ne' accumulo ne' split sono possibili senza una provenienza
@@ -838,12 +940,13 @@ function applyManualMoveEffects_(job, candidate, log) {
     return;
   }
 
-  // N2 (DESIGN_archiviazione.md, §8c): stessa regola di moveJob - un
-  // rientro reale su un caso gia' marcato "Chiuso" lo rende di nuovo
-  // attivo.
-  if (job.incarico_chiuso_ts) {
-    job.incarico_chiuso_ts = '';
-  }
+  // P5b (DESIGN_lock_ambiente.md §2.5, richiesto da Marco dopo il punto
+  // esplorativo di P5): l'azzeramento incondizionato di incarico_chiuso_ts
+  // sul solo candidato e' STATO lo stesso bug del Bug 1, applicato a
+  // questo campo - spostato in recomputeIncaricoChiusoTs_ (chiamata in
+  // fondo a addActivityEvent/updateActivityEvent), che deriva dal log
+  // INTERO se esiste davvero un rientro successivo alla chiusura, non
+  // dal solo candidato appena toccato.
 
   // Idempotenza: se questo stesso rientro (stesso job, stessa data,
   // stessa provenienza) e' gia' stato registrato in precedenza - es. un
@@ -990,6 +1093,10 @@ function updateActivityEvent(params) {
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, remaining);
+  // P5/P5b: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_/
+  // recomputeIncaricoChiusoTs_.
+  recomputeCurrentStatus_(job, remaining);
+  recomputeIncaricoChiusoTs_(job, remaining);
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job, originalJob);
@@ -1045,6 +1152,16 @@ function deleteActivityEvent(params) {
   if (lastMove) {
     applyStructuralAlignment_(job, checkStructuralAlignment_(job, lastMove));
   }
+  // P5 (Bug 2, DESIGN_lock_ambiente.md §2.5): prima di questo fix,
+  // job.status non veniva MAI riallineato qui (applyStructuralAlignment_
+  // sopra e' chiamata senza candidate/log di proposito - vedi commento -
+  // quindi applyManualMoveEffects_ non scatta mai in questa funzione).
+  // Cancellare l'evento che determinava la posizione attuale lasciava la
+  // card bloccata li'. recomputeCurrentStatus_ e' pura (nessun effetto
+  // su visite, coerente col motivo per cui applyManualMoveEffects_ resta
+  // volutamente esclusa da questa funzione) - risolve senza reintrodurre
+  // il problema del commento sopra.
+  recomputeCurrentStatus_(job, recalculated);
 
   job.activity_log_json = serializeActivityLog_(recalculated);
   writeJobToRow_(sheet, row, headers, job, originalJob);
