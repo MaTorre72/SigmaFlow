@@ -767,8 +767,10 @@ function addActivityEvent(params) {
   // registrato, senza chiedere conferma all'utente. I dettagli di questi
   // campi restano interni: l'utente cura solo la cronologia.
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, log);
-  // P5: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_.
+  // P5/P5b: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_/
+  // recomputeIncaricoChiusoTs_.
   recomputeCurrentStatus_(job, log);
+  recomputeIncaricoChiusoTs_(job, log);
 
   job.activity_log_json = serializeActivityLog_(log);
   writeJobToRow_(sheet, row, headers, job, originalJob);
@@ -794,6 +796,49 @@ function recomputeCurrentStatus_(job, log) {
   var mostRecentMove = moves[moves.length - 1];
   job.status = mostRecentMove.to;
   job.status_since_ts = mostRecentMove.ts;
+}
+
+// P5b (DESIGN_lock_ambiente.md §2.5, richiesto da Marco dopo il punto
+// esplorativo di P5 - stesso principio di recomputeCurrentStatus_,
+// applicato a incarico_chiuso_ts): un incarico chiuso va riaperto solo
+// se nel log esiste un vero rientro (move da una colonna stand_by/done
+// verso backlog/prep) SUCCESSIVO alla chiusura registrata - non per
+// qualunque candidato che rappresenti quel pattern, indipendentemente
+// da quando e' davvero accaduto rispetto alla chiusura. Un rientro
+// vecchio dimenticato, corretto in Cronologia DOPO che il caso e' gia'
+// stato richiuso da eventi piu' recenti, non deve riaprirlo per errore.
+// Funzione pura: nessun effetto su 'visite'. Chiamata solo da
+// addActivityEvent/updateActivityEvent (mai da deleteActivityEvent:
+// una volta azzerato, il valore originale di incarico_chiuso_ts non e'
+// piu' recuperabile dal solo log - stesso limite, per lo stesso motivo,
+// di applyManualMoveEffects_ che gia' non tocca gli effetti su visite
+// in cancellazione).
+function recomputeIncaricoChiusoTs_(job, log) {
+  if (!job.incarico_chiuso_ts) {
+    return;
+  }
+  var columns = readColumns_();
+  var moves = (log || []).filter(function(event) { return event.type === 'move'; });
+  var reopenedAfterClosure = moves.some(function(event) {
+    // < 0 (non <=): a parita' esatta di istante (es. rientro registrato
+    // "ora" subito dopo una chiusura fatta anch'essa "ora") il rientro
+    // deve comunque contare come successivo, non essere scartato per un
+    // pareggio - la precisione dei timestamp non garantisce mai un vero
+    // ordinamento stretto tra due azioni ravvicinate nello stesso secondo.
+    if (compareTs_(event.ts, job.incarico_chiuso_ts) < 0) {
+      return false;
+    }
+    var sourceColumn = event.from ? findColumn_(columns, event.from) : null;
+    var targetColumn = findColumn_(columns, event.to);
+    if (!sourceColumn || !targetColumn) {
+      return false;
+    }
+    var sourceClosesTowardActive = sourceColumn.role === 'stand_by' || sourceColumn.role === 'done';
+    return sourceClosesTowardActive && (targetColumn.role === 'backlog' || targetColumn.role === 'prep');
+  });
+  if (reopenedAfterClosure) {
+    job.incarico_chiuso_ts = '';
+  }
 }
 
 function applyStructuralAlignment_(job, warnings, candidate, log) {
@@ -895,12 +940,13 @@ function applyManualMoveEffects_(job, candidate, log) {
     return;
   }
 
-  // N2 (DESIGN_archiviazione.md, §8c): stessa regola di moveJob - un
-  // rientro reale su un caso gia' marcato "Chiuso" lo rende di nuovo
-  // attivo.
-  if (job.incarico_chiuso_ts) {
-    job.incarico_chiuso_ts = '';
-  }
+  // P5b (DESIGN_lock_ambiente.md §2.5, richiesto da Marco dopo il punto
+  // esplorativo di P5): l'azzeramento incondizionato di incarico_chiuso_ts
+  // sul solo candidato e' STATO lo stesso bug del Bug 1, applicato a
+  // questo campo - spostato in recomputeIncaricoChiusoTs_ (chiamata in
+  // fondo a addActivityEvent/updateActivityEvent), che deriva dal log
+  // INTERO se esiste davvero un rientro successivo alla chiusura, non
+  // dal solo candidato appena toccato.
 
   // Idempotenza: se questo stesso rientro (stesso job, stessa data,
   // stessa provenienza) e' gia' stato registrato in precedenza - es. un
@@ -1047,8 +1093,10 @@ function updateActivityEvent(params) {
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
 
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate), candidate, remaining);
-  // P5: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_.
+  // P5/P5b: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_/
+  // recomputeIncaricoChiusoTs_.
   recomputeCurrentStatus_(job, remaining);
+  recomputeIncaricoChiusoTs_(job, remaining);
 
   job.activity_log_json = serializeActivityLog_(remaining);
   writeJobToRow_(sheet, row, headers, job, originalJob);

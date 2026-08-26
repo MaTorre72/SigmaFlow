@@ -1,6 +1,61 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase P (ambiente e lock globale) — P5b: fix anche su incarico_chiuso_ts, su richiesta di Marco (2026-08-26, sessione 3 continua)
+
+Marco ha confermato di voler applicare anche il fix sul punto
+esplorativo di P5 (`incarico_chiuso_ts`). Stesso principio di
+`recomputeCurrentStatus_`: nuova funzione pura
+`recomputeIncaricoChiusoTs_(job, log)` (Kanban.gs) — un incarico chiuso
+viene riaperto (`incarico_chiuso_ts` azzerato) solo se nel log esiste
+un vero rientro (move da stand_by/done verso backlog/prep)
+**cronologicamente successivo alla chiusura registrata**, non per
+qualunque candidato che rappresenti quel pattern indipendentemente da
+quando è davvero accaduto. Le due righe che facevano l'azzeramento
+incondizionato sono state tolte da `applyManualMoveEffects_` (che resta
+solo per gli altri effetti su `visite`, invariati). Chiamata in fondo a
+`addActivityEvent`/`updateActivityEvent`, **non** in
+`deleteActivityEvent` — deliberatamente fuori scope: una volta azzerato,
+il valore originale di `incarico_chiuso_ts` non è più recuperabile dal
+solo log, stesso limite (per lo stesso motivo) per cui
+`applyManualMoveEffects_` già non tocca gli effetti su `visite` in
+cancellazione.
+
+**Bug reale trovato scrivendo il test del caso legittimo** (non solo
+"sembra corretto" — verificato con un secondo test dedicato, prima
+mancante): la prima versione confrontava gli istanti con `< / <=`
+stretto, scartando un rientro con timestamp **identico** alla chiusura
+(caso reale: un rientro registrato "ora" subito dopo una chiusura fatta
+anch'essa "ora" — capita spesso, la precisione dei timestamp non
+garantisce mai un ordinamento stretto tra due azioni ravvicinate nello
+stesso secondo). Corretto usando `< 0` invece di `<= 0` nel confronto
+(un pareggio conta come "successivo", non viene scartato).
+
+**Test aggiornati/aggiunti** (`Tests.gs`), entrambi registrati e
+verificati: il test esplorativo di P5 è stato rinominato e la sua
+asserzione capovolta (da "documenta il bug" a "verifica il fix") —
+`testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob`.
+Aggiunto il test simmetrico per il caso legittimo, che ha trovato il
+bug del pareggio sopra —
+`testAddActivityEventRecentReentryAfterClosureStillReopensJob` (un
+rientro vero, registrato "ora" subito dopo una chiusura fatta anch'essa
+"ora", deve continuare a riaprire l'incarico esattamente come prima di
+questo fix).
+
+**171/171 test nell'harness Node** (170 preesistenti + 1 nuovo — il test
+esplorativo di P5 è stato riusato/rinominato, non duplicato). Push su
+TEST verificato: 16/16 file identici. `moveJob`/`deleteActivityEvent`
+non toccate (verificato con `git diff`, zero righe modificate in
+entrambe).
+
+**Programma Fase P — P1-P5 tutte DONE, nessun residuo aperto.**
+`docs/DESIGN_lock_ambiente.md` §6 aggiornato, tutte le spunte a TRUE.
+
+**PR**: [#12](https://github.com/MaTorre72/SigmaFlow/pull/12) da
+aggiornare con questo commit.
+
+---
+
 ## Fase P (ambiente e lock globale) — P5 DONE, due bug reali corretti + un terzo confermato in attesa di decisione (2026-08-26, sessione 3)
 
 Proseguimento della sessione P1-P4 (stesso branch, verificato allineato

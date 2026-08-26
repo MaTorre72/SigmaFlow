@@ -350,7 +350,8 @@ function runAllTests() {
     testAddActivityEventManualMoveAfterReentryContinuesUpdatingStatus,
     testAddActivityEventBackdatedMoveDoesNotOverrideMoreRecentStatus,
     testDeleteActivityEventRevertsStatusToNewMostRecentMove,
-    testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed,
+    testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob,
+    testAddActivityEventRecentReentryAfterClosureStillReopensJob,
     testAddActivityEventColonnaNonTrovata,
     testAddActivityEventReasonObbligatoria,
     testAddActivityEventSequenceWarningsSenzaForce,
@@ -3151,20 +3152,19 @@ function testDeleteActivityEventRevertsStatusToNewMostRecentMove() {
   });
 }
 
-// P5 (DESIGN_lock_ambiente.md §2.5, punto esplorativo): stesso schema del
-// Bug 1 ("agisce sul candidato invece che sul piu' recente del log
+// P5b (DESIGN_lock_ambiente.md §2.5, punto esplorativo di P5 CONFERMATO
+// come bug e corretto su richiesta esplicita di Marco): stesso schema
+// del Bug 1 ("agisce sul candidato invece che sul piu' recente del log
 // intero"), qui applicato a incarico_chiuso_ts invece che a job.status.
 // Riprodotto con un log costruito direttamente sulla riga (gli eventi
 // automatici dell'API sono sempre stampati "ora", non backdatabili via
 // parametro - stesso limite gia' aggirato da testAddJobWithPastArrival_
 // per il solo campo arrival_ts, qui esteso al log intero).
 //
-// RISULTATO: CONFERMATO UN BUG ANALOGO. Segnalato a Marco, NON corretto
-// in questa sessione su sua richiesta esplicita (§2.5) - in attesa di
-// decisione. Questo test documenta il comportamento ATTUALE (il bug),
-// non quello desiderato: va aggiornato insieme a un eventuale fix, non
-// lasciato cosi' per sempre.
-function testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed() {
+// Corretto con recomputeIncaricoChiusoTs_ (Kanban.gs): un rientro vecchio
+// backdated, precedente alla chiusura gia' registrata, non deve piu'
+// riaprire l'incarico per errore.
+function testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
     var created = addJob({ title: 'Esplorativo incarico_chiuso_ts', size_class: 'S', status: 'backlog' }).data;
@@ -3205,8 +3205,35 @@ function testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedN
     assertEquals_('wait_client', result.data.event.from, 'precondizione: il candidato deve risolvere from=wait_client (vero pattern di rientro, non un caso degenere)');
 
     var job2 = readTable_(sheet).filter(function(j) { return j.job_id === jobId; })[0];
-    assertEquals_('', job2.incarico_chiuso_ts, 'BUG CONFERMATO (non corretto in questa sessione): un rientro vecchio backdated azzera comunque incarico_chiuso_ts anche se il job resta chiuso da eventi piu\' recenti - vedi DESIGN_lock_ambiente.md §2.5');
-    assertEquals_('wip', job2.status, 'a differenza di incarico_chiuso_ts, lo status NON viene toccato da questo evento vecchio - P5 gia\' corregge correttamente questo caso');
+    assertTrue_(Boolean(job2.incarico_chiuso_ts), 'un rientro vecchio backdated, precedente alla chiusura gia\' registrata, non deve riaprire l\'incarico per errore (P5b)');
+    assertEquals_(beforeCorrection.incarico_chiuso_ts, job2.incarico_chiuso_ts, 'la chiusura deve restare esattamente quella gia\' registrata, non una nuova');
+    assertEquals_('wip', job2.status, 'lo status non e\' toccato da questo evento vecchio (P5 gia\' corretto)');
+  });
+}
+
+// P5b: verifica il caso legittimo simmetrico - un rientro VERO,
+// successivo alla chiusura gia' registrata, deve continuare a riaprire
+// l'incarico esattamente come prima di questo fix. Senza questo test,
+// un fix troppo conservativo su recomputeIncaricoChiusoTs_ potrebbe
+// smettere di riaprire MAI l'incarico, scambiando un bug con un altro.
+function testAddActivityEventRecentReentryAfterClosureStillReopensJob() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Rientro vero dopo chiusura', size_class: 'M' }).data;
+    moveJob({ job_id: created.job_id, status: 'wip' });
+    moveJob({ job_id: created.job_id, status: 'wait_client' });
+
+    var closed = updateJob({ job_id: created.job_id, invoiced: true });
+    assertTrue_(closed.success, 'la chiusura deve riuscire');
+    var beforeReentry = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertTrue_(Boolean(beforeReentry.incarico_chiuso_ts), 'precondizione: l\'incarico e\' chiuso');
+
+    // Rientro vero, REGISTRATO ORA - successivo alla chiusura appena fatta.
+    var reentry = addActivityEvent({ job_id: created.job_id, type: 'move', ts: nowIso_(), to: 'backlog' });
+    assertTrue_(reentry.data.ok === true, 'il rientro deve registrarsi: ' + JSON.stringify(reentry.data));
+
+    var job = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS)).filter(function(j) { return j.job_id === created.job_id; })[0];
+    assertEquals_('', job.incarico_chiuso_ts, 'un rientro vero SUCCESSIVO alla chiusura deve continuare a riaprire l\'incarico, esattamente come prima di P5b');
   });
 }
 

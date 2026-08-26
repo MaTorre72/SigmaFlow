@@ -254,7 +254,7 @@ storico (§2.1-§2.4). Resta da fare P5:
 | **P2** | `SF_READ_ACTIONS_`: lock globale solo sulle azioni di scrittura. | ✅ Completata (commit `89bf7ea`, gate confermato) | — |
 | **P3** | `doPost` delega ad `api(params.action, params)`. | ✅ Completata (commit `c94a32c`) | — |
 | **P4** | Barra segmentata del percorso card, tab Informazioni. | ✅ Completata (commit `c94a32c`) | — |
-| **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts` (nuova funzione pura, dal log intero) dagli effetti su `visite` (restano legati al candidato specifico, mai in delete). Chiamata di ricalcolo in fondo a `addActivityEvent`/`updateActivityEvent`/`deleteActivityEvent`. Test dedicati per Bug 1, Bug 2, e test esplorativo su `incarico_chiuso_ts` (§2.5/§6). | ✅ Completata (Bug 1/Bug 2, sessione 2026-08-26) — punto esplorativo su `incarico_chiuso_ts` **confermato come bug analogo, non corretto**, in attesa di decisione di Marco | — |
+| **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts` (nuova funzione pura, dal log intero) dagli effetti su `visite` (restano legati al candidato specifico, mai in delete). Chiamata di ricalcolo in fondo a `addActivityEvent`/`updateActivityEvent`/`deleteActivityEvent`. Test dedicati per Bug 1, Bug 2, e test esplorativo su `incarico_chiuso_ts` (§2.5/§6). | ✅ Completata (Bug 1/Bug 2 + P5b `incarico_chiuso_ts`, sessione 2026-08-26) | — |
 
 ## 5. Fuori scope, per ora
 
@@ -299,10 +299,19 @@ pane): nessuna riga d'azione residua, elenco completo nei commit e in
       (backdated) su un job già richiuso da eventi successivi più
       recenti — **verificato: SÌ, si riproduce lo stesso schema di
       Bug 1** (`incarico_chiuso_ts` azzerato per errore); segnalato a
-      Marco, fix **non applicato** su sua richiesta esplicita, in attesa
-      di decisione — documentato con
-      `testExploratoryIncaricoChiusoTsResetByOldBackdatedReentry_BugConfirmedNotYetFixed`
-      (asserisce il comportamento attuale/il bug, non quello desiderato) (P5)
+      Marco, che ha confermato di volerlo corretto (P5b) — nuova
+      funzione pura `recomputeIncaricoChiusoTs_(job, log)`, stesso
+      principio di `recomputeCurrentStatus_`: riapre solo se esiste un
+      vero rientro cronologicamente successivo alla chiusura registrata.
+      Chiamata in fondo a `addActivityEvent`/`updateActivityEvent`, **non**
+      in `deleteActivityEvent` (deliberato — il valore originale non è
+      recuperabile dal solo log dopo un azzeramento). Test aggiornato
+      (`testAddActivityEventOldBackdatedReentryDoesNotReopenAlreadyClosedJob`)
+      più il test simmetrico del caso legittimo
+      (`testAddActivityEventRecentReentryAfterClosureStillReopensJob`,
+      che ha trovato un secondo bug — un confronto di timestamp troppo
+      stretto che scartava un rientro con ts identico alla chiusura,
+      corretto usando `<` invece di `<=`) (P5)
 - [x] `moveJob` non modificata — nessuna regressione sul drag-and-drop
       reale (P5) — verificato con `git diff`, zero righe toccate
 - [x] Nessuna regressione sui test esistenti (170/170, 167 preesistenti
