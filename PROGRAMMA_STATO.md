@@ -1,5 +1,85 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-25
+Aggiornato: 2026-08-26
+
+## Fase P (ambiente e lock globale) — P1 DONE, in pausa al gate di P2 (2026-08-26)
+
+Sessione autonoma (runbook `docs/RUNBOOK_esecuzione_autonoma.md`), su
+[docs/DESIGN_lock_ambiente.md](docs/DESIGN_lock_ambiente.md) — nuovo
+documento, allegato da Marco in questa sessione, aggiunto al repo su
+branch dedicato `fix/fase-p-lock-ambiente-2026-08-26` (creato da
+`origin/main` aggiornato, commit `3e13ba2`, verificato con `git fetch` +
+`git status` prima di iniziare — nessuna divergenza).
+
+**P1 — variabile per-esecuzione al posto della Script Property
+condivisa**, causa di fondo degli incidenti del 2026-08-19 e 2026-08-25
+(vedi sezioni sotto): `PROP_SPREADSHEET_ID` era letta/scritta da
+`getSpreadsheet_()`/`withEnvironment_()` (Utils.gs) per instradare
+l'ambiente di ogni singola chiamata `api()` — un dato che dovrebbe vivere
+solo dentro quella chiamata, ma persisteva tra esecuzioni separate
+(Script Property, per progettazione condivisa su tutto il progetto Apps
+Script). Se un'esecuzione si interrompeva prima del proprio `finally`, il
+valore sporco sopravviveva ed era ereditato dalla richiesta successiva —
+di un utente diverso, in un momento diverso.
+
+**Implementato**: nuova variabile globale `__sfRoutedSpreadsheetId_`
+(Utils.gs) — per costruzione isolata alla singola esecuzione (ogni
+esecuzione Apps Script parte in un'isolate V8 nuova, nessuna memoria
+condivisa tra esecuzioni separate), mai persistita. `getSpreadsheet_()`
+la legge al posto della property; `withEnvironment_()` la valorizza a
+inizio chiamata e la ripristina nel proprio `finally` (stesso pattern di
+prima, lock incluso — P1 non tocca il lock, solo l'instradamento).
+Stesso trattamento in `eseguiMigrazioneCompleta_` (ActivityLog.gs),
+`allineaSchemaSuProd` (Schema.gs) e `withTestSpreadsheet_` (Tests.gs —
+non elencata esplicitamente in §1 del documento ma necessaria: e' il
+meccanismo che instrada praticamente ogni test verso il foglio TEST,
+sarebbe rimasta orfana altrimenti). Il fallback di bootstrap in
+`setupSigmaFlow()` (Schema.gs, righe 178-179) resta invariato, sulla
+Script Property — comportamento persistente voluto, non toccato da P1
+come da documento.
+
+**Test aggiornati/aggiunti** (`Tests.gs`): i tre test che manipolavano
+`PROP_SPREADSHEET_ID` direttamente per verificare il vecchio meccanismo
+sono stati riscritti per il nuovo —
+`testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty`
+(l'assert finale non verifica piu' "la property sporca viene ripristinata"
+ma "non viene ne' letta ne' scritta da questo percorso"),
+`testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent`
+(rimosso il salvataggio/ripristino di `PROP_SPREADSHEET_ID`, ormai
+irrilevante per quella funzione). Nuovo test aggiunto, copertura diretta
+della causa di fondo:
+`testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty` — chiama
+`getSpreadsheet_()` fuori da qualunque `withEnvironment_`/
+`withTestSpreadsheet_` (variabile a `null`, come l'inizio di
+un'esecuzione reale) con la property sporcata a mano, verifica che
+risolva `DEFAULT_SPREADSHEET_ID` e non la property.
+`testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty`
+(regressione del fix 08-25 su `getSpreadsheetForEnv_('prod')`) lasciato
+invariato — funzione diversa, non toccata da P1, gia' non passava mai da
+`getSpreadsheet_()` nel ramo 'prod'.
+
+**163/163 test nell'harness Node** (161 preesistenti + 2 nuovi, nessuna
+regressione). Push su TEST verificato: 16/16 file identici tra TEST e
+`apps-script/src`.
+
+**Criteri di accettazione P1 (§6 del documento) — tutti verificati
+TRUE**: `getSpreadsheet_()`/`withEnvironment_()` non leggono/scrivono
+piu' `PROP_SPREADSHEET_ID` per instradare; `eseguiMigrazioneCompleta_`/
+`allineaSchemaSuProd` aggiornate allo stesso meccanismo, stesso
+comportamento osservabile (confermato da
+`testEseguiMigrazioneCompletaEndToEndOnOldSchemaData`, gia' esistente,
+passata invariata); il fallback di bootstrap in `setupSigmaFlow()`
+funziona come prima, invariato; tutti i test esistenti restano verdi,
+quelli che manipolavano la property riscritti con stessa copertura;
+nessun cambio di risultato osservabile su nessun test esistente.
+
+**P2 (lock solo sulle scritture) — in pausa al gate 🔴 esplicito del
+documento**: prima di scrivere qualunque codice, l'elenco delle azioni di
+`routeAction_` classificate lettura/scrittura va confermato da Marco.
+Non best-guessato. In attesa.
+
+**PR**: da aprire su `fix/fase-p-lock-ambiente-2026-08-26` per la
+review di P1, senza aspettare la chiusura di P2 (richiesta esplicita di
+Marco in sessione).
 
 ## Incidente di sessione — checkout locale disallineato da `origin/main`, riconciliazione (2026-08-25)
 

@@ -1,5 +1,17 @@
+// P1 (DESIGN_lock_ambiente.md, §2.1): l'ambiente risolto per la singola
+// chiamata NON vive piu' nella Script Property condivisa
+// PROP_SPREADSHEET_ID (persistente e condivisa tra esecuzioni separate,
+// causa di fondo degli incidenti del 2026-08-19 e 2026-08-25 — una
+// property sporca da un'esecuzione interrotta sopravvive e viene
+// ereditata dalla richiesta successiva), ma in questa variabile globale:
+// ogni esecuzione Apps Script parte in un'isolate V8 nuova, senza
+// memoria condivisa tra esecuzioni — una variabile dichiarata qui e'
+// per costruzione isolata alla singola chiamata, senza bisogno di un
+// finally per "proteggerla" da altre richieste in corso. Mai persistita.
+var __sfRoutedSpreadsheetId_ = null;
+
 function getSpreadsheet_() {
-  var id = PropertiesService.getScriptProperties().getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  var id = __sfRoutedSpreadsheetId_;
   if (id) {
     return SpreadsheetApp.openById(id);
   }
@@ -58,19 +70,14 @@ function normalizeEnv_(env) {
 function withEnvironment_(env, callback) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  var props = PropertiesService.getScriptProperties();
-  var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  var previousId = __sfRoutedSpreadsheetId_;
   var ss = getSpreadsheetForEnv_(normalizeEnv_(env));
 
   try {
-    props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+    __sfRoutedSpreadsheetId_ = ss.getId();
     return callback(ss);
   } finally {
-    if (previousId) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-    }
+    __sfRoutedSpreadsheetId_ = previousId;
     lock.releaseLock();
   }
 }

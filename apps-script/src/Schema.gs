@@ -231,17 +231,12 @@ function allineaSchemaSuProd() {
 
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  var props = PropertiesService.getScriptProperties();
-  var previousSpreadsheetId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+  var previousSpreadsheetId = __sfRoutedSpreadsheetId_;
+  __sfRoutedSpreadsheetId_ = ss.getId();
   try {
     return setupSigmaFlow();
   } finally {
-    if (previousSpreadsheetId) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetId);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-    }
+    __sfRoutedSpreadsheetId_ = previousSpreadsheetId;
     lock.releaseLock();
   }
 }

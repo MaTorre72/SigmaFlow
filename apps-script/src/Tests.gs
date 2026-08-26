@@ -1594,13 +1594,17 @@ function testEseguiArchiviazioneAutomaticaGiornalieraReturnsScanResult() {
   });
 }
 
-// Bugfix 2026-08-19: regressione sull'incidente reale — la Script Property
-// condivisa SIGMAFLOW_SPREADSHEET_ID e' rimasta bloccata su un valore
-// sporco (un'esecuzione precedente interrotta prima del proprio finally di
-// ripristino). Simulato qui sporcando la property con un id chiaramente
-// diverso da TEST/PROD prima di far scattare il trigger: con il bug
-// presente, archiveEligibleJobs_() avrebbe risolto quello stesso id
-// sporco (via getSpreadsheet_() ambientale) invece del foglio TEST vero.
+// Bugfix 2026-08-19, riscritto per P1 (2026-08-26, DESIGN_lock_ambiente.md
+// §2.1): l'incidente originale nasceva da un valore sporco lasciato nella
+// Script Property condivisa SIGMAFLOW_SPREADSHEET_ID, ereditato dalla
+// richiesta successiva. Con P1, getSpreadsheet_()/withEnvironment_() non
+// leggono ne' scrivono piu' quella property per instradare una chiamata —
+// usano solo una variabile per-esecuzione (__sfRoutedSpreadsheetId_,
+// Utils.gs), quindi una property sporca lasciata da fuori (un vecchio
+// script, una modifica manuale) non puo' piu' essere letta da questo
+// percorso: il test verifica esattamente questo, non piu' "la property
+// sporca viene ripristinata" (non ha piu' senso: il codice non la tocca
+// affatto).
 function testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsheetProperty() {
   withTestSpreadsheet_(function(ss) {
     resetTestDatabase_(ss);
@@ -1623,7 +1627,7 @@ function testEseguiArchiviazioneAutomaticaGiornalieraIgnoresDirtyAmbientSpreadsh
     var archivio = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS_ARCHIVIO)).filter(function(j) { return j.job_id === created.job_id; });
     assertEquals_(1, archivio.length, 'il caso deve trovarsi nell\'Archivio del vero foglio TEST');
 
-    assertEquals_('id-sporco-non-test-non-prod', props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID), 'la property sporca preesistente deve restare intatta dopo l\'esecuzione (withEnvironment_ la ripristina sempre)');
+    assertEquals_('id-sporco-non-test-non-prod', props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID), 'la property sporca non deve essere ne\' letta ne\' scritta da questo percorso (P1: instradamento solo tramite variabile per-esecuzione) — resta esattamente al valore impostato dal test');
 
     props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
   });
@@ -1664,6 +1668,34 @@ function testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty() {
   }
 }
 
+// P1 (2026-08-26, DESIGN_lock_ambiente.md, §2.1/§6): copertura diretta
+// della causa di fondo — getSpreadsheet_() (chiamata ambientalmente da
+// 27+ punti in Kanban.gs/ActivityLog.gs/Model.gs/Backup.gs) non deve piu'
+// leggere la Script Property condivisa PROP_SPREADSHEET_ID per
+// instradare, solo la variabile per-esecuzione __sfRoutedSpreadsheetId_
+// (Utils.gs). Chiamata qui FUORI da qualunque withEnvironment_/
+// withTestSpreadsheet_ (quindi con la variabile a null, come sarebbe
+// l'inizio di una qualunque esecuzione reale): con una property sporca
+// preesistente, il bug ora chiuso avrebbe fatto risolvere quell'id
+// sporco — la versione corretta deve invece ricadere su
+// DEFAULT_SPREADSHEET_ID, ignorando del tutto la property.
+function testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty() {
+  var props = PropertiesService.getScriptProperties();
+  var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, 'id-sporco-non-test-non-prod');
+
+  try {
+    var resolved = getSpreadsheet_();
+    assertEquals_(SIGMAFLOW.DEFAULT_SPREADSHEET_ID, resolved.getId(), 'getSpreadsheet_() non deve piu\' leggere PROP_SPREADSHEET_ID per instradare — senza una chiamata withEnvironment_/withTestSpreadsheet_ che valorizzi la variabile per-esecuzione, deve ricadere su DEFAULT_SPREADSHEET_ID, mai sulla property sporca');
+  } finally {
+    if (previousId) {
+      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);
+    } else {
+      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+    }
+  }
+}
+
 // Bugfix 2026-08-25 (richiesta di Marco): dopo aver eliminato
 // SIGMAFLOW_SPREADSHEET_ID (property PROD, incidente sopra), ha chiesto
 // se poteva eliminare anche SIGMAFLOW_TEST_SPREADSHEET_ID. Diversa da
@@ -1674,10 +1706,13 @@ function testGetSpreadsheetForEnvProdIgnoresDirtyAmbientSpreadsheetProperty() {
 // DEFAULT_TEST_SPREADSHEET_ID. Verifica che la property possa restare
 // assente senza rompere l'esecuzione di test/migrazioni dall'editor
 // (throw "Script Property mancante" prima di questo fix).
+// P1 (2026-08-26): non ripristina piu' SIGMAFLOW.PROP_SPREADSHEET_ID —
+// withTestSpreadsheet_ non la tocca affatto (instrada tramite la
+// variabile per-esecuzione __sfRoutedSpreadsheetId_, Utils.gs), quindi
+// non c'e' piu' nulla da salvare/ripristinare su quella property qui.
 function testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent() {
   var props = PropertiesService.getScriptProperties();
   var previousTestProp = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
-  var previousSpreadsheetProp = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
   props.deleteProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
 
   try {
@@ -1691,11 +1726,6 @@ function testWithTestSpreadsheetFallsBackToDefaultTestIdWhenPropertyAbsent() {
       props.setProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID, previousTestProp);
     } else {
       props.deleteProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
-    }
-    if (previousSpreadsheetProp) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetProp);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
     }
   }
 }
@@ -3910,14 +3940,20 @@ function runSingleTest_(testFn) {
 // docs/testing-and-security.md — resta un override legittimo, non
 // rimosso), ricade su DEFAULT_TEST_SPREADSHEET_ID (id fisso) se la
 // property e' assente — cosi' quella property puo' restare eliminata a
-// riposo (stesso stato "pulito" ora scelto per PROP_SPREADSHEET_ID)
-// senza rompere l'esecuzione di test/migrazioni dall'editor, che prima
-// si fermava con "Script Property mancante".
+// riposo senza rompere l'esecuzione di test/migrazioni dall'editor, che
+// prima si fermava con "Script Property mancante".
+//
+// P1 (2026-08-26, DESIGN_lock_ambiente.md): l'instradamento verso il
+// foglio TEST per la durata del callback non passa piu' dalla Script
+// Property condivisa PROP_SPREADSHEET_ID (letta da getSpreadsheet_() nei
+// 27+ punti che la chiamano ambientalmente), ma dalla stessa variabile
+// per-esecuzione __sfRoutedSpreadsheetId_ (Utils.gs) usata da
+// withEnvironment_ — stesso principio, stesso meccanismo.
 function withTestSpreadsheet_(callback) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   var props = PropertiesService.getScriptProperties();
-  var previousId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
+  var previousId = __sfRoutedSpreadsheetId_;
   var testId = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
 
   if (!testId) {
@@ -3925,15 +3961,11 @@ function withTestSpreadsheet_(callback) {
     throw new Error('Script Property mancante: ' + SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
   }
 
-  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, testId);
+  __sfRoutedSpreadsheetId_ = testId;
   try {
     return callback(SpreadsheetApp.openById(testId));
   } finally {
-    if (previousId) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousId);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-    }
+    __sfRoutedSpreadsheetId_ = previousId;
     lock.releaseLock();
   }
 }

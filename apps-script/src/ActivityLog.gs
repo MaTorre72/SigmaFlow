@@ -664,13 +664,14 @@ function computeVisiteFromLog_(job) {
 // Le funzioni riusate qui sotto (migrateActivityLogData_,
 // checkStructuralAlignment_/readColumns_ al loro interno,
 // migrateVisiteFromHistory_) risolvono lo spreadsheet target tramite
-// getSpreadsheet_() (Script Property PROP_SPREADSHEET_ID), non tramite
-// il parametro 'ss' che ricevono in superficie — per questo l'intera
-// orchestrazione, non solo l'allineamento schema, va eseguita con
-// PROP_SPREADSHEET_ID scambiata sul foglio target (stesso principio
-// gia' usato da withTestSpreadsheet_/withEnvironment_ in Utils.gs).
-// Verificato anche questo con un test dedicato: senza lo scambio, le
-// chiamate annidate risolvono lo spreadsheet sbagliato e falliscono.
+// getSpreadsheet_() (variabile per-esecuzione __sfRoutedSpreadsheetId_,
+// P1 — DESIGN_lock_ambiente.md), non tramite il parametro 'ss' che
+// ricevono in superficie — per questo l'intera orchestrazione, non solo
+// l'allineamento schema, va eseguita con quella variabile valorizzata
+// sul foglio target (stesso principio gia' usato da
+// withTestSpreadsheet_/withEnvironment_ in Utils.gs). Verificato anche
+// questo con un test dedicato: senza lo scambio, le chiamate annidate
+// risolvono lo spreadsheet sbagliato e falliscono.
 function eseguiMigrazioneCompleta_(ss, params) {
   params = params || {};
   var nomeAtteso = String(params.confermaNome || '');
@@ -681,9 +682,8 @@ function eseguiMigrazioneCompleta_(ss, params) {
 
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  var props = PropertiesService.getScriptProperties();
-  var previousSpreadsheetId = props.getProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-  props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, ss.getId());
+  var previousSpreadsheetId = __sfRoutedSpreadsheetId_;
+  __sfRoutedSpreadsheetId_ = ss.getId();
 
   try {
     var schemaAlignment = setupSigmaFlow();
@@ -713,11 +713,7 @@ function eseguiMigrazioneCompleta_(ss, params) {
     console.log(JSON.stringify(summary));
     return summary;
   } finally {
-    if (previousSpreadsheetId) {
-      props.setProperty(SIGMAFLOW.PROP_SPREADSHEET_ID, previousSpreadsheetId);
-    } else {
-      props.deleteProperty(SIGMAFLOW.PROP_SPREADSHEET_ID);
-    }
+    __sfRoutedSpreadsheetId_ = previousSpreadsheetId;
     lock.releaseLock();
   }
 }
