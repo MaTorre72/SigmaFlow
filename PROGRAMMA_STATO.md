@@ -1,6 +1,55 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## P7 — COMPLETA anche su PROD, eseguita da Marco (2026-08-26, sessione 6 continua)
+
+Seguito diretto della sezione sotto (TEST). Marco ha eseguito lui
+stesso, dall'editor Apps Script, dry-run e scrittura su PROD — nessuna
+azione di scrittura dati eseguita da Claude, come da regola del
+progetto.
+
+**PROD — dry-run** (`recomputeExistingJobsStatusSuProdDryRun`, 17:59:51):
+54 job scansionati, 0 righe malformate, **20 job cambierebbero** — 1
+su `status` (`JOB-20260707-0YXL`: `wait_client`→`wait_authority`), 20
+su `status_since_ts`, 0 su `incarico_chiuso_ts`. Numeri coerenti con
+l'analisi di §2.7 del documento (~20/55 disallineati).
+
+**Punto chiarito da Marco durante la review del dry-run**: l'analisi
+originale (§2.7) segnalava **2** job con `status` diverso dalla
+Cronologia (`JOB-20260707-0YXL` e `JOB-20260707-QSCD`), ma il dry-run
+ne mostra **1 solo**. Non è un bug della migrazione: `JOB-20260707-QSCD`
+non compare perché il suo `status` già corrisponde a quello che dice
+la sua Cronologia — l'errore è nell'**evento della Cronologia stesso**
+(un rientro in WIP registrato per sbaglio da un umano, confermato da
+Marco: "non doveva stare in WIP"), non un disallineamento status↔log.
+Dato che P5/P7 seguono sempre "la Cronologia comanda", un evento
+storico sbagliato ma coerente con lo `status` attuale non viene (e non
+deve) essere toccato da questa migrazione — correggerlo richiederebbe
+modificare l'evento stesso in Cronologia, un'azione manuale distinta,
+fuori scope qui. **1 è quindi il numero corretto**, confermato da
+Marco.
+
+**PROD — scrittura** (`recomputeExistingJobsStatusSuProdWrite`, 18:01:28):
+**esito identico al dry-run**, riga per riga, job per job, stesso
+prima/dopo per tutti e 20 — nessuna scrittura fuori da quanto già
+previsto e verificato. Nessun errore.
+
+**Log completo delle due esecuzioni PROD, conservato per un controllo
+a posteriori:**
+
+```
+Dry-run PROD (17:59:51): {"dry_run":true,"spreadsheet_id":"15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g","spreadsheet_name":"SigmaFlow Database","executed_at":"2026-08-26T17:59:53+02:00","total_rows_scanned":54,"rows_skipped_unparsable":[],"rows_changed":20,"changes_by_field":{"status":1,"status_since_ts":20,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]}],"changes":[{"job_id":"JOB-20260707-GUKC","row":8,"fields":[{"field":"status_since_ts","before":"2026-05-15T15:00","after":"2026-08-12T13:58"}]},{"job_id":"JOB-20260707-EMPA","row":11,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-10T09:00"}]},{"job_id":"JOB-20260707-18H2","row":12,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T12:00"}]},{"job_id":"JOB-20260707-Q0RY","row":14,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T11:47"}]},{"job_id":"JOB-20260707-NZFQ","row":16,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-06T15:00"}]},{"job_id":"JOB-20260707-763N","row":17,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-6QIZ","row":18,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-BGHE","row":19,"fields":[{"field":"status_since_ts","before":"2026-08-19T10:59:21+02:00","after":"2026-07-21T10:00"}]},{"job_id":"JOB-20260707-7YP8","row":20,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T09:00"}]},{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]},{"job_id":"JOB-20260707-AI13","row":26,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-22T09:00"}]},{"job_id":"JOB-20260707-427Q","row":35,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-05T16:45"}]},{"job_id":"JOB-20260707-QDXZ","row":37,"fields":[{"field":"status_since_ts","before":"2026-08-18T15:39:41+02:00","after":"2026-04-22T15:12"}]},{"job_id":"JOB-20260707-DQSL","row":41,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-05-30T09:00"}]},{"job_id":"JOB-20260729-UXVS","row":49,"fields":[{"field":"status_since_ts","before":"2026-07-29T09:00:00+02:00","after":"2026-07-28T17:00"}]},{"job_id":"JOB-20260810-0PBJ","row":50,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:27:17+02:00","after":"2026-08-01T12:01"}]},{"job_id":"JOB-20260818-C79W","row":51,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:46:42+02:00","after":"2026-08-17T09:00"}]},{"job_id":"JOB-20260818-XIM6","row":52,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:13:36+02:00","after":"2026-05-07T15:51"}]},{"job_id":"JOB-20260818-1BE6","row":53,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:37:40+02:00","after":"2026-05-18T07:55"}]},{"job_id":"JOB-20260818-E67E","row":54,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:55:31+02:00","after":"2026-06-22T15:49"}]}]}
+
+Scrittura PROD (18:01:28): {"dry_run":false,"spreadsheet_id":"15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g","spreadsheet_name":"SigmaFlow Database","executed_at":"2026-08-26T18:01:30+02:00","total_rows_scanned":54,"rows_skipped_unparsable":[],"rows_changed":20,"changes_by_field":{"status":1,"status_since_ts":20,"incarico_chiuso_ts":0},"status_changes_detail":[{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]}],"changes":[{"job_id":"JOB-20260707-GUKC","row":8,"fields":[{"field":"status_since_ts","before":"2026-05-15T15:00","after":"2026-08-12T13:58"}]},{"job_id":"JOB-20260707-EMPA","row":11,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-10T09:00"}]},{"job_id":"JOB-20260707-18H2","row":12,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T12:00"}]},{"job_id":"JOB-20260707-Q0RY","row":14,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2025-12-01T11:47"}]},{"job_id":"JOB-20260707-NZFQ","row":16,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-06T15:00"}]},{"job_id":"JOB-20260707-763N","row":17,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-6QIZ","row":18,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T15:00"}]},{"job_id":"JOB-20260707-BGHE","row":19,"fields":[{"field":"status_since_ts","before":"2026-08-19T10:59:21+02:00","after":"2026-07-21T10:00"}]},{"job_id":"JOB-20260707-7YP8","row":20,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-21T09:00"}]},{"job_id":"JOB-20260707-0YXL","row":21,"fields":[{"field":"status","before":"wait_client","after":"wait_authority"},{"field":"status_since_ts","before":"2026-06-15T09:00","after":"2026-07-20T14:12"}]},{"job_id":"JOB-20260707-AI13","row":26,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-07-22T09:00"}]},{"job_id":"JOB-20260707-427Q","row":35,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-08-05T16:45"}]},{"job_id":"JOB-20260707-QDXZ","row":37,"fields":[{"field":"status_since_ts","before":"2026-08-18T15:39:41+02:00","after":"2026-04-22T15:12"}]},{"job_id":"JOB-20260707-DQSL","row":41,"fields":[{"field":"status_since_ts","before":"2026-07-07T09:00:00+02:00","after":"2026-05-30T09:00"}]},{"job_id":"JOB-20260729-UXVS","row":49,"fields":[{"field":"status_since_ts","before":"2026-07-29T09:00:00+02:00","after":"2026-07-28T17:00"}]},{"job_id":"JOB-20260810-0PBJ","row":50,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:27:17+02:00","after":"2026-08-01T12:01"}]},{"job_id":"JOB-20260818-C79W","row":51,"fields":[{"field":"status_since_ts","before":"2026-08-18T10:46:42+02:00","after":"2026-08-17T09:00"}]},{"job_id":"JOB-20260818-XIM6","row":52,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:13:36+02:00","after":"2026-05-07T15:51"}]},{"job_id":"JOB-20260818-1BE6","row":53,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:37:40+02:00","after":"2026-05-18T07:55"}]},{"job_id":"JOB-20260818-E67E","row":54,"fields":[{"field":"status_since_ts","before":"2026-08-18T12:55:31+02:00","after":"2026-06-22T15:49"}]}]}
+```
+
+**Programma Fase P7 — completo, TEST e PROD.** Tutte le azioni di
+scrittura su PROD eseguite da Marco stesso, dall'editor Apps Script —
+nessuna scrittura dati eseguita da Claude, in nessun momento.
+`docs/DESIGN_lock_ambiente.md` §6 da aggiornare con le caselle P7.
+
+---
+
 ## P7 — migrazione una tantum status/status_since_ts/incarico_chiuso_ts: TEST completo, PROD in attesa di Marco (2026-08-26, sessione 6)
 
 Richiesta esplicita di Marco: "deve tutto essere coerente con la
