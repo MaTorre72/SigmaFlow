@@ -1,6 +1,20 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-26
 
+## Fase Q — CHIUSA DEFINITIVAMENTE: PR #15 mergiata, deploy fatto da Marco (2026-08-26, sessione 7)
+
+PR [#15](https://github.com/MaTorre72/SigmaFlow/pull/15) mergiata in
+`main` e nuovo deployment pubblicato, entrambi eseguiti da Marco. Dati
+PROD gia' corretti in modo permanente dalla migrazione (indipendente dal
+deployment, scritta direttamente sul foglio, vedi sotto) — il deploy
+serve solo a pubblicare eventuali modifiche di codice visibili lato
+client, nessuna in questa fase (Q e' interamente server-side). Nessun'
+altra azione lato Claude in sospeso su questa fase. `docs/DESIGN_derivazione_visite.md`
+§6 e `docs/DESIGN_lock_ambiente.md` §5 gia' aggiornati con le caselle
+spuntate (commit `327beb3`, prima del merge).
+
+---
+
 ## Fase Q — derivazione unificata di 'visite' dal log: COMPLETA (codice + TEST + PROD) (2026-08-26, sessione 7)
 
 Confermato da Marco: P6/P7 chiusi definitivamente, nessuno strascico
