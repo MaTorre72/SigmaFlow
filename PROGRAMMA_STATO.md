@@ -1,7 +1,7 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-27
 
-## Fase R e S — governo delle metriche dashboard: codice + test completi, push su TEST in attesa di re-login clasp (2026-08-27, sessione 8)
+## Fase R e S — governo delle metriche dashboard: COMPLETA, codice + test + push TEST + collaudo (2026-08-27, sessione 8)
 
 Eseguito da `docs/DESIGN_R_S.md` (Marco), branch dedicato
 `feat/fase-r-s-metriche-2026-08-27` creato da `main` aggiornato
@@ -71,17 +71,56 @@ client-side (rinomina di funzione, sole etichette) — nessun test Node
 applicabile, coerente con il precedente di P4/P6 (collaudo previsto nel
 Browser pane, non ancora eseguito in questa sessione — vedi sotto).
 
-**Bloccante trovato, non risolto da questa sessione**:
-`bash apps-script/test-harness/push-and-verify.sh` fallisce con
+**Bloccante incontrato e risolto da Marco**:
+`bash apps-script/test-harness/push-and-verify.sh` falliva con
 `{"error":"invalid_grant","error_description":"reauth related error
-(invalid_rapt)"}` — il token OAuth di `clasp` e' scaduto e richiede un
-re-login interattivo (`npx clasp login`, apertura browser, consenso
-Google). Non e' un problema di codice ne' di test: e' un'azione che
-tocca le credenziali Google di Marco, fuori da quanto un agente puo'
-fare (vedi limiti del progetto su credenziali/autenticazione). **Non
-eseguito ancora**: push su TEST, verifica `clasp pull` isolato + diff,
-collaudo Browser pane di R2/R3/R5/S2 (grafici e liste nuove) su markup
-reale.
+(invalid_rapt)"}` — token OAuth di `clasp` scaduto. Marco ha eseguito
+`npx clasp login` (re-login interattivo, fuori da quanto un agente puo'
+fare). Dopo il re-login: **push su TEST eseguito e verificato — 16/16
+file identici** (`push-and-verify.sh`, `clasp pull` isolato + diff).
+
+**Collaudo Browser pane** (server locale di riproduzione,
+`/tmp/sf-scratch/repro-server.js`, markup reale index/dashboard/client
++ `api()` via l'harness Node — rimosso a fine sessione): dati
+dimostrativi generati con `seedTestData` (60 job), dashboard aperta e
+scorsa per intero, nessun errore in console in nessun momento.
+Confermati visivamente:
+- **R2**: riga "Aggiunte (periodo)" — 12 iniziative/94 pt su 30 giorni
+  -> 2,8/settimana e 21,93 pt/settimana, entrambi derivati dallo stesso
+  totale (12 e 94), non piu' da una popolazione diversa.
+- **R3**: le cinque righe del blocco rework nel Quadro avanzato
+  riportano tutte "(per visita, non per iniziativa)"/"(per visita)",
+  distinte dalla percentuale del pannello principale (33% vs 13% sugli
+  stessi dati).
+- **R4**: "Rientri per causa — cliente / enti / interno: 2 / 1 / 1",
+  quota controllabile 75%, quota da enti 25% (2+1 su 4 totale) —
+  aritmetica verificata a mano.
+- **R5**: pannello "Fermi ora" mostra correttamente lo stato vuoto
+  ("Nessun job attualmente fermo in attesa", tutti i job demo hanno
+  `status_since_ts` vuoto) e, dopo aver backdatato manualmente un
+  evento move di prova (`addActivityEvent`, solo su questo server
+  locale, mai su TEST/PROD reali), la riga compare con cliente/tipo
+  attesa/giorni corretti; "Andamento mensile dell'attesa" mostra
+  correttamente lo stato vuoto quando i campioni `t_*_d` del dataset
+  demo sono a zero (limite del generatore dati demo, non di questa
+  fase).
+- **S2**: grafico a dispersione "WIP vs tempo di ciclo" nel Quadro
+  avanzato renderizzato con 22 punti reali, nessun errore.
+- **S3**: con 22 campioni storici di tempo di ciclo (>= soglia 20),
+  `cycleTimeBands` calcolato (p50=3, p85=8.04, p95=11.04); la riga di
+  prova con 9 giorni di attesa (> p85) e' comparsa in "Fermi ora"
+  colorata in rosso — fasce end-to-end confermate, non solo a livello
+  di unit test.
+- **S1**: riga "80° percentile del tempo prima del rientro" presente e
+  calcolata (0 giorni sul dataset demo, coerente con campioni `t_*_d`
+  tutti a zero — stesso limite del generatore dati demo di R5 sopra,
+  non un difetto del codice).
+
+**Fase R e S — programma completo.** Codice scritto e collaudato
+(189/189 test Node + collaudo Browser pane end-to-end), push su TEST
+verificato (16/16 identici). Nessuna PR aperta, nessun merge su
+`main` — branch `feat/fase-r-s-metriche-2026-08-27` pronto per la
+review di Marco quando vorra' aprirla.
 
 **Prossimo passo per Marco**: eseguire `npx clasp login` dal repository
 (reautorizza l'account gia' associato al progetto Apps Script), poi
