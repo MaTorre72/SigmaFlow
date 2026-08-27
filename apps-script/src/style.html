@@ -1237,6 +1237,21 @@
     background: var(--danger);
   }
 
+  /* S3 (DESIGN_R_S.md §3.8): fasce a percentile sulla lista "Fermi ora" -
+     applicate solo quando lo storico ha abbastanza campioni (righe senza
+     classe restano non colorate, comportamento identico a prima di S3). */
+  .blocked-band-green {
+    background: #e7f6ed;
+  }
+
+  .blocked-band-yellow {
+    background: #fff1cc;
+  }
+
+  .blocked-band-red {
+    background: #fdeceb;
+  }
+
   .rho-track {
     background: linear-gradient(90deg, #2f9e44 0 70%, #f2c94c 70% 85%, #d92d20 85% 100%);
     border-radius: 999px;

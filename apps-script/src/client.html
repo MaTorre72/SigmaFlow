@@ -1006,6 +1006,9 @@
   function updateLivePriorityBadge() {
     var impact = Number(document.getElementById('modal-impact').value || 0);
     var manageability = Number(document.getElementById('modal-manageability').value || 0);
+    // ATTENZIONE: duplica la formula di calcPriorityScore() in Utils.gs
+    // (server) solo per l'anteprima dal vivo, prima del salvataggio -
+    // se la formula server cambia, allineare anche qui.
     var score = impact && manageability ? Math.round(Math.sqrt(impact * manageability) * 100) / 100 : 0;
     var automaticPriority = suggestPriorityClassClient(score);
     var priority = document.getElementById('modal-priority-class').value || automaticPriority;
@@ -2101,12 +2104,12 @@
     document.getElementById('flow-open-points').textContent = metricValue(points.open_points, ' pt');
     document.getElementById('flow-added-cards').textContent = valueOrDash(points.added_cards);
     document.getElementById('flow-added-points').textContent = metricValue(points.added_points, ' pt');
-    document.getElementById('flow-added-rate').textContent = perWeekValue(flow.new_initiatives_per_day, '/settimana');
-    document.getElementById('flow-added-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.added_points, flow.window_days);
+    document.getElementById('flow-added-rate').textContent = perWeekFromWindowTotal_(points.added_cards, flow.window_days, '/settimana');
+    document.getElementById('flow-added-points-rate').textContent = perWeekFromWindowTotal_(points.added_points, flow.window_days, ' pt/settimana');
     document.getElementById('flow-completed-cards').textContent = valueOrDash(points.completed_cards);
     document.getElementById('flow-completed-points').textContent = metricValue(points.completed_points, ' pt');
     document.getElementById('flow-completed-rate').textContent = perWeekValue(flow.completed_per_day, '/settimana');
-    document.getElementById('flow-completed-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.completed_points, flow.window_days);
+    document.getElementById('flow-completed-points-rate').textContent = perWeekFromWindowTotal_(points.completed_points, flow.window_days, ' pt/settimana');
     document.getElementById('flow-window-days').textContent = valueOrDash(flow.window_days);
 
     // Chiesto da Marco (2026-08-20): "passaggi" non e' un termine
@@ -2123,12 +2126,19 @@
     });
 
     var rework = system.reworkMetrics || {};
+    // R4 (DESIGN_R_S.md §3.4): scomposizione dei rientri per causa
+    // (rework_cause) - quota controllabile (cliente + interno, leva:
+    // gating) vs non controllabile (enti).
+    var byCause = rework.by_cause || {};
     renderDl('system-rework-metrics', {
       'Iniziative con almeno un rientro': nullablePercent(rework.initiatives_with_rework, true),
       'Rientri medi quando il lavoro rientra': estimableValue(rework.average_reentries_when_reworked),
       'Visite medie per iniziativa': metricValue(rework.average_passages_per_initiative),
       'Visite totali alla settimana': perWeekValue(rework.total_passages_per_day, ' visite/settimana') + estimatedPointsSuffix_(rework.total_passages_per_day, avgPoints),
-      'Carico aggiuntivo dei rientri (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' visite/settimana') + estimatedPointsSuffix_(rework.additional_passages_from_rework, avgPoints)
+      'Carico aggiuntivo dei rientri (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' visite/settimana') + estimatedPointsSuffix_(rework.additional_passages_from_rework, avgPoints),
+      'Rientri per causa — cliente / enti / interno': byCause.total ? (byCause.client + ' / ' + byCause.authority + ' / ' + byCause.internal) : 'Dato non ancora stimabile',
+      'Quota controllabile (cliente + interno, leva: gating)': byCause.total ? nullablePercent(byCause.controllable_share, true) : 'Dato non ancora stimabile',
+      'Quota da enti (non controllabile direttamente)': byCause.total ? nullablePercent(byCause.external_share, true) : 'Dato non ancora stimabile'
     });
 
     var time = system.timeMetrics || {};
@@ -2196,6 +2206,9 @@
     renderWaitStatsRow_('wait-internal', waitTime.internal);
     document.getElementById('wait-total-days').textContent = metricValue(waitTime.total_days, ' g');
 
+    renderCurrentlyBlocked_(system.currentlyBlocked || []);
+    drawWaitTimeTrend_(system.waitTimeTrend || []);
+
     var latentBacklog = system.latentBacklogMetrics || {};
     renderDl('latent-backlog-metrics', {
       'Periodo analizzato': metricValue(latentBacklog.window_days, ' giorni'),
@@ -2204,6 +2217,7 @@
 
     renderDelayProfile(system.delayProfileMetrics || {});
     renderAdvancedMetrics(metrics);
+    drawWipCycleScatter_(system.wipCycleTimeScatter || []);
 
     renderScenarios(system.scenarioReadiness || {});
     renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
@@ -2269,13 +2283,18 @@
       'Visite nel sistema (L)': estimableValue(mg1.L)
     });
 
+    // R3 (DESIGN_R_S.md §3.3): questo blocco e' tutto calcolato per
+    // VISITA (reworkMetrics_, Model.gs), non per iniziativa come il
+    // pannello principale "Rientri e rework" (reworkShare di
+    // buildSystemState_) - le etichette lo dicono esplicitamente per
+    // non farle sembrare la stessa grandezza con un numero diverso.
     var rework = metrics.rework || {};
     renderDl('advanced-rework-metrics', {
-      'Quota di visite di rework (p1)': nullablePercent(rework.p1, true),
-      'Rientri medi quando c\'e\' rework (r)': estimableValue(rework.r),
-      'Numero atteso di visite per iniziativa (E[K])': estimableValue(rework.E_K),
-      'Tasso di arrivo effettivo (lambda_effective)': perWeekValue(rework.lambda_effective, ' visite/settimana'),
-      'Utilizzo effettivo (rho_effective)': nullablePercent(rework.rho_effective, true)
+      'Quota di visite di rework (per visita, non per iniziativa)': nullablePercent(rework.p1, true),
+      'Rientri medi per visita di rework (per visita, non per iniziativa)': estimableValue(rework.r),
+      'Numero atteso di visite per iniziativa (E[K], per visita)': estimableValue(rework.E_K),
+      'Tasso di arrivo effettivo (lambda_effective, per visita)': perWeekValue(rework.lambda_effective, ' visite/settimana'),
+      'Utilizzo effettivo (rho_effective, per visita)': nullablePercent(rework.rho_effective, true)
     });
   }
 
@@ -2295,10 +2314,143 @@
     document.getElementById(prefix + '-max').textContent = estimableValue(stats.max_days, ' g');
   }
 
+  // R5 (DESIGN_R_S.md §3.5): lista "Fermi ora" - job attualmente bloccati
+  // in una colonna di attesa, gia' ordinati per giorni decrescenti dal
+  // server (currentlyBlocked_, Model.gs). S3 (§3.8): se il server ha
+  // calcolato le fasce a percentile (campioni storici sufficienti), ogni
+  // riga porta anche 'band' ('green'/'yellow'/'red') - se assente,
+  // nessun colore (comportamento identico a prima di S3).
+  var WAIT_FIELD_LABELS_ = { t_cliente_d: 'Cliente', t_ente_d: 'Enti', t_interno_d: 'Interno' };
+  function renderCurrentlyBlocked_(items) {
+    var body = document.getElementById('currently-blocked-body');
+    var empty = document.getElementById('currently-blocked-empty');
+    var table = document.getElementById('currently-blocked-table');
+    body.innerHTML = '';
+    if (!items.length) {
+      table.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    table.hidden = false;
+    empty.hidden = true;
+    items.forEach(function(item) {
+      var tr = document.createElement('tr');
+      if (item.band) { tr.className = 'blocked-band-' + item.band; }
+      [item.title || item.job_id, item.client, WAIT_FIELD_LABELS_[item.wait_type] || item.wait_type, item.elapsed_days + ' g'].forEach(function(value) {
+        var td = document.createElement('td');
+        td.textContent = valueOrDash(value);
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  }
+
+  // R5: trend mensile dell'attesa (waitTimeMonthBuckets_, Model.gs) - tre
+  // serie (cliente/enti/interno), stesso stile a linee di
+  // drawPointsTimeline ("Carico mensile"), adattato a tre serie invece
+  // di una.
+  function drawWaitTimeTrend_(rows) {
+    var canvas = document.getElementById('wait-time-trend-chart');
+    var empty = document.getElementById('wait-time-trend-chart-empty');
+    var hasData = rows.some(function(row) {
+      return Number(row.client_days || 0) > 0 || Number(row.authority_days || 0) > 0 || Number(row.internal_days || 0) > 0;
+    });
+    if (!rows.length || !hasData) {
+      canvas.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    canvas.hidden = false;
+    empty.hidden = true;
+    var width = Math.max(560, canvas.parentElement.clientWidth - 32);
+    var height = 200;
+    var ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(ratio, ratio);
+    ctx.clearRect(0, 0, width, height);
+    var pad = { left: 42, right: 18, top: 18, bottom: 34 };
+    var max = Math.max.apply(null, rows.map(function(row) { return Math.max(row.client_days, row.authority_days, row.internal_days); }).concat([1]));
+    ctx.font = '12px Arial';
+    ctx.strokeStyle = '#d8dee8';
+    ctx.fillStyle = '#627184';
+    for (var g = 0; g <= 4; g++) {
+      var gy = pad.top + (height - pad.top - pad.bottom) * g / 4;
+      ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(width - pad.right, gy); ctx.stroke();
+      ctx.fillText(String(Math.round(max * (1 - g / 4))), 4, gy + 4);
+    }
+    var colors = { client_days: '#2F6B9A', authority_days: '#238636', internal_days: '#B7791F' };
+    Object.keys(colors).forEach(function(field) {
+      ctx.beginPath();
+      ctx.strokeStyle = colors[field];
+      ctx.lineWidth = field === 'internal_days' ? 3 : 2;
+      rows.forEach(function(row, index) {
+        var x = pad.left + (width - pad.left - pad.right) * index / Math.max(1, rows.length - 1);
+        var y = height - pad.bottom - (height - pad.top - pad.bottom) * Number(row[field] || 0) / max;
+        if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+        if (field === 'internal_days') { ctx.fillStyle = '#627184'; ctx.fillText(row.label, x - 18, height - 12); }
+      });
+      ctx.stroke();
+    });
+  }
+
+  // S2 (DESIGN_R_S.md §3.7): scatter diagnostico WIP al momento di avvio
+  // vs tempo di ciclo (wipCycleTimeScatter_, Model.gs) - sotto soglia
+  // (10 punti) mostra "Dato non ancora stimabile" invece del canvas
+  // vuoto, stesso pattern di drawDelayHistogram_.
+  function drawWipCycleScatter_(points) {
+    var canvas = document.getElementById('wip-cycle-scatter-chart');
+    var empty = document.getElementById('wip-cycle-scatter-empty');
+    if (!points.length || points.length < 10) {
+      canvas.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    canvas.hidden = false;
+    empty.hidden = true;
+    var width = Math.max(420, canvas.parentElement.clientWidth - 32);
+    var height = 200;
+    var ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(ratio, ratio);
+    ctx.clearRect(0, 0, width, height);
+    var pad = { left: 34, right: 12, top: 12, bottom: 34 };
+    var plotWidth = width - pad.left - pad.right;
+    var plotHeight = height - pad.top - pad.bottom;
+    var maxWip = Math.max.apply(null, points.map(function(p) { return p.wip_at_start; }).concat([1]));
+    var maxCycle = Math.max.apply(null, points.map(function(p) { return p.cycle_time_days; }).concat([1]));
+    ctx.font = '11px Arial';
+    ctx.strokeStyle = '#d8dee8';
+    ctx.fillStyle = '#627184';
+    ctx.beginPath(); ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, height - pad.bottom); ctx.lineTo(width - pad.right, height - pad.bottom); ctx.stroke();
+    ctx.fillText('WIP al momento di avvio ->', pad.left, height - 8);
+    ctx.save();
+    ctx.translate(10, height - pad.bottom);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('Tempo di ciclo (g) ->', 0, 0);
+    ctx.restore();
+    ctx.fillStyle = '#2F6B9A';
+    points.forEach(function(p) {
+      var x = pad.left + plotWidth * (p.wip_at_start / maxWip);
+      var y = height - pad.bottom - plotHeight * (p.cycle_time_days / maxCycle);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
   function renderDelayProfile(profile) {
     renderDl('delay-profile-metrics', {
       'Rientri osservati (campione)': valueOrDash(profile.sample_size),
-      'Rientri medi per consegna (alpha)': estimableValue(profile.alpha)
+      'Rientri medi per consegna (alpha)': estimableValue(profile.alpha),
+      '80° percentile del tempo prima del rientro': estimableValue(profile.p80_days, ' giorni')
     });
     drawDelayHistogram_(profile.kernel, profile.bin_days || 7);
   }
@@ -2611,11 +2763,13 @@
   // dare sempre anche i punti oltre alle iniziative): 'total' e' gia'
   // un totale sull'intera finestra (windowDays) - qui solo la
   // conversione a un tasso settimanale, nessun nuovo dato dal server.
-  function pointsPerWeekFromWindowTotal_(total, windowDays) {
+  // R2 (DESIGN_R_S.md §3.2): generalizzata per accettare il suffisso -
+  // riusata anche per la riga "Aggiunte" (card/settimana), non solo pt.
+  function perWeekFromWindowTotal_(total, windowDays, suffix) {
     if (total === null || total === undefined || !windowDays) {
       return 'Dato non ancora stimabile';
     }
-    return metricValue(Math.round(Number(total) / windowDays * 7 * 100) / 100, ' pt/settimana');
+    return metricValue(Math.round(Number(total) / windowDays * 7 * 100) / 100, suffix);
   }
 
   // Stima i punti/settimana equivalenti di un tasso espresso in

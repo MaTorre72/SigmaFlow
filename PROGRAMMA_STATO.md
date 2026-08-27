@@ -1,5 +1,105 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-26
+Aggiornato: 2026-08-27
+
+## Fase R e S — governo delle metriche dashboard: codice + test completi, push su TEST in attesa di re-login clasp (2026-08-27, sessione 8)
+
+Eseguito da `docs/DESIGN_R_S.md` (Marco), branch dedicato
+`feat/fase-r-s-metriche-2026-08-27` creato da `main` aggiornato
+(`afcf61b`). Copre R1-R5 (Area 1: errori puri; Area 2: riorganizzazione
+metriche di governo) e S1-S3 (Area 3: strumenti diagnostici), piu' la
+chiusura documentale di Area 6 e Area 5.
+
+**Codice server** (`Model.gs`):
+- **R1** — `initiativeGroups_` conta i rientri *osservati nell'insieme
+  ricevuto* (righe con `numero_visita > 1`), non piu' `numero_visita - 1`
+  dell'ultima visita — corregge la sovrastima per i casi con rientri sia
+  dentro sia fuori dalla finestra osservata.
+- **R4** — nuova `reworkByCause_`, integrata in `buildSystemState_`
+  (`reworkMetrics.by_cause`): scompone i rientri per causa
+  (`wait_client`/`wait_authority`/`wait_internal`), quota controllabile
+  vs quota da enti.
+- **R5** — nuove `waitTimeMonthBuckets_` (trend mensile su 6 mesi,
+  `waitTimeTrend`) e `currentlyBlocked_` (lista "Fermi ora", stato
+  adesso, `currentlyBlocked`); `waitSamplesByField` non mescola piu'
+  l'attesa in corso dentro `waitTimeMetrics` (che ora resta solo sulle
+  attese gia' concluse nella finestra).
+- **S1** — nuovo helper `percentile_` (nearest-rank, riusato anche da
+  S3); `delayProfileMetrics.p80_days` aggiunto a `delayProfile_`.
+- **S2** — nuove `visitActiveInterval_`/`wipCycleTimeScatter_`
+  (`wipCycleTimeScatter`): scatter diagnostico WIP-al-momento-di-avvio
+  vs tempo di ciclo, per la futura Fase T (Cap. 12, "cercare il
+  ginocchio").
+- **S3** — `cycleTimeBands` (p50/p85/p95 sui tempi di ciclo storici,
+  solo con >=20 campioni) e campo `band` su ogni riga di
+  `currentlyBlocked` quando i campioni bastano — nessun colore altrimenti
+  (comportamento identico a prima di S3).
+
+**Codice client** (`client.html`/`dashboard.html`/`style.html`):
+- **R2** — `pointsPerWeekFromWindowTotal_` generalizzata in
+  `perWeekFromWindowTotal_(total, windowDays, suffix)`; riga "Aggiunte
+  (periodo)" ora usa `points.added_cards` per il tasso settimanale
+  (stessa popolazione del conteggio mostrato accanto), non piu'
+  `flow.new_initiatives_per_day`.
+- **R3** — etichette del Quadro avanzato (p1/r/E[K]/lambda_effective/
+  rho_effective) tutte rietichettate "(per visita, non per
+  iniziativa)" — nessuna formula cambiata, solo per non farle sembrare
+  la stessa grandezza (per-caso) del pannello principale.
+- Nuovo markup in `dashboard.html`: tabella "Fermi ora" (colorata per
+  fasce quando S3 le calcola, via classi CSS `blocked-band-*` in
+  `style.html`), canvas "Andamento mensile dell'attesa" (tre serie,
+  stesso pattern a linee di "Carico mensile"), canvas "WIP vs tempo di
+  ciclo" dentro il Quadro avanzato collassato (stesso pattern a punti
+  di `drawDelayHistogram_`, soglia 10 punti sotto la quale mostra "Dato
+  non ancora stimabile").
+
+**Punto 9 (chiusura, predisposizione Area 5/WSJF, rischio zero)**:
+commento incrociato aggiunto sopra `calcPriorityScore` (`Utils.gs`) e
+sopra il calcolo di `score` in `updateLivePriorityBadge` (`client.html`)
+— nessuna riga di formula toccata. `testPriorityHelpers` (gia'
+esistente, verifica `calcPriorityScore(1,1)=1`, `(2,2)=2`, `(3,4)=3.46`,
+`(4,4)=4`) copre gia' la verifica "nessun cambio di valore" richiesta
+dal criterio di accettazione — non serviva un test nuovo.
+
+**189/189 test nell'harness Node** (177 preesistenti + 12 nuovi: R1
+x2, R4 x2, R5 x2, S1 x2, S2 x2, S3 x2 — un test preesistente,
+`testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked`,
+rinominato e riscritto in `testBuildSystemStateSeparatesOngoingWaitIntoCurrentlyBlocked`
+perche' R5 ne capovolge l'assunzione: prima verificava che l'attesa in
+corso ENTRASSE in `waitTimeMetrics`, ora verifica che ne resti fuori e
+compaia invece in `currentlyBlocked`). R2/R3 sono puramente
+client-side (rinomina di funzione, sole etichette) — nessun test Node
+applicabile, coerente con il precedente di P4/P6 (collaudo previsto nel
+Browser pane, non ancora eseguito in questa sessione — vedi sotto).
+
+**Bloccante trovato, non risolto da questa sessione**:
+`bash apps-script/test-harness/push-and-verify.sh` fallisce con
+`{"error":"invalid_grant","error_description":"reauth related error
+(invalid_rapt)"}` — il token OAuth di `clasp` e' scaduto e richiede un
+re-login interattivo (`npx clasp login`, apertura browser, consenso
+Google). Non e' un problema di codice ne' di test: e' un'azione che
+tocca le credenziali Google di Marco, fuori da quanto un agente puo'
+fare (vedi limiti del progetto su credenziali/autenticazione). **Non
+eseguito ancora**: push su TEST, verifica `clasp pull` isolato + diff,
+collaudo Browser pane di R2/R3/R5/S2 (grafici e liste nuove) su markup
+reale.
+
+**Prossimo passo per Marco**: eseguire `npx clasp login` dal repository
+(reautorizza l'account gia' associato al progetto Apps Script), poi
+richiedere di riprendere questa sessione per completare push-and-verify
+e il collaudo Browser pane prima di considerare la fase davvero chiusa.
+Nessuna PR aperta, nessun merge su `main` — resta tutto sul branch
+`feat/fase-r-s-metriche-2026-08-27`, come da istruzioni.
+
+**Area 5 — idee da valutare, non implementate**: tre spunti raccolti
+dalla letteratura Kanban/Agile, nessuno ancora deciso — WSJF/Cost of
+Delay (prioritizzazione economica, manca ancora la stima del "costo del
+ritardo", decisione di business non presa), Team Health Monitor
+(sessione facilitata trimestrale, nessuna dipendenza tecnica), Coaching
+Kata (rituale conversazionale a cinque domande, traccia naturale in
+`PROGRAMMA_STATO.md` se in futuro si vorra' registrarlo). Dettaglio
+completo in `SPUNTI_bibliografia_gestione_team_2026-08-27.md`.
+
+---
 
 ## Fase Q — CHIUSA DEFINITIVAMENTE: PR #15 mergiata, deploy fatto da Marco (2026-08-26, sessione 7)
 

@@ -208,19 +208,16 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // chiusa con quel tipo di attesa valorizzato, una per ogni job ancora
   // fermo ora in quel tipo di attesa) - waitStats_ ne deriva totale,
   // numero di occorrenze, media, minimo, massimo.
+  // R5 (DESIGN_R_S.md, §3.5): questo campione resta SOLO sulle attese
+  // gia' concluse dentro la finestra ('observed') - lo "stato attuale"
+  // (job ancora fermi ora, senza tetto di finestra) e' ora una lista a
+  // se' (currentlyBlocked_, sotto), non piu' mescolato qui.
   var waitSamplesByField = { t_cliente_d: [], t_ente_d: [], t_interno_d: [] };
   observed.forEach(function(visit) {
     Object.keys(waitSamplesByField).forEach(function(field) {
       var value = Number(visit[field] || 0);
       if (value > 0) { waitSamplesByField[field].push(value); }
     });
-  });
-  jobs.forEach(function(job) {
-    var column = columnMap[normalizeStatus_(job.status)];
-    var field = column ? SIGMAFLOW.WAIT_ACCUMULATOR_FIELDS[column.id] : null;
-    if (!field || !job.status_since_ts) { return; }
-    var elapsed = Number(diffDays(job.status_since_ts, now) || 0);
-    if (elapsed > 0) { waitSamplesByField[field].push(elapsed); }
   });
   var waitTime = {
     client: waitStats_(waitSamplesByField.t_cliente_d),
@@ -251,6 +248,29 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var delayProfile = delayProfile_(allVisite);
   var workload = currentWorkload_(jobs, columnMap);
   var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
+  // R5: trend mensile dell'attesa (su tutto allVisite, finestra fissa a 6
+  // mesi come "Carico mensile" - non windowDays) e stato attuale dei job
+  // fermi ora (su jobs attivi, nessun tetto di finestra).
+  var waitTimeTrend = waitTimeMonthBuckets_(allVisite, now, 6);
+  var currentlyBlocked = currentlyBlocked_(jobs, columnMap, now);
+  // S1 (DESIGN_R_S.md §3.6): percentili storici del tempo di ciclo,
+  // usati sia dal Profilo di ritardo (S1 vero e proprio) sia da S3 (fasce
+  // sulla lista "Fermi ora") - calcolati una sola volta qui.
+  var wipCycleTimeScatter = wipCycleTimeScatter_(allVisite);
+  var cycleTimeSamples = wipCycleTimeScatter.map(function(point) { return point.cycle_time_days; }).sort(function(a, b) { return a - b; });
+  var MIN_CYCLE_TIME_SAMPLES_FOR_BANDS = 20;
+  var cycleTimeBands = cycleTimeSamples.length >= MIN_CYCLE_TIME_SAMPLES_FOR_BANDS ? {
+    p50: percentile_(cycleTimeSamples, 0.50),
+    p85: percentile_(cycleTimeSamples, 0.85),
+    p95: percentile_(cycleTimeSamples, 0.95)
+  } : null;
+  if (cycleTimeBands) {
+    currentlyBlocked.forEach(function(item) {
+      if (item.elapsed_days <= cycleTimeBands.p50) { item.band = 'green'; }
+      else if (item.elapsed_days <= cycleTimeBands.p85) { item.band = 'yellow'; }
+      else { item.band = 'red'; }
+    });
+  }
 
   // Chiesto da Marco (2026-08-20): mostrare "dove e' possibile" ogni
   // tasso anche in punti, non solo in iniziative/visite - le
@@ -281,7 +301,8 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       average_reentries_when_reworked: conditionalReentries === null ? null : round_(conditionalReentries),
       average_passages_per_initiative: averagePassages === null ? null : round_(averagePassages),
       total_passages_per_day: totalPassageRate === null ? null : round_(totalPassageRate),
-      additional_passages_from_rework: reworkPassageRate === null ? null : round_(reworkPassageRate)
+      additional_passages_from_rework: reworkPassageRate === null ? null : round_(reworkPassageRate),
+      by_cause: reworkByCause_(observed)
     },
     workloadMetrics: workload,
     timeMetrics: {
@@ -314,11 +335,15 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       internal: waitTime.internal,
       total_days: round_(waitTime.client.total_days + waitTime.authority.total_days + waitTime.internal.total_days)
     },
+    waitTimeTrend: waitTimeTrend,
+    currentlyBlocked: currentlyBlocked,
+    cycleTimeBands: cycleTimeBands,
     latentBacklogMetrics: {
       window_days: windowDays,
       count: latentBacklogCount
     },
     delayProfileMetrics: delayProfile,
+    wipCycleTimeScatter: wipCycleTimeScatter,
     stabilityMetrics: stability === null ? null : {
       margin: stability.margin,
       congestion_factor: stability.congestion_factor,
@@ -477,20 +502,48 @@ function jobPoints_(job) {
 
 // Fase L4: raggruppa le VISITE per caso (job_id — il caso non ha piu'
 // bisogno di un case_id separato per questo, essendo 'visite' gia'
-// indicizzata sul caso) e tiene il massimo numero_visita-1 osservato,
-// stesso significato di prima ("quante volte questa iniziativa e'
-// rientrata, per come osservato in questa finestra") ma sulla fonte
-// corretta (ogni riga di 'visite' e' un'iterazione reale, non piu' un
-// job duplicato per ogni rientro come nel vecchio markRework).
+// indicizzata sul caso). R1 (DESIGN_R_S.md, §3.1): conta i rientri
+// OSSERVATI nell'insieme ricevuto (una riga con numero_visita > 1 e'
+// gia', per costruzione, un rientro avvenuto nella finestra filtrata dal
+// chiamante), non la posizione del caso in tutta la sua storia
+// (numero_visita - 1 dell'ultima visita osservata sovrastimava i rientri
+// per i casi con rientri sia dentro sia fuori dalla finestra).
 function initiativeGroups_(visite) {
   return visite.reduce(function(groups, visit) {
     var key = visit.job_id;
     if (!groups[key]) {
       groups[key] = { id: key, reentries: 0 };
     }
-    groups[key].reentries = Math.max(groups[key].reentries, Math.max(0, Number(visit.numero_visita || 1) - 1));
+    if (Number(visit.numero_visita || 1) > 1) {
+      groups[key].reentries++;
+    }
     return groups;
   }, {});
+}
+
+// R4 (CRITERI_governo_metriche_2026-08-26.md §6): scompone i rientri
+// osservati nella finestra per causa (rework_cause sulla visita che
+// e' rientrata) - distingue quota controllabile (cliente + interno,
+// leva: gating) da quota non controllabile (enti, nessuna leva
+// diretta). Opera sullo stesso insieme filtrato per finestra di
+// initiativeGroups_ (coerenza tra le due letture).
+function reworkByCause_(visite) {
+  var counts = { wait_client: 0, wait_authority: 0, wait_internal: 0 };
+  visite.forEach(function(visit) {
+    if (Number(visit.numero_visita || 1) > 1 && counts.hasOwnProperty(visit.rework_cause)) {
+      counts[visit.rework_cause]++;
+    }
+  });
+  var total = counts.wait_client + counts.wait_authority + counts.wait_internal;
+  var controllable = counts.wait_client + counts.wait_internal;
+  return {
+    total: total,
+    client: counts.wait_client,
+    authority: counts.wait_authority,
+    internal: counts.wait_internal,
+    controllable_share: total ? round_(controllable / total) : null,
+    external_share: total ? round_(counts.wait_authority / total) : null
+  };
 }
 
 function columnsFromConfig_(config) {
@@ -784,12 +837,116 @@ function delayProfile_(visite) {
     kernelCounts[bin]++;
   });
 
+  // S1 (DESIGN_R_S.md §3.6): 80° percentile del tempo di attesa prima del
+  // rientro - servira' per tarare la finestra H (Area 4/Fase T, fuori da
+  // questo documento), calcolato sullo stesso campione 'delays' (tutto lo
+  // storico disponibile, non filtrato sulla finestra di osservazione).
+  var sortedDelays = delays.slice().sort(function(a, b) { return a - b; });
+
   return {
     sample_size: delays.length,
     alpha: closedVisits.length ? round_(reentries.length / closedVisits.length) : null,
     bin_days: BIN_DAYS,
-    kernel: kernelCounts.map(function(count) { return round_(count / delays.length); })
+    kernel: kernelCounts.map(function(count) { return round_(count / delays.length); }),
+    p80_days: round_(percentile_(sortedDelays, 0.80))
   };
+}
+
+// S1/S3: percentile per rango (nearest-rank) su un campione ordinato
+// crescente - sufficiente per l'uso qui (soglie indicative, non un
+// requisito statistico stringente); p in [0,1].
+function percentile_(sortedAscendingValues, p) {
+  if (!sortedAscendingValues.length) { return null; }
+  var index = Math.min(sortedAscendingValues.length - 1, Math.ceil(p * sortedAscendingValues.length) - 1);
+  return sortedAscendingValues[Math.max(0, index)];
+}
+
+// R5: trend dell'attesa a grana mensile - ogni visita chiusa (con
+// consegna_ts o rientro_ts) attribuisce la sua attesa cumulata
+// (t_cliente_d/t_ente_d/t_interno_d) al mese in cui si e' chiusa.
+// A differenza del pannello "stato attuale" (sotto), qui NON entra
+// l'attesa in corso: e' un trend su eventi conclusi, per vedere se
+// una leva di controllo sta funzionando nel tempo (mesi, non giorni).
+function waitTimeMonthBuckets_(visite, now, count) {
+  var first = new Date(now.getFullYear(), now.getMonth() - count + 1, 1);
+  var buckets = [];
+  var byKey = {};
+  for (var i = 0; i < count; i++) {
+    var date = new Date(first.getFullYear(), first.getMonth() + i, 1);
+    var key = Utilities.formatDate(date, SIGMAFLOW.TZ, 'yyyy-MM');
+    var bucket = { key: key, label: Utilities.formatDate(date, SIGMAFLOW.TZ, 'MM/yyyy'), client_days: 0, authority_days: 0, internal_days: 0 };
+    buckets.push(bucket);
+    byKey[key] = bucket;
+  }
+  visite.forEach(function(visit) {
+    var closeTs = visit.consegna_ts || visit.rientro_ts;
+    if (!closeTs) { return; }
+    var key = Utilities.formatDate(new Date(closeTs), SIGMAFLOW.TZ, 'yyyy-MM');
+    if (!byKey[key]) { return; }
+    byKey[key].client_days += Number(visit.t_cliente_d || 0);
+    byKey[key].authority_days += Number(visit.t_ente_d || 0);
+    byKey[key].internal_days += Number(visit.t_interno_d || 0);
+  });
+  return buckets.map(function(b) {
+    return { key: b.key, label: b.label, client_days: round_(b.client_days), authority_days: round_(b.authority_days), internal_days: round_(b.internal_days) };
+  });
+}
+
+// R5: elenco dei job attualmente fermi in una colonna di attesa,
+// ordinato per giorni trascorsi decrescenti - lo "stato attuale" che
+// serve per sollecitare, distinto dal trend mensile sopra (che copre
+// solo attese gia' concluse). S3 (DESIGN_R_S.md §3.8): il campo 'band'
+// (verde/giallo/rosso) viene aggiunto dal chiamante (buildSystemState_)
+// solo quando ci sono abbastanza campioni storici di tempo di ciclo -
+// qui resta assente, comportamento identico a prima di S3.
+function currentlyBlocked_(jobs, columnMap, now) {
+  var result = [];
+  jobs.forEach(function(job) {
+    var column = columnMap[normalizeStatus_(job.status)];
+    var field = column ? SIGMAFLOW.WAIT_ACCUMULATOR_FIELDS[column.id] : null;
+    if (!field || !job.status_since_ts) { return; }
+    var elapsed = Number(diffDays(job.status_since_ts, now) || 0);
+    if (elapsed <= 0) { return; }
+    result.push({ job_id: job.job_id, title: job.title, client: job.client, wait_type: field, elapsed_days: round_(elapsed) });
+  });
+  return result.sort(function(a, b) { return b.elapsed_days - a.elapsed_days; });
+}
+
+// S2 (strumento diagnostico per la futura Fase T, Cap. 12 della
+// dispensa — "cercare il ginocchio" nella curva WIP/tempo di ciclo):
+// per ogni visita con un tempo di ciclo calcolabile, conta quante
+// ALTRE visite erano "attive" (WIP) nel momento esatto in cui questa
+// e' partita (start_ts). Attiva = start_ts <= t < fine (consegna_ts o
+// rientro_ts, quella che viene prima; nessuna fine = ancora aperta
+// ora). E' un'approssimazione di L_WIP(t) al momento dell'avvio di
+// ogni visita, non una serie storica esatta giorno per giorno -
+// sufficiente per uno scatter diagnostico, non per un conteggio di
+// audit.
+function visitActiveInterval_(visit) {
+  if (!visit.start_ts) { return null; }
+  var start = new Date(visit.start_ts);
+  var end = null;
+  if (visit.consegna_ts) { end = new Date(visit.consegna_ts); }
+  if (visit.rientro_ts) {
+    var rientro = new Date(visit.rientro_ts);
+    if (!end || rientro < end) { end = rientro; }
+  }
+  return { start: start, end: end };
+}
+
+function wipCycleTimeScatter_(visite) {
+  var intervals = visite.map(visitActiveInterval_).filter(Boolean);
+  var points = [];
+  visite.forEach(function(visit) {
+    var cycleDays = visitServiceTimeDays_(visit);
+    if (cycleDays <= 0 || !visit.start_ts) { return; }
+    var t = new Date(visit.start_ts);
+    var wip = intervals.filter(function(iv) {
+      return iv.start <= t && (iv.end === null || iv.end > t);
+    }).length;
+    points.push({ wip_at_start: wip, cycle_time_days: round_(cycleDays) });
+  });
+  return points;
 }
 
 // Fase L4: 'visite' non ha size_class (e' anagrafica del caso, non della

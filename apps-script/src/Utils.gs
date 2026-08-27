@@ -125,6 +125,10 @@ function randomSuffix_() {
   return Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
+// ATTENZIONE: la stessa formula e' duplicata in client.html,
+// updateLivePriorityBadge() (anteprima dal vivo nel modale, prima
+// del salvataggio) - se questa formula cambia (es. per introdurre
+// WSJF/Cost of Delay, vedi Area 5), aggiornare anche li'.
 function calcPriorityScore(impact, manageability) {
   var i = Number(impact);
   var m = Number(manageability);

@@ -311,8 +311,20 @@ function runAllTests() {
     testBuildSystemStateExposesStabilityMetrics,
     testBuildSystemStateStabilityMetricsNullWhenInsufficientData,
     testBuildSystemStateSumsWaitTimeByType,
-    testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked,
+    testBuildSystemStateSeparatesOngoingWaitIntoCurrentlyBlocked,
     testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn,
+    testInitiativeGroupsCountsOnlyObservedReentriesNotHistoryPosition,
+    testBuildSystemStateReworkCountsOnlyReentriesWithinWindow,
+    testReworkByCauseSplitsControllableFromExternal,
+    testBuildSystemStateExposesReworkByCause,
+    testWaitTimeMonthBucketsAttributesToCloseMonth,
+    testCurrentlyBlockedListsOnlyWaitingJobsOrderedByElapsedDays,
+    testPercentileHelperNearestRank,
+    testDelayProfileExposesP80DaysWhenEnoughSamples,
+    testWipCycleTimeScatterCountsOverlappingActiveVisitsAtStart,
+    testBuildSystemStateExposesWipCycleTimeScatter,
+    testCurrentlyBlockedGetsColorBandsWhenEnoughCycleTimeSamples,
+    testCurrentlyBlockedHasNoBandsWhenNotEnoughCycleTimeSamples,
     testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
     testDelayProfileNullBelowMinimumSamples,
     testDelayProfileComputesAlphaAndKernelFromRealReentries,
@@ -2304,10 +2316,14 @@ function testBuildSystemStateSumsWaitTimeByType() {
 // card ferme in attesa enti, ma "Attesa enti" mostrava 0,65 giorni in
 // totale). accumulateWaitTime_ scrive t_ente_d solo quando una visita
 // ESCE dalla colonna stand_by - una card ancora ferma li' ora non ha
-// ancora accumulato nulla in 'visite'. waitTimeMetrics deve includere
-// anche l'attesa IN CORSO (status_since_ts -> adesso) per i job
-// attualmente in una colonna stand_by, non solo le attese gia' concluse.
-function testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked() {
+// ancora accumulato nulla in 'visite'.
+// R5 (DESIGN_R_S.md §3.5, 2026-08-27): l'attesa IN CORSO non e' piu'
+// mescolata dentro waitTimeMetrics (che ora resta solo sulle attese gia'
+// concluse nella finestra) - e' esposta a se' in state.currentlyBlocked.
+// Test rinominato/riscritto per verificare il nuovo comportamento
+// (prima verificava l'opposto: che l'attesa in corso ENTRASSE in
+// waitTimeMetrics).
+function testBuildSystemStateSeparatesOngoingWaitIntoCurrentlyBlocked() {
   var now = new Date();
   var enteredWaitAuthority = Utilities.formatDate(new Date(now.getTime() - 5 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
   var jobs = [{
@@ -2321,8 +2337,11 @@ function testBuildSystemStateIncludesOngoingWaitForJobsCurrentlyBlocked() {
 
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
-  assertTrue_(state.waitTimeMetrics.authority.total_days >= 5, 'l\'attesa in corso (5 giorni, mai ancora chiusa in visite) deve comunque contare');
-  assertEquals_(1, state.waitTimeMetrics.authority.occurrences, 'l\'attesa in corso conta come una occorrenza');
+  assertEquals_(0, state.waitTimeMetrics.authority.total_days, 'waitTimeMetrics non deve piu\' includere l\'attesa in corso (solo attese gia\' concluse)');
+  var blocked = state.currentlyBlocked.filter(function(item) { return item.job_id === 'JOB-STUCK-IN-WAIT'; })[0];
+  assertTrue_(Boolean(blocked), 'il job fermo ora deve comparire in currentlyBlocked');
+  assertTrue_(blocked.elapsed_days >= 5, 'l\'attesa in corso (5 giorni) deve comparire in currentlyBlocked');
+  assertEquals_('t_ente_d', blocked.wait_type, 'wait_type deve riflettere il campo accumulatore della colonna attuale');
 }
 
 // Un job in una colonna NON di attesa (es. wip) non deve contribuire
@@ -2336,6 +2355,211 @@ function testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn() {
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
   assertEquals_(0, state.waitTimeMetrics.total_days, 'un job in wip non contribuisce ad alcuna attesa');
+}
+
+// R1 (DESIGN_R_S.md §3.1, 2026-08-27): initiativeGroups_ deve contare i
+// rientri OSSERVATI nell'insieme ricevuto, non la posizione del caso in
+// tutta la sua storia (numero_visita - 1 dell'ultima visita osservata
+// sovrastimava i rientri quando alcuni erano fuori finestra).
+function testInitiativeGroupsCountsOnlyObservedReentriesNotHistoryPosition() {
+  var visite = [
+    { job_id: 'JOB-ZNWU-LIKE', numero_visita: 5 },
+    { job_id: 'JOB-ZNWU-LIKE', numero_visita: 6 }
+  ];
+  var groups = initiativeGroups_(visite);
+  assertEquals_(2, groups['JOB-ZNWU-LIKE'].reentries, 'deve contare 2 rientri osservati (visite 5 e 6), non 6-1=5');
+}
+
+// Stesso caso, end-to-end su buildSystemState_: un caso con 4 rientri
+// fuori finestra (numero_visita 1-4, apertura_ts vecchia) e 2 dentro
+// (numero_visita 5-6, apertura_ts recente) - equivalente a
+// JOB-20260707-ZNWU citato nella diagnosi del documento.
+function testBuildSystemStateReworkCountsOnlyReentriesWithinWindow() {
+  var now = new Date();
+  var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, { observation_window_days: 90 });
+  var jobs = [{ job_id: 'JOB-ZNWU-LIKE', status: 'wip', arrival_ts: testIsoDaysAgo_(now, 200), visit_number: 6 }];
+  var visite = [];
+  for (var i = 1; i <= 4; i++) {
+    visite.push({ job_id: 'JOB-ZNWU-LIKE', numero_visita: i, apertura_ts: testIsoDaysAgo_(now, 200 - i) });
+  }
+  visite.push({ job_id: 'JOB-ZNWU-LIKE', numero_visita: 5, apertura_ts: testIsoDaysAgo_(now, 10) });
+  visite.push({ job_id: 'JOB-ZNWU-LIKE', numero_visita: 6, apertura_ts: testIsoDaysAgo_(now, 5) });
+
+  var state = buildSystemState_(jobs, visite, config, now);
+
+  assertEquals_(2, state.reworkMetrics.average_reentries_when_reworked, 'solo le 2 visite osservate nella finestra (5 e 6) devono contare come rientri, non 5');
+}
+
+// R4 (DESIGN_R_S.md §3.4): scompone i rientri osservati per causa -
+// solo le visite con numero_visita > 1 contano, e solo le tre cause
+// riconosciute (le altre, es. 'manual', non incrementano nessun
+// contatore ma non rompono il totale).
+function testReworkByCauseSplitsControllableFromExternal() {
+  var visite = [
+    { job_id: 'JOB-A', numero_visita: 2, rework_cause: 'wait_client' },
+    { job_id: 'JOB-B', numero_visita: 2, rework_cause: 'wait_authority' },
+    { job_id: 'JOB-C', numero_visita: 2, rework_cause: 'wait_internal' },
+    { job_id: 'JOB-D', numero_visita: 1, rework_cause: 'wait_client' }, // prima visita, non un rientro: non deve contare
+    { job_id: 'JOB-E', numero_visita: 2, rework_cause: 'manual' } // causa non riconosciuta: non incrementa nessun contatore
+  ];
+
+  var byCause = reworkByCause_(visite);
+
+  assertEquals_(3, byCause.total, 'solo i 3 rientri con causa riconosciuta contano nel totale');
+  assertEquals_(1, byCause.client, 'un rientro per causa cliente');
+  assertEquals_(1, byCause.authority, 'un rientro per causa enti');
+  assertEquals_(1, byCause.internal, 'un rientro per causa interna');
+  assertEquals_(0.67, byCause.controllable_share, 'quota controllabile = (cliente+interno)/totale = 2/3');
+  assertEquals_(0.33, byCause.external_share, 'quota da enti = 1/3');
+}
+
+function testBuildSystemStateExposesReworkByCause() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-CAUSE', status: 'wip', arrival_ts: nowIso_(), visit_number: 2 }];
+  var visite = [{ job_id: 'JOB-CAUSE', numero_visita: 2, apertura_ts: nowIso_(), rework_cause: 'wait_client' }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Boolean(state.reworkMetrics.by_cause), 'reworkMetrics.by_cause presente in systemState');
+  assertEquals_(1, state.reworkMetrics.by_cause.total, 'un rientro per causa cliente osservato nella finestra');
+}
+
+// R5 (DESIGN_R_S.md §3.5): trend mensile dell'attesa - ogni visita
+// chiusa attribuisce la sua attesa cumulata al mese in cui si e' chiusa
+// (consegna_ts o, in mancanza, rientro_ts).
+function testWaitTimeMonthBucketsAttributesToCloseMonth() {
+  var now = new Date(2026, 7, 27); // 27/08/2026, coerente con le date del progetto
+  var visite = [
+    { job_id: 'JOB-TREND-1', numero_visita: 1, consegna_ts: '2026-07-15T09:00:00+02:00', t_cliente_d: 3, t_ente_d: 0, t_interno_d: 0 },
+    { job_id: 'JOB-TREND-2', numero_visita: 2, rientro_ts: '2026-08-10T09:00:00+02:00', t_cliente_d: 0, t_ente_d: 5, t_interno_d: 0 }
+  ];
+
+  var buckets = waitTimeMonthBuckets_(visite, now, 6);
+  var july = buckets.filter(function(b) { return b.key === '2026-07'; })[0];
+  var august = buckets.filter(function(b) { return b.key === '2026-08'; })[0];
+
+  assertEquals_(3, july.client_days, 'la visita chiusa a luglio (consegna_ts) attribuisce la sua attesa cliente a luglio');
+  assertEquals_(5, august.authority_days, 'la visita chiusa ad agosto (rientro_ts, nessuna consegna_ts) attribuisce la sua attesa enti ad agosto');
+}
+
+// R5: elenco "Fermi ora" - solo job con status_since_ts in una colonna
+// di attesa e attesa positiva, ordinati per giorni decrescenti.
+function testCurrentlyBlockedListsOnlyWaitingJobsOrderedByElapsedDays() {
+  var now = new Date();
+  var config = SIGMAFLOW.DEFAULT_CONFIG;
+  var columnMap = {};
+  columnsFromConfig_(config).forEach(function(c) { columnMap[c.id] = c; });
+  var jobs = [
+    { job_id: 'JOB-SHORT-WAIT', status: 'wait_client', status_since_ts: testIsoDaysAgo_(now, 2), title: 'Attesa breve' },
+    { job_id: 'JOB-LONG-WAIT', status: 'wait_authority', status_since_ts: testIsoDaysAgo_(now, 20), title: 'Attesa lunga' },
+    { job_id: 'JOB-NOT-WAITING', status: 'wip', status_since_ts: testIsoDaysAgo_(now, 30), title: 'In lavorazione' }
+  ];
+
+  var blocked = currentlyBlocked_(jobs, columnMap, now);
+
+  assertEquals_(2, blocked.length, 'solo i job in una colonna di attesa devono comparire');
+  assertEquals_('JOB-LONG-WAIT', blocked[0].job_id, 'il piu\' fermo deve comparire per primo');
+  assertEquals_('JOB-SHORT-WAIT', blocked[1].job_id, 'il meno fermo deve comparire per secondo');
+}
+
+// S1 (DESIGN_R_S.md §3.6): percentile per rango (nearest-rank).
+function testPercentileHelperNearestRank() {
+  var sorted = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  assertEquals_(8, percentile_(sorted, 0.80), '80esimo percentile su 10 valori (nearest-rank) = 8');
+  assertEquals_(1, percentile_(sorted, 0.01), 'un p molto basso non deve andare sotto il primo valore');
+  assertEquals_(10, percentile_(sorted, 1), 'p=1 deve restituire il massimo');
+  assertEquals_(null, percentile_([], 0.5), 'campione vuoto -> null');
+}
+
+function testDelayProfileExposesP80DaysWhenEnoughSamples() {
+  var visite = [];
+  var delays = [1, 2, 3, 4, 20]; // 5 campioni, minimo per essere stimabile
+  delays.forEach(function(days, i) {
+    visite.push({ job_id: 'JOB-P80-' + i, numero_visita: 2, rientro_ts: '2026-01-05T09:00:00+02:00', t_cliente_d: days });
+  });
+
+  var profile = delayProfile_(visite);
+
+  // percentile_ nearest-rank su [1,2,3,4,20] (gia' ordinato): indice =
+  // ceil(0.80*5)-1 = 3 -> quarto valore (4), non il massimo (20).
+  assertEquals_(4, profile.p80_days, '80esimo percentile (nearest-rank) su [1,2,3,4,20] = 4');
+}
+
+// S2 (DESIGN_R_S.md §3.7): scatter WIP al momento di avvio vs tempo di
+// ciclo - due visite si sovrappongono nel tempo (entrambe attive quando
+// la terza parte), una e' gia' conclusa prima.
+function testWipCycleTimeScatterCountsOverlappingActiveVisitsAtStart() {
+  var now = new Date();
+  var visite = [
+    // Conclusa ben prima che le altre due partano: non deve contare come "attiva" per loro.
+    { job_id: 'JOB-EARLY', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 30), consegna_ts: testIsoDaysAgo_(now, 25) },
+    // Attiva quando JOB-C parte (partita prima, ancora aperta - nessuna fine).
+    { job_id: 'JOB-B', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 15) },
+    // Parte quando JOB-B e' gia' attiva (e JOB-EARLY gia' concluso): wip_at_start atteso = 1 (solo JOB-B).
+    { job_id: 'JOB-C', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 10), consegna_ts: testIsoDaysAgo_(now, 5) }
+  ];
+
+  var points = wipCycleTimeScatter_(visite);
+  var pointC = points.filter(function(p) { return p.cycle_time_days === 5; })[0];
+
+  assertTrue_(Boolean(pointC), 'JOB-C deve produrre un punto (5 giorni di ciclo)');
+  assertEquals_(1, pointC.wip_at_start, 'solo JOB-B era attiva quando JOB-C e\' partita (JOB-EARLY gia\' concluso)');
+}
+
+function testBuildSystemStateExposesWipCycleTimeScatter() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-SCATTER', status: 'wip', arrival_ts: nowIso_(), visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-SCATTER', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 5), consegna_ts: nowIso_() }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Array.isArray(state.wipCycleTimeScatter), 'wipCycleTimeScatter deve essere un array (anche con un solo campione)');
+  assertEquals_(1, state.wipCycleTimeScatter.length, 'una visita con tempo di ciclo calcolabile produce un punto');
+}
+
+// S3 (DESIGN_R_S.md §3.8): fasce a percentile sulla lista "Fermi ora" -
+// solo quando lo storico ha almeno 20 campioni di tempo di ciclo.
+function testCurrentlyBlockedGetsColorBandsWhenEnoughCycleTimeSamples() {
+  var now = new Date();
+  var config = SIGMAFLOW.DEFAULT_CONFIG;
+  var visite = [];
+  // 20 visite concluse con tempi di ciclo distinti 1..20 giorni - percentili
+  // attesi (nearest-rank su 20 valori ordinati): p50 -> indice 9 -> 10,
+  // p85 -> indice 16 -> 17, p95 -> indice 18 -> 19.
+  for (var i = 1; i <= 20; i++) {
+    visite.push({
+      job_id: 'JOB-CYCLE-' + i,
+      numero_visita: 1,
+      apertura_ts: testIsoDaysAgo_(now, 30 + i),
+      start_ts: testIsoDaysAgo_(now, 30),
+      consegna_ts: testIsoDaysAgo_(now, 30 - i)
+    });
+  }
+  var jobs = [
+    { job_id: 'JOB-GREEN', status: 'wait_client', status_since_ts: testIsoDaysAgo_(now, 5) },
+    { job_id: 'JOB-YELLOW', status: 'wait_client', status_since_ts: testIsoDaysAgo_(now, 15) },
+    { job_id: 'JOB-RED', status: 'wait_client', status_since_ts: testIsoDaysAgo_(now, 20) }
+  ];
+
+  var state = buildSystemState_(jobs, visite, config, now);
+  var byId = {};
+  state.currentlyBlocked.forEach(function(item) { byId[item.job_id] = item; });
+
+  assertEquals_('green', byId['JOB-GREEN'].band, '5 giorni <= p50 (10) -> verde');
+  assertEquals_('yellow', byId['JOB-YELLOW'].band, '15 giorni tra p50 (10) e p85 (17) -> giallo');
+  assertEquals_('red', byId['JOB-RED'].band, '20 giorni > p85 (17) -> rosso');
+}
+
+function testCurrentlyBlockedHasNoBandsWhenNotEnoughCycleTimeSamples() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-NO-BAND', status: 'wait_client', status_since_ts: testIsoDaysAgo_(now, 5) }];
+  var visite = [{ job_id: 'JOB-SINGLE', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 10), consegna_ts: testIsoDaysAgo_(now, 5) }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+  var item = state.currentlyBlocked.filter(function(i) { return i.job_id === 'JOB-NO-BAND'; })[0];
+
+  assertEquals_(null, state.cycleTimeBands, 'con meno di 20 campioni le fasce non devono essere calcolate');
+  assertEquals_(undefined, item.band, 'senza abbastanza campioni storici la riga non deve avere colore (comportamento identico a prima di S3)');
 }
 
 // M6 (DESIGN_dashboard.md, §4.2): B_lat(t) - consegne recenti la cui

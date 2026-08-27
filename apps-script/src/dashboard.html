@@ -78,6 +78,19 @@
       </tbody>
     </table></div>
 
+    <h3>Fermi ora</h3>
+    <p class="panel-note">Job attualmente bloccati in una colonna di attesa, ordinati per giorni trascorsi - a differenza della tabella sopra (solo attese gia' concluse nel periodo), qui non c'e' finestra: e' lo stato adesso.</p>
+    <div class="table-scroll"><table class="monthly-load-table" id="currently-blocked-table">
+      <thead><tr><th>Job</th><th>Cliente</th><th>Tipo attesa</th><th>Giorni</th></tr></thead>
+      <tbody id="currently-blocked-body"></tbody>
+    </table></div>
+    <div id="currently-blocked-empty" class="chart-empty" hidden>Nessun job attualmente fermo in attesa</div>
+
+    <h3>Andamento mensile dell'attesa</h3>
+    <canvas id="wait-time-trend-chart" height="200" aria-label="Andamento mensile dell'attesa per tipo"></canvas>
+    <div id="wait-time-trend-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
+    <div class="chart-legend"><span class="legend-entered">Attesa cliente</span><span class="legend-completed">Attesa enti</span><span class="legend-open">Decisione interna</span></div>
+
     <h3>Esposizione futura a rientri</h3>
     <dl id="latent-backlog-metrics"></dl>
 
@@ -140,6 +153,10 @@
     <dl id="advanced-mg1-metrics"></dl>
     <h3>Rework (Cap. 6)</h3>
     <dl id="advanced-rework-metrics"></dl>
+    <h3>WIP vs tempo di ciclo (diagnostico, Cap. 12)</h3>
+    <p class="panel-note">Strumento diagnostico per la futura calibrazione della finestra H (Fase T): ogni punto e' una visita, quanti altri lavori erano attivi quando e' partita rispetto a quanto e' durata.</p>
+    <canvas id="wip-cycle-scatter-chart" height="200" aria-label="Dispersione WIP al momento di avvio rispetto al tempo di ciclo"></canvas>
+    <div id="wip-cycle-scatter-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
   </details>
 </section>
 </details>
