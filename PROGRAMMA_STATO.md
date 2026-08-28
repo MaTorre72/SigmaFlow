@@ -1,6 +1,235 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — secondo giro di collaudo: R7/R8/S5/R9 + correzioni R5/R6.6/S2-S3 (2026-08-28, sessione 11) — codice pronto, in attesa della verifica finale su dati reali
+
+Da `docs/DESIGN_R_S_addendum_collaudo.md` (aggiornamento 2026-08-28,
+sezione "secondo giro"). Stesso branch, prosegue la stessa fase — non
+una nuova. Copre R7 (nuovo), R8 (nuovo), S5 (nuovo), R9.1-R9.13 (audit
+UX, tutti e tredici i passi), piu' le correzioni aggiuntive a R5, R6.6
+e S2/S3 su voci gia' chiuse nel giro precedente.
+
+### R7 — schema degli stadi di lavoro
+
+Nuova `workStage_(job, columnMap)` (Model.gs): unica classificazione a
+7 stadi (0 Preventivo, 1 Backlog, 2 Preparazione, 3 Lavorazione, 4
+Attesa, 5 Da fatturare, 6 Chiuso), mappata sul `role` gia' esistente +
+`invoiced` — nessun campo nuovo. Riusata da `pointsStatistics_`
+(sostituisce `open_cards`/`open_points`, che mescolava stadio 0 con
+1-4, con `pipeline_cards`/`pipeline_points` e
+`committed_cards`/`committed_points`, mai sommati) e da
+`currentWorkload_` (nessun cambio di struttura dati — gia' teneva
+`can_return`, stadio 5, come campo separato). Lato client: "Aperti
+(ora)" sostituito da due righe distinte ("Pipeline commerciale
+(preventivi)"/"Lavoro impegnato (ora)"); "Lavoro presente e capacita'"
+spaccato in due `<dl>` distinti ("Lavoro impegnato"/"Da fatturare"),
+mai sommati nella stessa card; WIP settimanale di S4 rinominato
+"Lavoro in corso" nei titoli/etichette del pannello diagnostico
+(stessa struttura dati, solo il nome — nessun ricalcolo, coerente con
+l'istruzione esplicita dell'addendum).
+
+### R5, correzione aggiuntiva — storico invece di finestra
+
+`waitSamplesByField` ("Dove si blocca il lavoro") legge ora da
+`allVisite` (tutto lo storico), non piu' da `observed` (finestra di
+osservazione) — un'attesa lunga conclusa mesi fa e' un segnale di
+governo reale. lambda/mu/rho/capacita' restano invariati su
+`observed` (concetto diverso, il flusso sulla finestra). Nota di
+pannello aggiornata di conseguenza.
+
+### R6.6, completamento — pipeline sbagliata per "Lavori completati"
+
+Trovato: "Lavori completati (periodo)" leggeva `points.completed_cards`
+(pipeline job-level via `job.done_ts`) invece di
+`flow.completed_initiatives` (pipeline visita-level via `consegna_ts`,
+la stessa di "Passaggi completati") — due popolazioni diverse,
+coincidenza non garantita. Corretto in entrambe le occorrenze
+(`client.html`, tabella "Flusso e carico" e blocco "Capacita' e
+bilancio"). Nota tecnica per chi rilegge il codice: `flow.completed_initiatives`/
+`flow.completed_passages` derivano dallo stesso insieme `completed`
+(`consegna_ts` nella finestra, **nessun filtro sul tempo di servizio** —
+verificato leggendo `Model.gs` riga 139-144, la descrizione originale
+dell'addendum che citava un filtro `visitServiceTimeDays_ > 0` non
+corrispondeva al codice reale) — il primo e' deduplicato per `job_id`,
+il secondo conta ogni visita; coincidono solo se nessun job ha piu' di
+una visita consegnata nella stessa finestra.
+
+**Nota di data quality (facoltativa, come richiesto)**: non ancora
+quantificata sui dati reali di oggi in questa sessione (il numero "7
+job con `start_ts` vuoto" citato nell'addendum viene dall'audit
+originale, non riverificato qui) — segnalata qui come debito
+informativo, non bloccante.
+
+### S2/S3, correzione aggiuntiva — throughput sulla pipeline sbagliata
+
+`flowWeeklyBuckets_` calcolava `throughput_punti_settimana` da
+`job.incarico_chiuso_ts` (evento amministrativo, quasi mai
+valorizzato) — corretto per usare `consegna_ts` sulle visite chiuse
+(join a `jobsById` per i punti), stessa nozione di completamento di
+`flow.completed_passages`/R6.6 (solo `consegna_ts`, non `rientro_ts`).
+Verificato sui dati demo (harness Node): con la vecchia sorgente il
+throughput sarebbe stato quasi sempre 0; con la nuova, 12 settimane su
+26 mostrano throughput > 0.
+
+### S5 — `wip_trend_weeks` in config
+
+Nuova chiave in `DEFAULT_CONFIG` (default 26) sostituisce il
+letterale `26` nei quattro punti che lo usavano
+(`activeWipWeeklyFromLog_`, `flowWeeklyBuckets_`, la chiamata in
+`buildSystemState_`, e — per coerenza, non esplicitamente richiesto ma
+stesso principio — `checkS4WipCoverage_`). Nota di pannello nel
+Quadro avanzato ora mostra il numero di settimane effettivo invece del
+letterale "26" fisso nel testo.
+
+### R8 — pulizia editoriale
+
+Rimossi tutti i riferimenti a numeri di capitolo della dispensa dalle
+didascalie utente (`dashboard.html`, classe `panel-chapter` e testo
+circostante) — riscritti in linguaggio semplice dove il capitolo era
+l'unica spiegazione. "Percorso della card" (`client.html`,
+`formatDurationLabel_`) mostra ora solo giorni (es. "52,4g"), non piu'
+giorni+ore ("52g 9h").
+
+### R9 — revisione trasversale di leggibilita' (tutti i 13 passi)
+
+- **R9.1**: `renderCurrentlyBlocked_` non concatena piu' il numero a
+  mano (`item.elapsed_days + ' g'`) — passa da `metricValue` come
+  tutto il resto della pagina (virgola, non punto). Verificato via
+  grep che non ci sono altri punti in `client.html` con lo stesso
+  problema (le uniche concatenazioni dirette residue sono conteggi
+  interi della board, mai un problema di virgola/punto). Precisione
+  decimale in `Model.gs`: `round_()` era gia' uniforme (2 decimali
+  ovunque) — la differenza "1" vs "1,25" osservata nell'audit e' un
+  effetto di JS che non mostra gli zeri decimali finali, non un
+  arrotondamento incoerente; nessuna azione necessaria.
+- **R9.2**: le celle di "Flusso e carico" (righe Aggiunti/Completati)
+  non ripetono piu' l'unita' gia' dichiarata dall'header di colonna
+  ("Lavori/settimana"/"Punti/settimana").
+- **R9.3**: `drawWipScatter_` disegna ora tacche numeriche su entrambi
+  gli assi (stesso pattern di `drawPointsTimeline`/`drawWaitTimeTrend_`);
+  tolta la freccia testuale "->" (ridondante con la tacca vera).
+- **R9.4**: `drawPointsTimeline`/`drawWaitTimeTrend_` misurano la
+  larghezza reale dell'etichetta (`ctx.measureText`) prima di
+  posizionarla, cosi' l'ultimo mese non esce piu' troncato dal bordo
+  destro del canvas.
+- **R9.5**: `gauge-load`/`gauge-capacity` (potevano superare il 100% o
+  essere negativi — un arco non li rappresenta) sostituiti da un nuovo
+  componente `renderLoadIndicator_` (numero grande + colore di
+  direzione). `gauge-rework` resta un gauge (genuinamente 0-100%).
+- **R9.6** (il piu' corposo): Vista rapida mostra ora **un solo**
+  numero di sovraccarico ("Carico rispetto alla capacita'") con un
+  rimando testuale ("vedi 'Rilavorazione' per il dettaglio"), non piu'
+  tre gauge. Rimossi i duplicati sparsi: "Margine rispetto alla
+  saturazione" (pannello Stato del sistema) e "Margine disponibile"
+  (pannello Capacita') erano lo stesso identico numero di "Quota di
+  capacita' occupata dal carico totale" (pannello Rilavorazione, ora
+  l'unica sede) — stesso fatto, tre pannelli diversi. Le due
+  ripetizioni interne al pannello "Rilavorazione" segnalate
+  dall'addendum ("Carico totale"/"Passaggi totali alla settimana" e
+  "Carico da rilavorazione"/"Carico aggiuntivo dalla rilavorazione")
+  sono state verificate essere davvero lo stesso calcolo
+  (`rework.total_passages_per_day`/`additional_passages_from_rework`)
+  — rimosse dal pannello dettagliato `system-rework-metrics`, restano
+  una sola volta in `system-load-metrics` ("Carico, nel suo
+  contesto"). rho/rho-effettivo del Quadro avanzato **non rimossi**
+  (sono varianti per-passaggio legittimamente diverse, non lo stesso
+  numero — R6.4), solo enfatizzati quando fuori scala (R9.13).
+- **R9.7**: "Affidabilita' della lettura" mostra ora le soglie insieme
+  al numero ("BASSA sotto 10, MEDIA 10-30, BUONA oltre 30 lavori
+  osservati"). "Variabilita' dei tempi: MEDIA" mostra ora anche il
+  Cv² nello stesso pannello ("MEDIA (Cv² = 0,65)"), non solo nel
+  Quadro avanzato.
+- **R9.8**: le tre righe di attesa per tipo (cliente/enti/interno) nel
+  pannello "Lavoro impegnato" sono ora indentate/raggruppate
+  visivamente (classe CSS `dl-subitem`) sotto "Lavoro in attesa
+  (totale)". "Rilavorazioni per causa" non e' piu' una terna
+  posizionale ("2 / 1 / 1") ma tre righe etichettate singolarmente
+  ("Rilavorazioni da cliente"/"da enti"/"da decisione interna").
+- **R9.9**: le card "Predisposto" di "Scenari futuri" hanno ora una
+  classe CSS dedicata (`scenario-item-inactive`, sfondo tratteggiato)
+  e la dicitura "Non ancora attivo" al posto di "Predisposto".
+- **R9.10**: Coda M/M/1 e M/G/1 (`renderQueueMetrics_`, nuova
+  funzione) mostrano una riga sola col messaggio quando tutti e
+  quattro i campi sono nulli, non piu' 4 righe vuote ripetute.
+- **R9.11**: ultima occorrenza di "card" nel glossario R6
+  (`renderBreakdown`, pannello Distribuzione) sostituita con "lavori"
+  — verificato che le occorrenze di "card" sulla board vera (contatori
+  di colonna) restano intatte, fuori dal glossario per definizione.
+- **R9.12**: riga "Totale" della tabella "Dove si blocca il lavoro"
+  rinominata "Tutte le attese" (collideva con l'header di colonna
+  "Totale (giorni)"); nota su arrotondamento aggiunta all'istogramma
+  del profilo di rilavorazione (le percentuali possono non sommare a
+  100%); nota "misure diverse" resa esplicita su quale riga si
+  riferisce; nota aggiunta sul saldo iniziale di "Carico mensile". Il
+  refuso "anzichè" segnalato dall'audit non e' stato trovato nel
+  codice attuale (gia' scritto "anziche'", forma ASCII-sicura
+  coerente col resto del file) — nessuna azione necessaria.
+- **R9.13**: nuova `outOfScaleClasses_` applica una classe CSS
+  (`value-out-of-scale`, colore/peso distinto) a "Utilizzo (rho)" e
+  "Utilizzo effettivo (rho effettivo)" quando il valore supera 100% o
+  e' negativo.
+
+### Diagnostica estesa (`checkS4WipCoverage_`, stessa funzione di S4)
+
+Per evitare di chiedere a Marco piu' esecuzioni separate, la
+diagnostica gia' in uso per S4 ora riporta anche, nella stessa
+chiamata: settimane con throughput > 0, settimane con campione di
+tempo di ciclo, `wipBands.length` (verifica obbligatoria di S2/S3 —
+se i grafici scatter restano vuoti su TEST live, questi numeri dicono
+se e' davvero scarsita' di dati) e il confronto a tre vie
+`completed_initiatives`/`completed_passages`/`completed_cards`
+(verifica di R6.6 — non piu' garantiti coincidere).
+
+**206/206 test nell'harness Node** (13 nuovi: classificazione stadi
+R7 x3, storico waitStats R5 x1, throughput da consegna_ts S2/S3 x2,
+wip_trend_weeks da config S5 x1 — R8/R9 sono quasi interamente
+client-side, senza equivalente nell'harness Node, coerente col
+precedente di P4/P6/R2/R3 di questo stesso progetto: collaudo nel
+Browser pane invece di test Node).
+
+**Collaudo eseguito**:
+- Browser pane (server locale, dati demo via `seedTestData`, 60 job):
+  nessun errore console in nessun momento. Confermati visivamente: le
+  due righe Pipeline/Lavoro impegnato, i due `<dl>` Lavoro
+  impegnato/Da fatturare mai sommati, il sottogruppo indentato delle
+  attese, "Rilavorazioni da cliente/enti/decisione interna" etichettate
+  singolarmente, Vista rapida con un solo numero di sovraccarico (57%,
+  verde) e nessun gauge per carico/capacita', "26 settimane" al posto
+  del letterale nella nota del Quadro avanzato, "lavori" al posto di
+  "card" nella Distribuzione, "Variabilita' dei tempi: MEDIA (Cv² =
+  0,65)".
+- Diagnostica (`checkS4WipCoverage_`) eseguita sui dati demo tramite
+  l'harness Node: `instant_difference` ancora 0 (nessuna regressione
+  su S4), `completed_initiatives_periodo`/`completed_passages_periodo`/
+  `completed_cards_periodo_punti` genuinamente diversi (8/9/5 sui dati
+  demo) — conferma diretta che R6.6 non produce piu' una coincidenza
+  strutturale.
+
+**Non ancora verificato — richiede i dati reali di TEST, non
+sostituibile dal dataset demo sintetico**: `wip_bands_length` e le
+settimane con throughput/campioni di ciclo REALI (l'addendum riporta
+una verifica indipendente di 18/26 settimane con campione valido e 4
+fasce di WIP valide sui dati di oggi — da confermare con l'esecuzione
+vera, non assunta). Push su TEST gia' fatto e verificato (16/16
+identici) ad ogni commit di questa sessione.
+
+**Prossimo passo, richiesto a Marco**: dall'editor Apps Script di
+TEST, eseguire di nuovo `checkS4WipCoverageOnTest` (**Model.gs**,
+stessa funzione di S4, ora estesa) e incollare il risultato JSON qui
+in chat. In particolare: se `wip_bands_length` risulta < 3 (i grafici
+"Throughput vs Lavoro in corso"/"Tempo di ciclo vs Lavoro in corso"
+mostrerebbero "Dato non ancora sufficiente"), confrontare con
+`weeks_with_throughput_gt_0`/`weeks_with_cycle_time_sample` per capire
+se e' scarsita' di dati reale o una discrepanza da indagare — non
+richiudere S2/S3 senza questo numero. Utile anche un controllo visivo
+diretto della dashboard TEST live (i due grafici, "Fermi ora" con la
+virgola, Vista rapida con un solo numero).
+
+Nessuna PR aperta, nessun merge su `main` — branch
+`feat/fase-r-s-metriche-2026-08-27`, invariato.
+
+---
+
 ## Fase R e S — S4: WIP attivo ricostruito dal log — COMPLETA, verificata su dati reali (2026-08-28, sessione 10)
 
 Da `docs/DESIGN_R_S_addendum_collaudo.md`, sez. S4 (`PROMPT_S4_wip_attivo_log.md`). Stesso branch, prosegue la stessa fase — non una nuova.
