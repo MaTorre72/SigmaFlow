@@ -1242,22 +1242,6 @@ function checkS4WipCoverage_() {
   var now = new Date();
   var weeksCount = 26;
 
-  // La produzione (flowWeeklyBuckets_) include SEMPRE l'archivio nel WIP
-  // ricostruito, per ogni settimana (N6: le metriche storiche su
-  // finestra includono l'archivio) - corretto, non cambiato da questa
-  // diagnostica. Ma il pannello per-colonna "live" mostra per
-  // costruzione SOLO i job ancora sulla board: un job chiuso e
-  // archiviato pochi giorni fa contribuisce comunque ai suoi giorni
-  // "attivi" della settimana corrente nella ricostruzione (corretto, e'
-  // successo davvero), ma non puo' comparire in nessun pannello live
-  // (non e' piu' un job aperto). Per un confronto "stessa fotografia"
-  // la verifica usa quindi la ricostruzione sui SOLI job aperti - un
-  // secondo calcolo, solo per questo controllo, distinto da quello
-  // esposto in systemState.flowWeeklyBuckets.
-  var reconstructedIncludingArchive = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount);
-  var reconstructedOpenOnly = activeWipWeeklyFromLog_(jobs, [], columnMap, now, weeksCount);
-  var currentWeekWip = reconstructedOpenOnly.weekly[reconstructedOpenOnly.weekly.length - 1];
-
   var livePanelPoints = 0;
   jobs.forEach(function(job) {
     var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
@@ -1265,19 +1249,53 @@ function checkS4WipCoverage_() {
       livePanelPoints += jobPoints_(job);
     }
   });
+  livePanelPoints = round_(livePanelPoints);
+
+  // Verifica che conta davvero: "in che colonna e' questo job ADESSO,
+  // secondo l'ultimo intervallo ricostruito dal log" deve dare la
+  // stessa risposta di job.status (il campo che il pannello live legge
+  // direttamente). Se non coincide, la ricostruzione (o l'allineamento
+  // status<->log) ha un bug reale - a differenza del confronto sotto,
+  // qui la fotografia e' letteralmente la stessa istante per istante,
+  // nessuna media di mezzo.
+  var instantWipPoints = 0;
+  jobs.forEach(function(job) {
+    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
+    if (!intervals) { return; } // gia' contato in excluded_job_ids
+    var lastInterval = intervals[intervals.length - 1];
+    if (lastInterval.wip_class === 'active') {
+      instantWipPoints += jobPoints_(job);
+    }
+  });
+  instantWipPoints = round_(instantWipPoints);
+
+  // Il valore che finisce davvero in systemState.flowWeeklyBuckets (la
+  // MEDIA sui 7 giorni della settimana corrente, non un'istantanea) -
+  // include sempre l'archivio (N6), come in produzione.
+  var weeklyAverage = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount);
+  var currentWeekAverage = weeklyAverage.weekly[weeklyAverage.weekly.length - 1];
 
   return {
     executed_at: nowIso_(),
     total_jobs_scanned: jobs.length + archivedJobs.length,
-    excluded_jobs: reconstructedIncludingArchive.excluded_job_ids.length,
-    excluded_job_ids: reconstructedIncludingArchive.excluded_job_ids,
-    current_week_wip_reconstructed: currentWeekWip,
-    current_week_wip_live_panel: round_(livePanelPoints),
-    difference: round_(currentWeekWip - livePanelPoints),
-    // Diagnostico: quanto dell'eventuale differenza sopra viene da job
-    // chiusi e archiviati durante la settimana corrente (attesa una
-    // differenza qui, non un bug - vedi commento sopra).
-    current_week_wip_reconstructed_with_archive: reconstructedIncludingArchive.weekly[reconstructedIncludingArchive.weekly.length - 1]
+    excluded_jobs: weeklyAverage.excluded_job_ids.length,
+    excluded_job_ids: weeklyAverage.excluded_job_ids,
+    // Verifica "istante contro istante" - questa e' quella che deve
+    // tornare 0 (a meno di arrotondamento). Se non torna, il log
+    // dell'ultimo evento di qualche job non concorda con job.status:
+    // un problema reale di allineamento, da segnalare con i job_id
+    // coinvolti, non un effetto di media settimanale.
+    instant_wip_from_log: instantWipPoints,
+    instant_wip_live_panel: livePanelPoints,
+    instant_difference: round_(instantWipPoints - livePanelPoints),
+    // Informativo, NON un criterio di pass/fail: la media sui 7 giorni
+    // della settimana corrente differisce legittimamente dalla fotografia
+    // di adesso se anche un solo job e' entrato o uscito da una colonna
+    // 'active' durante la settimana (rientro, avvio lavorazione,
+    // chiusura, archiviazione) - una differenza qui e' attesa con
+    // qualunque churn reale, non e' un sintomo di bug.
+    current_week_average_wip: currentWeekAverage,
+    current_week_average_vs_live_panel_difference: round_(currentWeekAverage - livePanelPoints)
   };
 }
 

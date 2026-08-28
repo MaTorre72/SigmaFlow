@@ -329,6 +329,7 @@ function runAllTests() {
     testActiveWipWeeklyFromLogExcludesJobsWithoutParseableLog,
     testBuildSystemStateExposesWipCoverageAndUsesReconstructedWip,
     testActiveWipWeeklyFromLogArchivedJobsInflateCurrentWeekButNotLivePanel,
+    testActiveWipWeeklyFromLogWeeklyAverageDiffersFromInstantSnapshotOnChurn,
     testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending,
     testWipBandsExcludesWeeksWithoutCycleTimeSamples,
     testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands,
@@ -2743,7 +2744,54 @@ function testActiveWipWeeklyFromLogArchivedJobsInflateCurrentWeekButNotLivePanel
   }, 0);
 
   assertTrue_(withArchive.weekly[0] > openOnly.weekly[0], 'con l\'archivio il WIP ricostruito della settimana corrente deve essere piu\' alto (il job archiviato ha contribuito giorni attivi reali)');
-  assertEquals_(livePanelPoints, openOnly.weekly[0], 'senza archivio (soli job aperti) il ricostruito deve tornare identico al pannello live - stessa popolazione');
+  // In questa fixture JOB-STILL-ACTIVE non ha churn (attivo da 30 giorni,
+  // copre l'intera settimana corrente) - la sua media settimanale
+  // coincide banalmente con l'istantanea di adesso. Non e' una legge
+  // generale: vedi testActiveWipWeeklyFromLogWeeklyAverageDiffersFromInstantSnapshotOnChurn
+  // sotto per il caso (reale, trovato in TEST) in cui differiscono
+  // anche senza archivio di mezzo.
+  assertEquals_(livePanelPoints, openOnly.weekly[0], 'senza archivio e senza churn nella settimana, il ricostruito coincide col pannello live');
+}
+
+// S4, secondo bug/chiarimento trovato verificando su dati reali
+// (checkS4WipCoverageOnTest dopo il primo fix, differenza ancora
+// presente: 3,51 pt anche escludendo l'archivio). Causa reale: un job
+// che e' entrato o uscito da una colonna 'active' DURANTE la settimana
+// corrente (qui: un rientro da wip a backlog) rende la MEDIA sui 7
+// giorni diversa dalla fotografia di ADESSO - per costruzione, non per
+// un errore: la media settimanale e l'istantanea sono due grandezze
+// diverse appena c'e' churn. La verifica che deve invece tornare
+// sempre 0 e' quella "istante contro istante" (ultimo intervallo
+// ricostruito dal log vs job.status, entrambi per l'istante attuale) -
+// vedi checkS4WipCoverage_.
+function testActiveWipWeeklyFromLogWeeklyAverageDiffersFromInstantSnapshotOnChurn() {
+  var now = new Date();
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  // Era in WIP (attivo) fino a 2 giorni fa, poi rientrato in backlog:
+  // ADESSO non e' attivo, ma ha contribuito 5 giorni attivi questa
+  // settimana prima del rientro.
+  var churnedJob = {
+    job_id: 'JOB-CHURNED',
+    status: 'backlog',
+    size_points: 13,
+    activity_log_json: JSON.stringify([
+      { type: 'move', to: 'wip', ts: testIsoDaysAgo_(now, 30) },
+      { type: 'move', to: 'backlog', ts: testIsoDaysAgo_(now, 2) }
+    ]),
+    incarico_chiuso_ts: ''
+  };
+  var jobs = [churnedJob];
+
+  var weeklyAverage = activeWipWeeklyFromLog_(jobs, [], columnMap, now, 1).weekly[0];
+  var lastInterval = jobColumnIntervalsFromLog_(churnedJob, columnMap, now).slice(-1)[0];
+  var instantWip = lastInterval.wip_class === 'active' ? jobPoints_(churnedJob) : 0;
+  var livePanelPoints = wipColumnClass_(columnMap[normalizeStatus_(churnedJob.status)]) === 'active' ? jobPoints_(churnedJob) : 0;
+
+  assertTrue_(weeklyAverage > 0, 'la media settimanale conta i 5 giorni in cui il job era davvero attivo, prima del rientro');
+  assertEquals_(0, instantWip, 'l\'istantanea ricostruita dal log deve riflettere lo stato ADESSO (backlog, non attivo)');
+  assertEquals_(0, livePanelPoints, 'il pannello live deve concordare: il job non e\' attivo adesso');
+  assertEquals_(instantWip, livePanelPoints, 'istante contro istante devono sempre coincidere, anche quando la media settimanale differisce per churn reale');
 }
 
 // S3 (DESIGN_R_S.md §3.8): fasce a percentile sulla lista "Fermi ora" -
