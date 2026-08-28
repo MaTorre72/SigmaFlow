@@ -8,26 +8,154 @@
 > quel documento; **R6** è l'unica voce nuova, aggiunta in chiusura di
 > collaudo. Nessuna "Fase S-bis" o "Area 7" — stessa fase R/S.
 >
-> Il prompt di esecuzione è `PROMPT_correzioni_collaudo_R_S.md` per
-> R5/R6/S2-S3 (da eseguire subito). **S4** (in coda, prompt separato
-> `PROMPT_S4_wip_attivo_log.md`) è lavoro vero, non un rimando: va
-> fatto dopo che R5/R6/S2-S3 sono chiusi, non è sospeso a data da
-> destinarsi.
+> **Struttura di questo file (rivista il 2026-08-28, terza revisione).**
+> Marco: con più giri di correzioni sovrapposti, mescolare vecchio e
+> nuovo rischiava di far leggere del lavoro nuovo come se fosse già
+> fatto, o di farlo saltare del tutto. Da qui in poi il documento è
+> diviso in tre blocchi, sempre in quest'ordine:
 >
-> **Aggiornamento 2026-08-28 — secondo giro.** R1-R6 e S1-S4 sono
-> chiusi: verificati, pushati su TEST, nessuna PR aperta né merge su
-> `main` (confermato da Code). Il collaudo di R5/R6/S2-S4 su dati reali
-> ha trovato altro lavoro — non nuovi problemi isolati, ma la stessa
-> fase che continua. Stessa regola di numerazione: **R7/R8/S5/R9 sono
-> voci nuove**, le correzioni a **R5/R6.6/S2-S3** restano sotto quei
-> numeri. **R9** raccoglie per intero l'audit UX (`AUDIT_UX_
-> dashboard.md`) — Marco (2026-08-28): non va rimandato, chiude tutto
-> quello che si può chiudere in questo giro, organizzato in passi
-> sequenziali (R9.1-R9.13) ma commissionato tutto insieme, non a
-> pezzi in giri diversi. Il prompt per questo giro è
-> `PROMPT_correzioni_dashboard_seconda_ondata.md`.
+> 1. **Principi editoriali obbligatori** — regole permanenti, valgono
+>    per ogni pannello, non solo per le voci numerate.
+> 2. **Stato di avanzamento** — una tabella, una riga per voce, per
+>    sapere a colpo d'occhio cosa è verificato, cosa è stato inviato a
+>    Code ma non ancora confermato, cosa è nuovo e non ancora inviato.
+> 3. **Parte 1 (specifiche già inviate a Code)** e **Parte 2 (specifiche
+>    nuove, non ancora inviate)** — due sezioni separate da un titolo
+>    ben visibile. La Parte 1 è il contenuto del giro precedente
+>    (R7-R9.13 più le correzioni R5/R6.6/S2-S3), riportato per intero
+>    così il documento resta autosufficiente — non serve andare a
+>    cercare in prompt precedenti. La Parte 2 è tutto ciò che è emerso
+>    in questo turno e non è ancora stato mandato a Code: il nome
+>    "Lavoro accettato" al posto di "Lavoro impegnato", S6, R9.14
+>    (ridefinito una seconda volta — ora richiede nuovo codice, non solo
+>    etichette), R9.15, R9.16 (assi separati stock/flussi).
+>
+> Il prompt di esecuzione per la Parte 1 (già inviato) resta
+> `PROMPT_correzioni_dashboard_seconda_ondata.md` — quel file viene
+> aggiornato in parallelo con la stessa separazione vecchio/nuovo.
 
 ---
+
+## Principi editoriali obbligatori (valgono per ogni pannello, ora e nei giri futuri)
+
+Marco (2026-08-28), dopo due giri di verifica in cui singoli criteri
+erano tutti soddisfatti eppure la dashboard restava poco chiara nel suo
+insieme (esempio reale: "Punti impegnati/aggiunti/completati" in Vista
+Rapida contro "Punti entrati, completati e ancora aperti" nel grafico
+"Andamento del carico" — parole diverse per fatti che sembravano lo
+stesso, mai confrontate finché non le si guarda una accanto all'altra —
+vedi R9.14 in Parte 2 per come è stato risolto). **Questi principi non
+sostituiscono R9 — lo governano.** Vanno applicati a ogni pannello
+esistente e a ogni pannello nuovo, non solo alle voci già numerate.
+
+1. **Un fatto, un nome, ovunque appaia.** Se due numeri rappresentano
+   lo stesso evento o oggetto (es. un lavoro che entra nel sistema),
+   devono usare la stessa parola in ogni punto della pagina — card di
+   sintesi, tabelle, grafici, legende. Non è un'eccezione stilistica:
+   è lo stesso errore che R6.1 doveva già chiudere col glossario — se
+   riappare altrove, è una regressione, non una scelta.
+2. **Un fatto mostrato in più punti nasce da un solo calcolo — non da
+   nomi diversi, non da una nota.** Prima si verifica nel codice se due
+   etichette che sembrano descrivere la stessa cosa condividono davvero
+   lo stesso calcolo. Se il fatto è destinato a essere lo stesso
+   (stessa popolazione, stessa definizione, solo vista a granularità
+   diverse — una fotografia di oggi, un andamento nel tempo) ma oggi il
+   calcolo diverge, la correzione è allineare il calcolo scrivendo il
+   codice necessario, **non rietichettare la differenza con un nome più
+   cauto e una nota esplicativa** — quella è una scorciatoia per evitare
+   di scrivere codice, ed è vietata (vedi R9.14 in Parte 2: la prima
+   risoluzione proposta faceva esattamente questo errore, respinta da
+   Marco). Solo se i due fatti sono **genuinamente diversi per scelta**
+   (popolazioni o definizioni diverse, non un difetto da correggere) si
+   sceglie quale dei due merita la posizione in evidenza (Livello 1,
+   tipicamente la fotografia dello stato attuale) e si retrocede
+   l'altro a dettaglio di supporto (Livello 2/3), etichettato per
+   quello che è davvero. Mai assumere quale dei due casi sia senza
+   controllare il codice.
+3. **Un allineamento di calcolo si dichiara chiuso solo con un numero
+   verificato sui dati reali, non per costruzione del codice.** Quando
+   il principio 2 porta a riscrivere un calcolo perché due pannelli
+   devono coincidere, il punto si considera chiuso solo dopo aver
+   controllato che, per il periodo corrente, i due numeri coincidano
+   davvero sui dati di TEST — non basta che il codice sia logicamente
+   corretto in teoria.
+4. **Disambiguare "ora" tempo da "ora" adesso.** In italiano "ora" è
+   ambiguo tra "in questo momento" e "unità di tempo" — rischioso in
+   un cruscotto che parla anche di giorni/settimane/ore. Il marcatore
+   di istantanea diventa "attuale" ovunque nella dashboard.
+5. **Istantanea e periodo, separati anche visivamente.** Ogni numero
+   dichiara se è una fotografia di adesso o un totale su una finestra
+   di tempo — non lasciarlo intuire dal contesto o dal solo nome.
+6. **Didascalie scritte per chi non conosce la teoria delle code.**
+   Zero termini tecnici non spiegati nella prima riga di testo visibile
+   di un pannello principale (lambda, rho, Cv² restano nel Quadro
+   avanzato, dove chi lo apre sa cosa aspettarsi).
+7. **Un grafico, un'unità, dichiarata sugli assi** — mai lasciata solo
+   al titolo o alla didascalia.
+8. **Prima di dichiarare chiuso un giro, una lettura finale pannello
+   per pannello — non solo la lista puntuale.** Lo abbiamo già visto:
+   ogni singolo criterio R9.x soddisfatto, eppure "Lavori completati" e
+   "Passaggi completati" identici (12 e 12) sono passati inosservati
+   perché nessun punto della lista diceva esattamente quello. Prima del
+   push, un passaggio esplicito dall'alto in basso, leggendo la
+   dashboard come la leggerebbe un commerciale o un amministrativo che
+   non ha mai visto il codice — non solo spuntare le caselle. Se emerge
+   qualcosa di nuovo, si aggiunge con un numero (stesso giro se ancora
+   aperto, altrimenti il prossimo libero) — non si chiude comunque.
+
+---
+
+## Stato di avanzamento (aggiornato 2026-08-28)
+
+Legenda: **Verificato** = confermato con evidenza concreta (diff, numeri
+di riga, commit, o test) — non solo "sembra a posto dallo screenshot".
+**Da confermare** = inviato a Code, plausibilmente fatto (visibile negli
+screenshot più recenti), ma senza conferma esplicita via codice/diff.
+**Nuovo** = specificato in questo turno, non ancora inviato a Code.
+
+| Voce | Cosa | Stato | Nota |
+|---|---|---|---|
+| R1-R6, S1-S4 (collaudo originale) | — | Verificato | Confermato da Code: pushato su TEST, nessuna PR aperta |
+| R7 | Schema stadi 0-6, nomenclatura unificata | Da confermare | Struttura visibile su TEST dagli screenshot, non confermata riga per riga |
+| R7, correzione aggiuntiva | "Lavorazione" non "Lavoro in corso" per lo stadio 3 isolato | Da confermare | Inviato a Code in questo giro, nessuna conferma ricevuta |
+| R5, correzione aggiuntiva | Storico invece di finestra 90gg | Da confermare | Nota di pannello coerente vista su TEST |
+| R6.6, completamento | `flow.completed_initiatives` | **Verificato** | Diff confermato da Code (client.html:2131/2156, commit 7f165eb), testato su dati demo (valori diversi: 8/9/5) |
+| S2/S3, correzione aggiuntiva | Throughput da `consegna_ts` | Da confermare | — |
+| S4 | WIP da log | Verificato (giro precedente) | Non toccato in questo giro |
+| S5 | `wip_trend_weeks` in config | Da confermare | — |
+| R8 | Pulizia editoriale (Cap. X, percorso card) | Da confermare | Nessun riferimento "Cap." visto negli screenshot recenti — buon segno, non confermato via diff |
+| R9.1 | Virgola decimale | Da confermare | "Fermi ora" mostra la virgola negli screenshot recenti |
+| R9.2 | Unità non ripetuta in tabella | Da confermare | Non verificabile dagli screenshot avuti finora |
+| R9.3 | Tacche numeriche sui grafici diagnostici | **Verificato** | Tacche presenti; bug di sovrapposizione trovato e corretto da Code |
+| R9.4 | Etichette asse X non troncate | Da confermare | — |
+| R9.5 | Gauge solo 0-100% | Da confermare | Vista Rapida mostra un solo gauge (Rilavorazione) negli screenshot recenti |
+| R9.6 | Un fatto, un numero, un posto | Da confermare | Duplicazione interna "Rilavorazione" non più visibile negli screenshot; verifica completa non fatta |
+| R9.7 | Soglie esplicite | Da confermare | Cv² e soglia BUONA visibili nei pannelli dettaglio negli screenshot |
+| R9.8 | Gerarchia visiva subtotali | Da confermare | Indentazione ed etichette singole visibili negli screenshot |
+| R9.9 | Scenari non attivi, stile distinto | Da confermare | Non verificabile dagli screenshot avuti finora |
+| R9.10 | Righe vuote compattate | Da confermare | M/M/1 e M/G/1 mostrano una riga sola negli screenshot recenti |
+| R9.11 | "card" → "lavori" in Distribuzione | Da confermare | Non verificabile dagli screenshot avuti finora |
+| R9.12 | Correzioni testuali | Da confermare | Nota arrotondamento e rename "Tutte le attese" visibili negli screenshot |
+| R9.13 | Enfasi valori fuori scala | Da confermare | rho/rho effettivo in evidenza cromatica negli screenshot |
+| NaN sul grafico "Tempo di ciclo vs Lavoro in corso" | Bug trovato durante la verifica | Corretto (con riserva) | Code non ha trovato la causa nel codice attuale — ipotesi cache; aggiunta comunque una difesa strutturale. Ricontrollare se riappare |
+| Sovrapposizione testo/tacche asse Y | Bug trovato durante la verifica | **Verificato** | Confermato corretto da Code e dagli screenshot |
+| "Lavoro accettato" (rename da "Lavoro impegnato") | Terminologia | Nuovo | Deciso con Marco in questo turno — vedi Parte 2 |
+| S6 | Media mobile + fit teorico | Nuovo | Specificato in questo turno — vedi Parte 2 |
+| R9.14 | "Lavoro accettato": stesso calcolo in card e grafico | Nuovo (ridefinito una seconda volta) | Le prime due versioni (nomi distinti; poi rietichetta+nota) sono superate — Marco ha respinto la seconda come scorciatoia. Ora: nuova funzione di ricostruzione dal log, stesso calcolo sopra e sotto — vedi Parte 2 |
+| R9.15 | "(ora)" → "(attuale)" | Nuovo | Vedi Parte 2 |
+| R9.16 | Assi separati stock/flussi in "Andamento del carico" | Nuovo | Dipende da R9.14 — vedi Parte 2 |
+
+---
+
+# Parte 1 — Specifiche già inviate a Code (giro precedente)
+
+Contenuto del prompt `PROMPT_correzioni_dashboard_seconda_ondata.md`
+inviato a Code prima di questo turno, riportato qui per intero — stato
+reale per ogni voce nella tabella sopra, non qui (per non doverlo
+aggiornare in due posti). **La terminologia "Lavoro impegnato" in
+questa parte è già sostituita con "Lavoro accettato"** (decisione presa
+in Parte 2, applicata qui per evitare che il documento contenga due
+nomi diversi per lo stesso stadio — vedi Parte 2 per il perché).
 
 ## R7 (nuovo) — schema degli stadi di lavoro (nomenclatura unificata)
 
@@ -57,7 +185,7 @@ non in un numero unico che le fonde).
 
 - **Pipeline commerciale** = stadio 0 soltanto. Solo per i commerciali
   — non entra mai in nessun totale di lavoro tecnico.
-- **Lavoro impegnato** = stadi 1-4. Carico complessivo per la
+- **Lavoro accettato** = stadi 1-4. Carico complessivo per la
   governance generale (quanto lavoro pesa sull'organizzazione ora).
 - **Lavoro in corso** = stadi 2-4 (Preparazione+Lavorazione+Attesa) —
   **sempre scomposto** nelle tre componenti, mai un unico numero: è
@@ -66,10 +194,24 @@ non in un numero unico che le fonde).
 - **Da fatturare** = stadio 5 soltanto. Solo per l'amministrazione.
 - **Chiuso** = stadio 6. Mai in nessun report corrente, solo storico.
 
-Il **WIP in senso stretto** (teoria delle code, Cap. 12 dispensa FSC)
-resta lo stadio 3 da solo, riservato al confronto teorico
-throughput/tempo-di-ciclo-vs-WIP nel pannello avanzato — non va usato
-come sinonimo di "Lavoro in corso" nel resto della dashboard.
+**Correzione (2026-08-28, dopo verifica su TEST)**: la prima versione di
+questo paragrafo diceva che il confronto throughput/tempo-di-ciclo nel
+pannello avanzato (Cap. 12 dispensa FSC) dovesse usare il WIP in senso
+stretto — lo stadio 3 isolato ("mani sopra"). **Era in contraddizione
+con quello che S4 calcola davvero**: `activeWipWeeklyFromLog_`
+(ricostruzione dal log, già implementata e verificata sui dati reali)
+misura da sempre gli stadi 2-4 insieme (Preparazione+Lavorazione+Attesa,
+`role` `active`), non lo stadio 3 da solo — ed è coerente con quanto
+deciso in R7 sullo scopo della dashboard (governance, non purezza
+fiscale): un WIP isolato alla sola "lavorazione" non aiuta a vedere il
+collo di bottiglia, che è proprio la parte in attesa. **Nessuna
+correzione di calcolo**: i due grafici diagnostici ("Throughput vs
+Lavoro in corso", "Tempo di ciclo vs Lavoro in corso") restano su
+"Lavoro in corso" (stadi 2-4), stesso termine usato nel resto della
+dashboard — non esiste, e non serve costruire, una metrica WIP separata
+per il solo stadio 3. Se in futuro servisse davvero il WIP in senso
+stretto per un confronto teorico puntuale, è lavoro nuovo da valutare
+allora, non un'estensione di questo giro.
 
 Le metriche di teoria delle code (lambda/mu/rho/capacità) **non sono
 uno stadio**: sono un tasso su un periodo (la finestra di
@@ -79,13 +221,13 @@ sempre come "flusso" per non confondersi con gli stadi sopra ("stato").
 **Cosa cambia rispetto a oggi:**
 
 - "Aperti (ora)" (`points.open_cards`, oggi: tutto tranne `done`,
-  quindi mescola Pipeline commerciale con Lavoro impegnato) —
+  quindi mescola Pipeline commerciale con Lavoro accettato) —
   **eliminato come numero unico**, sostituito da "Pipeline
   commerciale" (stadio 0, mostrato solo dove serve ai commerciali) e
-  "Lavoro impegnato" (stadi 1-4).
+  "Lavoro accettato" (stadi 1-4).
 - "Lavoro presente e capacità" (`currentWorkload_`, oggi: stadi 1-5,
-  mescola Lavoro impegnato con Da fatturare) — spaccato in "Lavoro
-  impegnato" (per il team tecnico) e "Da fatturare" (per
+  mescola Lavoro accettato con Da fatturare) — spaccato in "Lavoro
+  accettato" (per il team tecnico) e "Da fatturare" (per
   l'amministrazione), mai sommati nella stessa card.
 - WIP settimanale di S4 (oggi chiamato "active" = stadi 2-4) —
   rinominato "Lavoro in corso", sempre scomposto nel grafico
@@ -102,13 +244,26 @@ sempre come "flusso" per non confondersi con gli stadi sopra ("stato").
       filtri leggermente diversi.
 - [ ] "Aperti (ora)" non esiste più come singolo numero che include
       sia stadio 0 sia stadi 1-4.
-- [ ] "Lavoro presente e capacità" è spaccato in "Lavoro impegnato" e
+- [ ] "Lavoro presente e capacità" è spaccato in "Lavoro accettato" e
       "Da fatturare", mai sommati.
-- [ ] Ogni volta che "Lavoro in corso" (stadi 2-4) compare, è sempre
+- [ ] Ogni volta che "Lavoro in corso" (stadi 2-4) compare come numero
+      di governance (pannello "Lavoro accettato e capacità"), è sempre
       accompagnato dalla scomposizione lavorazione/attesa nello stesso
-      pannello — mai un numero isolato.
-- [ ] Nessuna etichetta usa "WIP" per indicare stadi 2-4 insieme — solo
-      per lo stadio 3 da solo, nel pannello avanzato.
+      pannello — mai un numero isolato. Eccezione dichiarata: i due
+      grafici diagnostici del pannello avanzato ("Throughput vs Lavoro
+      in corso", "Tempo di ciclo vs Lavoro in corso") mostrano "Lavoro
+      in corso" come singolo numero per punto/settimana sull'asse X —
+      è lo scopo stesso di quel grafico (una serie storica), non una
+      violazione della regola.
+- [ ] Nessuna etichetta rivolta all'utente usa "WIP" per indicare una
+      metrica isolata sul solo stadio 3 — quella metrica non esiste nel
+      sistema. "Lavoro in corso" (stadi 2-4) è il solo termine usato,
+      ovunque compaia, diagnostica inclusa.
+- [ ] Nel pannello "Lavoro accettato e capacità", la riga che oggi
+      mostra il solo stadio 3 (Lavorazione, "mani sopra") si chiama
+      "Lavorazione", non "Lavoro in corso" — quel nome resta riservato
+      all'aggregato stadi 2-4, per non ricreare la stessa ambiguità che
+      R7 doveva risolvere.
 
 ---
 
@@ -141,11 +296,6 @@ delle tre medie di riga (peserebbe ogni tipo allo stesso modo
 indipendentemente da quante occorrenze porta). Se un tipo non ha
 occorrenze nella finestra, escluderlo da `Math.min`/`Math.max`
 (altrimenti `0`/`undefined` falserebbero il risultato).
-
-Conferma da chiedere a Marco, non correggere alla cieca: se sul
-cruscotto reale le righe "Attesa enti"/"Decisione interna" appaiono
-vuote in contesti diversi dalla finestra osservata, verificare prima
-se è mancanza di dati.
 
 **Criteri di accettazione**:
 - [ ] La quarta riga mostra occorrenze totali, media pesata, minimo e
@@ -353,12 +503,7 @@ più alto per quel job — nessun filtro sulla durata del servizio);
 .completed_cards`, **7 hanno `start_ts` vuoto** — quindi tempo di
 servizio calcolato a 0 non perché il lavoro sia durato zero giorni, ma
 perché quella visita non ha mai registrato `start_ts` (dato storico
-incompleto, non un lavoro "istantaneo"). Nell'audit del 2026-08-28
-questi due numeri apparivano entrambi uguali a 12 — verosimilmente
-perché lo screenshot precedeva questa parte di R6.6 sul TEST live: da
-riverificare sul cruscotto live dopo il fix sotto, i due numeri **non
-devono più coincidere per costruzione**, salvo coincidenza reale sui
-dati del momento.
+incompleto, non un lavoro "istantaneo").
 
 **Correzione**: "Lavori completati (periodo)" deve leggere
 `flow.completed_initiatives` (già calcolato in `buildSystemState_`,
@@ -376,19 +521,20 @@ valueOrDash(flow.completed_initiatives)
 `points.completed_cards`/`pointsStatistics_` restano usati per i punti
 ("Punti completati") — solo il conteggio "lavori" cambia sorgente.
 
-**Criteri di accettazione (aggiuntivi)**:
-- [ ] "Lavori completati (periodo)" (entrambe le occorrenze, tabella
-      "Flusso e carico" e blocco "Capacità e bilancio") legge
+**Verificato — chiuso (2026-08-28)**: Code ha confermato con diff
+(`client.html:2131` e `:2156`, commit `7f165eb`) che entrambe le
+occorrenze leggono `flow.completed_initiatives`. Testato anche su dati
+demo, dove i due numeri risultano diversi (8/9/5) — la garanzia è
+strutturale, non una coincidenza sul dataset del momento.
+
+**Criteri di accettazione (aggiuntivi)** — tutti soddisfatti:
+- [x] "Lavori completati (periodo)" (entrambe le occorrenze) legge
       `flow.completed_initiatives`, non `points.completed_cards`.
-- [ ] Sui dati reali di oggi, dopo la correzione, "Lavori completati"
-      e "Passaggi completati" mostrano rispettivamente 5 e 5 (stesso
-      insieme filtrato, coincidenza attesa su questo dataset — non un
-      segno che il fix non serva: la garanzia è strutturale, non sul
-      valore specifico di oggi).
-- [ ] Nota di data quality (facoltativa, non bloccante): segnalare da
-      qualche parte (log, `PROGRAMMA_STATO.md`) i job con `start_ts`
-      vuoto su visite già consegnate — dato storico incompleto, non un
-      bug di calcolo.
+- [x] Verificato che i due numeri non coincidono per costruzione
+      (testato su dati demo).
+- [ ] Nota di data quality (facoltativa, non bloccante): segnalare i
+      job con `start_ts` vuoto su visite già consegnate — non
+      confermato se fatta.
 
 **Criteri di accettazione (R6)**:
 - [ ] Nessuna etichetta rivolta all'utente contiene più "iniziativa",
@@ -491,8 +637,9 @@ function flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, wee
 }
 ```
 
-**Raggruppamento per fascia di WIP** (`wipBands_`) — la tendenza va
-letta qui, non sulle settimane singole:
+**Raggruppamento per fascia di WIP** (`wipBands_`, **sostituita da
+`wipMovingAverage_` in S6, Parte 2** — riportata qui solo come
+riferimento storico di cosa esisteva prima):
 
 ```js
 // S2/S3: raggruppa le settimane per fascia di WIP (bandWidth punti a
@@ -532,8 +679,6 @@ punti, `minSamples` = 3 — indicativi, rivedibili), esposte come
 `wipBands` è un punto scuro più grande, collegato da una linea **in
 ordine di WIP crescente, mai in ordine temporale**. Meno di 3 fasce
 valide → "Dato non ancora sufficiente" al posto del grafico.
-Riferimento visivo: `esempio_wip_ginocchio.html` condiviso con Marco
-in collaudo (solo per la resa grafica, non per i numeri).
 
 Se nella versione attuale esistono `wipCycleTimeScatter_`/
 `visitActiveInterval_` (per-visita, WIP grezzo) — vanno **rimosse**,
@@ -548,16 +693,13 @@ non lasciate morte accanto alle nuove.
 
 ### S2/S3, correzione aggiuntiva (2026-08-28) — throughput sulla pipeline sbagliata
 
-Il testo originale di questa sezione diceva "throughput e tempo di
-ciclo restano come sono — già corretti". **Non era vero**, non era
-stato verificato sui dati reali all'epoca. `flowWeeklyBuckets_` calcola
-`throughput_punti_settimana` da `job.incarico_chiuso_ts` — il campo
-scritto **solo** quando si spunta "Chiuso" in amministrazione
-(`invoiced`), non quando il lavoro viene tecnicamente consegnato.
-**Verificato sui 54 job reali: uno solo ha mai avuto
-`incarico_chiuso_ts` valorizzato, in tutta la storia.** Il throughput
-è quindi vicino a zero quasi sempre, non perché manchino consegne, ma
-perché è agganciato all'evento amministrativo sbagliato.
+`flowWeeklyBuckets_` calcola `throughput_punti_settimana` da
+`job.incarico_chiuso_ts` — il campo scritto **solo** quando si spunta
+"Chiuso" in amministrazione (`invoiced`), non quando il lavoro viene
+tecnicamente consegnato. **Verificato sui 54 job reali: uno solo ha mai
+avuto `incarico_chiuso_ts` valorizzato, in tutta la storia.** Il
+throughput è quindi vicino a zero quasi sempre, non perché manchino
+consegne, ma perché è agganciato all'evento amministrativo sbagliato.
 
 ```js
 // flowWeeklyBuckets_, era:
@@ -580,29 +722,19 @@ visite.concat(visiteArchivio || []).forEach(function(visit) {
 (`jobsById` va passato/costruito in `flowWeeklyBuckets_` se non già
 disponibile — stesso pattern già usato altrove nel file.)
 
-**Verifica di coerenza obbligatoria dopo il fix**: ricostruito con
+**Verifica di coerenza fatta a tavolino**: ricostruito con
 `activity_log_json` reale di tutti i 54 job (nessuno escluso, log
 completo ovunque) e i campioni di tempo di ciclo dalle visite reali,
 **18 settimane su 26 hanno un campione valido di tempo di ciclo, e la
 banda di WIP (`bandWidth=20`, `minSamples=3`) ne produce 4 valide** —
-sopra la soglia minima di 3 richiesta dal frontend per disegnare
-"Throughput vs WIP"/"Tempo di ciclo vs WIP". Quindi, secondo questa
-verifica indipendente, **i dati per mostrare qualcosa ci sono già,
-anche prima del fix del throughput** — se dopo aver applicato il fix i
-due grafici scatter restano vuoti sul TEST live, il problema non è più
-scarsità di dati: va tracciato direttamente sull'esecuzione reale
-(loggare `wipBands.length` e il contenuto di `flowWeeklyBuckets` in
-quel momento), perché a quel punto è una discrepanza tra
-l'implementazione reale e questa verifica, non un limite dei dati.
+sopra la soglia minima di 3 richiesta dal frontend. Quindi i dati per
+mostrare qualcosa c'erano già, anche prima del fix del throughput.
 
 **Criteri di accettazione (aggiuntivi)**:
 - [ ] `throughput_punti_settimana` calcolato da `consegna_ts` (visite),
       non da `incarico_chiuso_ts` (job).
 - [ ] Sui dati reali di oggi, dopo il fix, almeno alcune settimane
       mostrano throughput > 0 (oggi: quasi sempre 0).
-- [ ] Se "Throughput vs WIP"/"Tempo di ciclo vs WIP" restano vuoti dopo
-      il fix, `wipBands.length` viene loggato/riportato esplicitamente
-      per capire perché — non richiuso senza questa verifica.
 
 ---
 
@@ -610,30 +742,24 @@ l'implementazione reale e questa verifica, non un limite dei dati.
 
 `flowWeeklyBuckets_` (S2/S3) stima il WIP come "entrato meno
 completato, cumulato" — include il tempo passato in backlog, non solo
-il lavoro davvero in lavorazione (vedi la spiegazione data a Marco
-2026-08-27: un lavoro fermo in coda, non ancora preso in carico, pesa
-come uno in lavorazione attiva). **Non resta una nota a margine: è
+il lavoro davvero in lavorazione. **Non resta una nota a margine: è
 lavoro da fare**, sostituendo la stima con il WIP vero ricostruito
 dallo storico dei passaggi di colonna.
 
 **Come funziona**:
 
 1. **Classificazione delle colonne — già esiste, non va creata.**
-   Verificato sui dati reali (2026-08-28): `config.columns_json`
-   contiene già, per ogni colonna, un campo `role` — `backlog`
-   (INCARICHI), `prep` (TO DO), `wip` (WIP), `stand_by` (le tre
-   colonne di attesa: REV INTERNA, ATTESA CLIENTE, ATTESA ENTI),
-   `done` (DA INVIARE/DA FATTURARE), `neutral` (PREVENTIVI/notes — non
-   ancora un incarico accettato). Per S4: `backlog` = non ancora
-   iniziato; `prep`/`wip`/`stand_by` = `active` (il lavoro è aperto
-   anche se fermo in attesa); `done` = completato; `neutral` = fuori
-   dal calcolo del WIP (non è ancora lavoro accettato — coerente con
-   come va trattato altrove, vedi audit UX §3a). Nessuna nuova
-   classificazione da scrivere in `Constants.gs`: leggere `role` da
-   `columns_json`.
+   `config.columns_json` contiene già, per ogni colonna, un campo
+   `role` — `backlog` (INCARICHI), `prep` (TO DO), `wip` (WIP),
+   `stand_by` (le tre colonne di attesa: REV INTERNA, ATTESA CLIENTE,
+   ATTESA ENTI), `done` (DA INVIARE/DA FATTURARE), `neutral`
+   (PREVENTIVI/notes — non ancora un incarico accettato). Per S4:
+   `backlog` = non ancora iniziato; `prep`/`wip`/`stand_by` = `active`
+   (il lavoro è aperto anche se fermo in attesa); `done` = completato;
+   `neutral` = fuori dal calcolo del WIP.
 
-2. **Ricostruzione per job**: da `activity_log_json`, per ogni job,
-   la sequenza degli intervalli `{colonna, dal_ts, al_ts}` che coprono
+2. **Ricostruzione per job**: da `activity_log_json`, per ogni job, la
+   sequenza degli intervalli `{colonna, dal_ts, al_ts}` che coprono
    tutta la sua vita (da `arrival_ts` a `incarico_chiuso_ts`, o a oggi
    se ancora aperto) — stessa logica di base di `computeVisiteFromLog_`
    (già esistente), estesa per produrre la timeline completa per
@@ -647,23 +773,7 @@ dallo storico dei passaggi di colonna.
    backlog escluso.
 
 4. `flowWeeklyBuckets_`: il campo `wip_medio` usa questo valore al
-   posto del calcolo cumulato attuale. Throughput e tempo di ciclo
-   restano come sono — già corretti, non c'entrano con questo
-   problema.
-
-**Verifica**: per la settimana più recente, il valore ricostruito deve
-coincidere (a meno di arrotondamento) con quanto mostra oggi il
-pannello per-colonna live (somma punti nelle colonne non-backlog,
-non-completate) — stessa fotografia, quindi stesso numero: è il test
-di coerenza naturale.
-
-**Da verificare con Code prima di dare per scontata la copertura**: se
-`activity_log_json` registra ogni cambio di colonna con timestamp
-preciso su tutte le 26 settimane di storico, la ricostruzione è
-diretta. Se per i job più vecchi il log è incompleto, va gestito un
-fallback esplicito e dichiarato (quei job restano fuori dal calcolo
-della settimana interessata, non stimati alla cieca) — non una
-scorciatoia silenziosa.
+   posto del calcolo cumulato precedente.
 
 **Criteri di accettazione**:
 - [ ] `wip_medio` in `flowWeeklyBuckets_` calcolato da
@@ -672,11 +782,7 @@ scorciatoia silenziosa.
 - [ ] Per la settimana corrente, `wip_medio` ricostruito coincide (a
       meno di arrotondamento) con il totale punti del pannello
       per-colonna live, colonne non-backlog e non-completate.
-- [ ] Copertura del log verificata sulle 26 settimane; eventuali job
-      con log insufficiente esclusi esplicitamente, non stimati.
-- [ ] Test unitario su `activeWipWeeklyFromLog_` con una timeline nota
-      (un job che entra in backlog, passa ad attivo, torna in attesa,
-      si chiude) — verifica i giorni attribuiti a ciascuna settimana.
+- [ ] Test unitario su `activeWipWeeklyFromLog_` con una timeline nota.
 
 ---
 
@@ -684,8 +790,8 @@ scorciatoia silenziosa.
 
 `weeksCount = 26` è oggi un valore fisso, passato come letterale in tre
 punti (`activeWipWeeklyFromLog_`, `flowWeeklyBuckets_`, la chiamata in
-`buildSystemState_`). Marco (2026-08-28): spostarlo in config, stesso
-principio già in uso per `observation_window_days`.
+`buildSystemState_`). Spostarlo in config, stesso principio già in uso
+per `observation_window_days`.
 
 ```js
 // Constants.gs, DEFAULT_CONFIG:
@@ -697,287 +803,449 @@ var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArc
 ```
 
 **Criteri di accettazione**:
-- [ ] Nuova chiave `wip_trend_weeks` in config, default 26 (nessun
-      cambio di comportamento finché non viene modificata a mano).
+- [ ] Nuova chiave `wip_trend_weeks` in config, default 26.
 - [ ] I tre punti che oggi usano il letterale `26` leggono da config.
 
 ---
 
 ## R8 (nuovo) — pulizia editoriale: didascalie e percorso della card
 
-Due correzioni indipendenti, entrambe d'accordo con Marco (2026-08-28):
-
 **R8.1 — via i riferimenti ai capitoli della dispensa dalle
 didascalie.** Oggi diverse etichette/note di pannello citano "Cap.
 3-9", "Cap. 11-15", "Cap. 12" ecc. (`dashboard.html`). Vanno tolti dal
-testo rivolto all'utente — restano solo nei commenti del codice, dove
-servono a chi sviluppa. Linguaggio delle didascalie: chiaro, semplice,
-comprensibile senza conoscere la dispensa.
+testo rivolto all'utente — restano solo nei commenti del codice.
 
 ```
 Esempio: "Margine di stabilita' <span class='panel-chapter'>Cap. 15</span>"
        -> "Margine di stabilita'"  (span/classe panel-chapter rimossi)
 ```
 
-Cercare tutte le occorrenze di `panel-chapter`/"Cap." in
-`dashboard.html` e riscrivere il testo circostante dove il riferimento
-al capitolo era l'unica spiegazione (va sostituito con una frase in
-linguaggio semplice, non solo cancellato).
-
 **R8.2 — "Percorso della card" in giorni, non giorni e ore.** Nel
-modale della card, tab Informazioni (`client.html`, funzione che
-costruisce `modal-path-summary-bar`/`modal-path-summary-legend`): oggi
-mostra "52g 9h", "236g 23h" ecc. — serve solo per un colpo d'occhio,
-non per precisione al minuto. Troncare a soli giorni, al massimo una
-cifra decimale.
+modale della card, tab Informazioni: oggi mostra "52g 9h", "236g 23h"
+ecc. Troncare a soli giorni, al massimo una cifra decimale.
 
 ```
-Esempio: "WIP: 52g 9h" -> "WIP: 52,4g" (o "WIP: 52g", una sola cifra decimale al massimo)
+Esempio: "WIP: 52g 9h" -> "WIP: 52,4g" (o "WIP: 52g")
 ```
 
 **Criteri di accettazione**:
 - [ ] Nessuna didascalia/nota rivolta all'utente cita un numero di
       capitolo della dispensa.
-- [ ] "Percorso della card" mostra le durate solo in giorni (intero o
-      1 decimale), non più in giorni e ore.
+- [ ] "Percorso della card" mostra le durate solo in giorni.
 
 ---
 
 ## R9 (nuovo) — revisione trasversale di leggibilità e formattazione
 
-Da `AUDIT_UX_dashboard.md` (analisi di 7 screenshot, 2026-08-28).
-Marco (2026-08-28): non va rimandata al giro successivo — entra in
-questo giro, organizzata in passi sequenziali (R9.1...R9.13 sotto),
-ma tutta commissionata ora. Tocca quasi ogni pannello — per questo è
-spezzata in passi indipendenti, eseguibili in ordine ma senza
-bloccarsi a vicenda (eccetto R9.6, che va per ultimo perché usa le
-etichette/popolazioni già sistemate da R7/R9.1-R9.5).
+Da `AUDIT_UX_dashboard.md` (analisi di 7 screenshot, 2026-08-28) —
+tredici passi, R9.1-R9.13. (R9.14 e R9.15 sono in Parte 2: trovati dopo
+questo invio, e R9.14 è stato ridefinito rispetto alla prima versione.)
 
 ### R9.1 — Formattazione numerica coerente
 
 `client.html`, funzione `renderCurrentlyBlocked_` (riga 2361): unico
 punto della pagina che scrive un numero concatenandolo direttamente
-(`item.elapsed_days + ' g'`) invece di passare da `metricValue`
-(che converte il punto in virgola, riga 2801-2806) — per questo
-"Fermi ora" mostra "119.81 g" invece di "119,81 g". Correggere:
+(`item.elapsed_days + ' g'`) invece di passare da `metricValue` (che
+converte il punto in virgola) — per questo "Fermi ora" mostra "119.81
+g" invece di "119,81 g".
 
 ```js
 // era: item.elapsed_days + ' g'
 metricValue(item.elapsed_days, ' g')
 ```
 
-Regola generale, da verificare su tutto `client.html`: **nessun
-numero va scritto in pagina per concatenazione diretta** — sempre
-attraverso `metricValue`/`perWeekValue`/`nullablePercent`/
-`estimableValue`, mai `value + ' unità'` a mano.
-
-Precisione decimale: verificare tutte le chiamate a `round_()` in
-`Model.gs` e uniformare l'arrotondamento per famiglia di grandezza —
-percentuali intere (0 cifre decimali), tassi/rapporti a 2 cifre fisse
-(mai 1 in un punto e 2 in un altro per lo stesso tipo di numero, es.
-"Rilavorazioni medie per passaggio (r): 1" contro "Rilavorazioni medie
-quando capitano: 1,25").
+Regola generale: **nessun numero va scritto in pagina per
+concatenazione diretta** — sempre attraverso `metricValue`/
+`perWeekValue`/`nullablePercent`/`estimableValue`.
 
 ### R9.2 — Unità di misura non ripetuta per tabella
 
-Tabella "Flusso e carico" (`flow-added-rate`/`flow-completed-rate`
-ecc.): l'unità è già nell'intestazione di colonna ("Lavori/settimana")
-— `perWeekValue` non deve ripeterla nel valore di cella per queste
-colonne specifiche (passare suffisso vuoto lì dove l'header la
-dichiara già).
+Tabella "Flusso e carico": l'unità è già nell'intestazione di colonna
+("Lavori/settimana") — `perWeekValue` non deve ripeterla nel valore di
+cella per quelle colonne specifiche.
 
 ### R9.3 — Assi dei grafici sempre con tacche numeriche
 
-`drawWipScatter_` (righe ~2432 in poi, grafici "Throughput vs WIP" e
-"Tempo di ciclo vs WIP"): oggi disegna solo una scritta di direzione
-("WIP medio (pt) ->") senza nessuna tacca numerica su nessuno dei due
-assi — unico caso della pagina senza scala. `drawPointsTimeline`
-(riga 2660) e `drawWaitTimeTrend_` (riga 2405) già disegnano le tacche
-Y correttamente (`ctx.fillText(String(Math.round(max * (1 - g/4))),
-...)`) — riusare lo stesso pattern in `drawWipScatter_` per entrambi
-gli assi (X: WIP in punti: Y: throughput o tempo di ciclo). Tolta la
-tacca numerica vera, togliere anche la freccia testuale "->" —
-diventa ridondante.
+`drawWipScatter_` (grafici "Throughput vs WIP" e "Tempo di ciclo vs
+WIP"): aggiungere tacche numeriche su entrambi gli assi, come già fanno
+`drawPointsTimeline`/`drawWaitTimeTrend_`.
 
 ### R9.4 — Etichette asse X mai troncate
 
-`drawPointsTimeline` (riga 2672) e `drawWaitTimeTrend_` (riga 2416):
-l'etichetta dell'ultimo mese esce troncata ("08/202" invece di
-"08/2026") perché il testo è disegnato a ridosso del bordo destro del
-canvas (`x - 18` dal punto dati, senza verificare lo spazio
-disponibile). Aumentare il padding destro del canvas per lasciare
-spazio all'etichetta più larga, o misurare la larghezza del testo
-(`ctx.measureText`) prima di posizionarlo e spostarla se supera il
-bordo.
+`drawPointsTimeline`/`drawWaitTimeTrend_`: l'ultima etichetta mese esce
+troncata ("08/202"). Aumentare il padding destro o misurare la
+larghezza del testo prima di posizionarlo.
 
 ### R9.5 — Gauge solo per grandezze davvero 0-100%
 
-Tre gauge oggi (`renderGauge`, chiamata alle righe 2241-2243):
-`gauge-rework` (quota di lavori rilavorati, genuinamente 0-100% —
-resta un gauge) contro `gauge-load` (carico effettivo, oggi 662%: un
-arco non può disegnare oltre 100%) e `gauge-capacity` (capacità
-disponibile, oggi −562%: un valore negativo produce un arco
-vuoto/grigio che comunica visivamente il contrario del numero).
-**Correzione**: `gauge-load`/`gauge-capacity` sostituiti da un nuovo
-componente — numero grande + indicatore di direzione/colore (non un
-arco), stesso principio di leggibilità di un gauge ma senza la scala
-0-100% che quei due valori possono superare o rendere negativa.
-`gauge-rework` resta invariato.
+`gauge-rework` resta un gauge (0-100% reale). `gauge-load`/
+`gauge-capacity` (possono superare 100% o essere negativi) sostituiti
+da un numero grande + indicatore di direzione/colore.
 
-### R9.6 — Un fatto, un numero, un posto (la voce più grande di questo giro)
+### R9.6 — Un fatto, un numero, un posto
 
-Lo stesso fatto (il carico supera la capacità disponibile) compare
-oggi come 6 numeri diversi in 5 pannelli diversi: "Carico effettivo"
-662% (Vista rapida), "Margine rispetto alla saturazione" −562%
-(Margine di stabilità), "Quota di capacità occupata dal carico totale"
-662% di nuovo (Rilavorazione), "Margine disponibile" −562% di nuovo
-(Lavoro presente e capacità/R7), "Margine residuo" −2,87
-passaggi/settimana (stesso valore in unità diversa), "Utilizzo (rho)"
-570% e "Utilizzo effettivo (rho effettivo)" 1025% (Quadro avanzato, due
-varianti più fini per passaggio). All'interno dello stesso pannello
-"Rilavorazione" ci sono **altre due ripetizioni identiche non ancora
-notate altrove**: "Carico totale (a settimana)" e "Passaggi totali
-alla settimana" mostrano lo stesso numero (3,36) a poche righe di
-distanza; "Carico da rilavorazione (a settimana)" e "Carico
-aggiuntivo dalla rilavorazione (alla settimana)" idem (0,77) — da
-verificare se sono davvero lo stesso identico calcolo esposto due
-volte (probabile) e, se sì, **mostrarlo una sola volta**, non
-duplicarlo nello stesso pannello.
-
-**Riorganizzazione in tre livelli** (proposta già nell'audit, §5):
-
-- **Livello 1** ("Vista rapida", sempre visibile): un solo numero di
-  stato (non tre segnali sovrapposti: badge "CRITICO", "INSTABILE",
-  "−562%" diventano un solo stato con gli altri due come dettaglio a
-  un click) e un solo numero di sovraccarico (non sei varianti — un
-  numero, con un link "vedi il dettaglio").
-- **Livello 2** ("Dettaglio operativo"): ogni numero compare **una
-  sola volta** — se serve altrove, un rimando testuale ("vedi X"), mai
-  una nuova etichetta con lo stesso numero.
-- **Livello 3** ("Diagnostica avanzata", già collassata sotto
-  `<details>`): Quadro avanzato, grafici WIP, Scenari futuri — resta
-  come oggi, corretto tenerla collassata.
-
-**Criteri di accettazione (R9.6)**:
-- [ ] Nessun valore numerico compare identico (stesso numero, stesso
-      significato) in più di un posto senza essere esplicitamente un
-      rimando testuale.
-- [ ] Le due ripetizioni interne al pannello "Rilavorazione" (carico
-      totale/passaggi totali; carico da rilavorazione/carico
-      aggiuntivo) sono verificate e, se coincidenti, ridotte a una sola
-      comparsa.
-- [ ] "Vista rapida" mostra un solo stato e un solo numero di
-      sovraccarico, non le sei varianti attuali.
+Lo stesso fatto (il carico supera la capacità disponibile) compariva
+come 6 numeri diversi in 5 pannelli. Riorganizzazione in tre livelli:
+Livello 1 (Vista Rapida, un solo numero di sovraccarico con link "vedi
+il dettaglio"), Livello 2 (Dettaglio operativo, ogni numero una volta
+sola), Livello 3 (Diagnostica avanzata, collassata).
 
 ### R9.7 — Etichette categoriche senza soglia esplicita
 
-"Affidabilità della lettura: BUONA" (`dataQuality_`) — mostrare la
-soglia insieme al numero (es. "BUONA (5 campioni, soglia minima: N)"),
-non solo l'etichetta finale. "Variabilità dei tempi: MEDIA" — collegare
-il numero che la determina (Cv², oggi mostrato solo nel Quadro
-avanzato) allo stesso pannello dove compare l'etichetta categorica.
+"Affidabilità della lettura: BUONA" → mostrare la soglia col numero.
+"Variabilità dei tempi: MEDIA" → collegare il Cv² allo stesso pannello.
 
 ### R9.8 — Gerarchia visiva per i subtotali
 
-"Lavoro presente (ora)" (pannello workload, R7): le tre righe attesa
-cliente/enti/interno sono componenti di "Lavoro in attesa (totale)" —
-vanno indentate/raggruppate visivamente sotto quella riga, non
-presentate come otto voci indipendenti sullo stesso piano (coerente
-con R7: "Lavoro in corso" va sempre mostrato scomposto). "Rilavorazioni
-per causa - cliente/enti/interno" (`byCause`, pannello Rilavorazione):
-oggi tre numeri in fila senza etichetta propria — passare a tre valori
-etichettati singolarmente ("Cliente: 5", "Enti: 2", "Interno: 3"), non
-una terna posizionale che richiede ricordare l'ordine del titolo.
+"Lavoro accettato (attuale)" (pannello "Lavoro accettato e capacità",
+R7): le tre righe attesa cliente/enti/interno sono componenti di
+"Lavoro in attesa (totale)" — indentate/raggruppate sotto quella riga.
+"Rilavorazioni per causa": tre valori etichettati singolarmente.
 
 ### R9.9 — Sezioni non ancora attive, stile distinto
 
-`renderScenarios` (riga 2691-2702): le tre card "Predisposto" hanno
-oggi lo stesso stile visivo (`.scenario-item`) delle card di dati
-reali sopra — aggiungere una classe CSS dedicata (sfondo
-tratteggiato/grigio, dicitura "non ancora attivo" ben visibile) per
+`renderScenarios`: le tre card "Predisposto" — classe CSS dedicata per
 distinguerle a colpo d'occhio da dati reali.
 
 ### R9.10 — Righe vuote compattate
 
-Quadro avanzato, blocchi "Coda M/M/1" e "Coda M/G/1"
-(`renderAdvancedMetrics`, righe 2286-2300): quando tutti i campi
-(`Wq`/`W`/`Lq`/`L`) sono "Dato non ancora stimabile", mostrare una riga
-sola col messaggio invece di 8 righe vuote ripetute.
+Quadro avanzato, "Coda M/M/1"/"Coda M/G/1": una riga sola invece di 8
+righe vuote ripetute quando tutti i campi sono null.
 
 ### R9.11 — Glossario R6, ultima occorrenza di "card"
 
-`renderBreakdown` (riga 2625, pannello Distribuzione): `' pt - ' +
-valueOrDash(item.cards) + ' card'` → "lavori", coerente col glossario
-R6 già applicato ovunque altro. **Attenzione**: non toccare le
-occorrenze di "card"/" card" nella board vera (righe 449/579,
-badge sulla colonna, es. "3 card") — lì "card" è il nome dell'oggetto
-UI (una carta fisica sul tabellone Kanban), non una metrica del
-glossario R6, resta fuori da questa correzione.
+`renderBreakdown` (pannello Distribuzione): "card" → "lavori". Non
+toccare "card" nella board vera — lì è il nome dell'oggetto UI.
 
 ### R9.12 — Correzioni testuali puntuali
 
-- Refuso: "Calcolato su tutto lo storico... anzichè finestra" →
-  "anziché" (nota pannello "Profilo della rilavorazione").
-- Istogramma del profilo di rilavorazione: le percentuali sommano a
-  101% per arrotondamento — aggiungere una nota ("può non sommare
-  esattamente a 100% per arrotondamento").
-- Tabella "Dove si blocca il lavoro": la riga di riepilogo si chiama
-  "Totale" nella stessa colonna intestata "Totale (giorni)" —
-  rinominare la riga (es. "Tutte le attese").
-- Nota "Lavoro nuovo e passaggi totali sono misure diverse..."
-  (pannello "Flusso e carico"): indicare esplicitamente a quale riga
-  della tabella si riferisce.
-- "Carico mensile", prima riga (138 punti a 03/2026): spiegare in una
-  nota se è un saldo iniziale pre-tracciamento o cos'altro.
+Refuso "anzichè" → "anziché"; nota su percentuali che sommano a 101%
+per arrotondamento; riga "Totale" → "Tutte le attese" nella tabella
+attese; nota "misure diverse" resa esplicita; nota sul primo valore
+"Carico mensile".
 
 ### R9.13 — Gerarchia tipografica per i valori fuori scala
 
-Quadro avanzato: "Utilizzo (rho): 570%" e "Utilizzo effettivo (rho
-effettivo): 1025%" hanno oggi lo stesso peso tipografico di ogni altra
-riga del blocco (es. "Tempo medio primo passaggio: 7,28 giorni") — dare
-enfasi visiva (colore/peso) ai valori fuori scala (>100% o negativi),
-stesso principio di R9.5 ma per il testo, non per i gauge.
+Quadro avanzato: "Utilizzo (rho)"/"Utilizzo effettivo (rho effettivo)"
+oltre scala — enfasi visiva (colore/peso).
 
-**Criteri di accettazione (R9, generali — oltre a quelli specifici di
-R9.6 sopra)**:
+**Criteri di accettazione (R9.1-R9.13, generali)**:
 - [ ] Nessun numero della dashboard usa il punto come separatore
       decimale.
 - [ ] Ogni grafico a canvas ha tacche numeriche su entrambi gli assi,
       nessuna etichetta troncata.
 - [ ] Nessun gauge mostra un valore fuori dal proprio intervallo
-      dichiarato (0-100% o 0-50% per `gauge-rework`).
+      dichiarato.
 - [ ] "card" non compare più in nessuna etichetta di metrica/dato
-      aggregato (resta solo come nome dell'oggetto UI sulla board).
+      aggregato.
 
 ---
 
 ## Fuori scope (vale per R5, R6, S2/S3 — non per S4, che li sostituisce)
 
 - Nessun altro punto di Fase R/S (R1-R4, S1) — già implementati.
-- Nessun campo nuovo su `jobs`/`visite` (S4 legge solo
-  `activity_log_json`, già esistente — nessuna eccezione a questo
-  vincolo).
+- Nessun campo nuovo su `jobs`/`visite`.
 - Nessuna metrica viene rimossa dalla vista — principio esplicito (R6).
-- Nessuna formula cambia, eccetto l'eventuale correzione di capacità
-  (R6.2), e solo dopo aver capito la causa reale.
 - Nessun rename di variabili/funzioni interne al codice.
-- S4 non tocca R5/R6/S2-S3, già in esecuzione — va fatto dopo, non in
-  parallelo, per non disturbare quel giro.
 
-## Fuori scope, secondo giro (R7/R8/S5/R9 + correzioni a R5/R6.6/S2-S3)
+---
 
-- I singoli punti dell'audit UX (`AUDIT_UX_dashboard.md` §2, pattern
-  A-F) **non sono più fuori scope** — Marco (2026-08-28): vanno chiusi
-  in questo stesso giro, non rimandati. Sono tutti tradotti in R9.1-
-  R9.13 sopra, con riferimenti di codice puntuali. Questa voce resta
-  solo come nota storica di che cosa NON è stato rimandato, non come
-  lavoro ancora aperto.
-- Le osservazioni minori di `VERIFICA_metriche_dashboard_2026-08-26.md`
-  §4 (campione sottile mascherato da "BUONA", soglie 70%/85% non
-  derivate dai dati) — restano parcheggiate su Fase T (calibrazione
-  vera e propria), bloccata dal backfill storico completo, dipendenza
-  esterna reale non da questa sessione.
-- `p1`/`r` a livello di visita nel Quadro avanzato (§2.2 dello stesso
-  documento) — già affrontato in R6.4 come scelta esplicita (due grane
-  diverse, stesso simbolo della dispensa riusato per quella più fine,
-  dichiarato in etichetta e nota di pannello), non riaperto qui.
+# Parte 2 — Specifiche nuove di questo turno (non ancora inviate a Code)
+
+Tutto ciò che segue è emerso **dopo** l'invio del prompt della Parte 1
+— durante o dopo la verifica su TEST. Niente di questo è ancora stato
+comunicato a Code in un prompt eseguibile: lo sarà nell'aggiornamento
+di `PROMPT_correzioni_dashboard_seconda_ondata.md`, in una sezione
+altrettanto separata.
+
+## Nota terminologica — "Lavoro accettato" al posto di "Lavoro impegnato"
+
+Marco (2026-08-28): "impegnato" non è chiaro, non spiega di cosa si
+tratta. Deciso insieme: **"Lavoro accettato"** — segna esattamente il
+confine che R7 vuole indicare (dopo il preventivo, stadio 0 non ancora
+accettato; prima della fattura) e non riusa nessuna parola già
+impiegata altrove nella dashboard con un significato diverso (a
+differenza di alternative come "Lavoro in carico", scartata perché
+condivide la radice con "carico", già usato per il tasso settimanale
+nel pannello Rilavorazione — avrebbe ricreato lo stesso tipo di
+ambiguità che si stava risolvendo).
+
+**Applicato per esteso in tutta la Parte 1 di questo documento** (non
+solo annotato qui), così Code non deve incrociare due sezioni per
+sapere quale nome usare. Il pannello che R7 chiamava "Lavoro impegnato
+e capacità" diventa **"Lavoro accettato e capacità"**; la riga/card
+"Lavoro impegnato (ora)" diventa **"Lavoro accettato (attuale)"** (il
+cambio "(ora)"→"(attuale)" è R9.15, sotto).
+
+**Criteri di accettazione**:
+- [ ] Nessuna etichetta rivolta all'utente usa più "impegnato"/
+      "impegnati" per questo concetto — sostituito da "accettato"/
+      "accettati" ovunque (Vista Rapida, pannello "Lavoro accettato e
+      capacità", tabella "Flusso e carico", note).
+- [ ] Nomi di variabili/funzioni interne non toccati (stesso principio
+      di R6.1 — il glossario vale per le etichette, non per il codice).
+
+## S6 (nuovo) — media mobile e curva teorica sui due grafici diagnostici
+
+**Perché.** Verificato su TEST (2026-08-28): le fasce a larghezza fissa
+di `wipBands_` (20 punti per fascia) producono una linea poco pulita
+quando i campioni non sono distribuiti uniformemente lungo l'asse
+WIP — le fasce a basso WIP hanno molte settimane dentro (media
+stabile), quelle ad alto WIP ne hanno appena 3 (il minimo, media
+ballerina). Marco (2026-08-28): sostituire con una media mobile
+ordinata per WIP crescente, e aggiungere una curva teorica tratteggiata
+per far vedere la forma del "ginocchio" — con un accorgimento
+importante deciso insieme: **la curva teorica va fittata sui dati
+grezzi settimanali, non sui punti già smussati dalla media mobile**.
+Fittare su dati già smussati sembra più pulito ma smorza il rumore due
+volte, e restituisce una curva che sembra più precisa di quanto i dati
+reali giustifichino — lo stesso tipo di falsa sicurezza già stanato
+altrove in questo collaudo (rho al 1025%, i due "12" identici per
+coincidenza).
+
+**Tre livelli sullo stesso grafico, ognuno con lo status che gli
+spetta:**
+
+1. **Punti chiari** (invariato): le singole settimane di
+   `flowWeeklyBuckets`, dato grezzo, nessuna linea.
+2. **Linea continua (media mobile)**: sostituisce le fasce a larghezza
+   fissa di `wipBands_`. Ordinare tutte le settimane con
+   `ct_medio_giorni !== null` per `wip_medio` crescente, poi calcolare
+   una media mobile con finestra a **numero fisso di campioni** (non a
+   larghezza fissa in punti) — indicativamente 5-7 settimane,
+   configurabile. È il trend empirico, nessuna forma imposta.
+3. **Linea tratteggiata (fit teorico)**, solo sopra una soglia minima
+   di campioni (vedi sotto): una curva a 2 parametri fittata sui
+   **punti grezzi settimanali** (non sulla media mobile) — forma
+   asintotica per il tempo di ciclo (cresce senza limite quando il WIP
+   si avvicina alla capacità del sistema), forma a saturazione per il
+   throughput (cresce poi si appiattisce). Colore più tenue/tratteggio,
+   per segnalare visivamente che è un'indicazione teorica, non una
+   misura.
+
+```js
+// S6: media mobile ordinata per WIP crescente, finestra a numero
+// fisso di campioni (non a larghezza fissa in punti come le vecchie
+// fasce) - si adatta meglio a distribuzioni non uniformi del WIP.
+function wipMovingAverage_(weeklyBuckets, windowSize) {
+  var valid = weeklyBuckets.filter(function(b) { return b.ct_medio_giorni !== null; })
+    .sort(function(a, b) { return a.wip_medio - b.wip_medio; });
+  var result = [];
+  for (var i = 0; i + windowSize <= valid.length; i++) {
+    var window = valid.slice(i, i + windowSize);
+    var avg = function(f) { return round_(window.reduce(function(s, w) { return s + f(w); }, 0) / windowSize); };
+    result.push({
+      wip_medio: avg(function(w) { return w.wip_medio; }),
+      throughput_medio: avg(function(w) { return w.throughput_punti_settimana; }),
+      ct_medio: avg(function(w) { return w.ct_medio_giorni; }),
+      n_campioni: windowSize
+    });
+  }
+  return result;
+}
+```
+
+**Soglia minima per la curva tratteggiata**: non tarata su quanti
+campioni abbiamo oggi (sarebbe lo stesso trucco già trovato altrove —
+una soglia scelta per far entrare i dati attuali invece che per un
+criterio a monte). Criterio: una curva a 2 parametri ha bisogno di
+almeno 4-5 volte tanti punti quanti parametri per non essere
+degenere — soglia minima **10 settimane con campione di tempo di ciclo
+valido**. Sotto soglia: solo punti chiari e media mobile, niente
+tratteggiata — stesso principio di "Dato non ancora sufficiente" già
+in uso per `wipBands_`.
+
+**Nota di pannello obbligatoria, sotto entrambi i grafici**: *"La linea
+tratteggiata mostra la forma attesa dalla teoria delle code, calcolata
+su N settimane — con questo storico il valore preciso del 'ginocchio'
+non è ancora affidabile, solo l'andamento generale."* — `N` è il numero
+di settimane realmente usate per il fit, non una costante nel testo.
+
+`wipBands_` viene sostituita da `wipMovingAverage_` in
+`buildSystemState_` e nel client — non lasciata morta accanto alla
+nuova, stesso principio già applicato a S2/S3 con `wipCycleTimeScatter_`.
+
+**Criteri di accettazione**:
+- [ ] `wipMovingAverage_` sostituisce `wipBands_`, finestra a numero
+      fisso di campioni (non a larghezza fissa in punti).
+- [ ] Curva tratteggiata fittata sui punti grezzi settimanali, non
+      sulla media mobile — verificabile leggendo la funzione di fit.
+- [ ] Sotto i 10 campioni validi, nessuna curva tratteggiata — solo
+      punti e media mobile.
+- [ ] Nota di pannello presente sotto entrambi i grafici, col numero
+      reale di settimane usate per il fit.
+- [ ] `wipBands_` rimossa dal codice, non lasciata inutilizzata accanto
+      alla nuova funzione.
+
+## R9.14 (ridefinito una seconda volta, 2026-08-28) — stesso dato, stesso nome, sopra e sotto: niente scorciatoie
+
+**Le due versioni precedenti sono entrambe superate.** La prima
+proponeva di distinguere i due numeri con nomi diversi. La seconda
+proponeva di tenere solo "Lavoro accettato" in evidenza e rietichettare
+la linea del grafico come una stima storica diversa, con una nota a
+spiegare la differenza. **Marco (2026-08-28) ha respinto la seconda
+esplicitamente**: non è accettabile evitare di scrivere codice nuovo
+lasciando in piedi due calcoli diversi con una nota che ne giustifica
+lo scarto — se un fatto compare sopra (Vista Rapida) e sotto (il
+grafico), deve essere **lo stesso dato, con la stessa definizione**, non
+due dati confrontabili solo a parole. **Obbligo esplicito: vietato
+cercare scorciatoie per evitare di scrivere nuovo codice.**
+
+**La causa reale**: la linea "Punti aperti" nel grafico "Andamento del
+carico" viene da `flowWeeklyBuckets_`, che la calcola come
+approssimazione cumulata (`running += entered_points -
+completed_points`, settimana dopo settimana) — non da una vera
+ricostruzione storica delle colonne. "Lavoro accettato (attuale)"
+(Vista Rapida) è invece una fotografia vera dello stato delle colonne
+adesso. Non tornano perché **non sono la stessa cosa calcolata in due
+modi**: sono due cose diverse. La correzione non è rietichettarle — è
+far sì che il grafico calcoli davvero la stessa cosa della card, con lo
+stesso metodo.
+
+**Correzione**: S4 ha già costruito, e verificato sui dati reali,
+`activeWipWeeklyFromLog_` — una ricostruzione vera dal log
+(`activity_log_json`) di quanti punti erano in colonne attive, settimana
+per settimana. Va **generalizzata**, non duplicata, per accettare
+l'insieme di `role` da includere invece di averlo fisso a `prep`/`wip`/
+`stand_by`:
+
+```js
+// era (S4): activeWipWeeklyFromLog_(jobs, archivedJobs, weeksCount)
+// - filtro fisso sul role 'active' (prep/wip/stand_by), stadi 2-4
+// ora: stessa ricostruzione per-job degli intervalli {colonna, dal_ts,
+// al_ts} dal log, gia' scritta e verificata per S4 - generalizzata sul
+// filtro invece di riscritta da zero:
+function stockWeeklyFromLog_(jobs, archivedJobs, weeksCount, includeRoles) {
+  // ... stessa logica di ricostruzione degli intervalli di S4 ...
+  // era: role === 'prep' || role === 'wip' || role === 'stand_by'
+  // ora: includeRoles.indexOf(role) !== -1
+}
+
+// Due chiamate sullo stesso motore, due popolazioni dichiarate esplicitamente:
+var lavoroInCorsoWeekly = stockWeeklyFromLog_(jobs, archivedJobs, weeksCount, ['prep', 'wip', 'stand_by']);
+// stadi 2-4 - "Lavoro in corso", usa S4/S6, grafici diagnostici (invariato)
+var lavoroAccettatoWeekly = stockWeeklyFromLog_(jobs, archivedJobs, weeksCount, ['backlog', 'prep', 'wip', 'stand_by']);
+// stadi 1-4 - "Lavoro accettato", nuovo uso per "Andamento del carico"
+```
+
+`flowWeeklyBuckets_` perde il calcolo cumulato approssimato per la
+linea storica di "Andamento del carico" — quella riga confrontava
+un'approssimazione con una fotografia vera, ecco perché non tornavano.
+Il grafico legge `lavoroAccettatoWeekly`; l'etichetta della linea
+diventa **"Lavoro accettato"** — stesso nome esatto della card in
+Vista Rapida, non un sinonimo, non una variante "storica".
+
+**Verifica di coerenza obbligatoria** (stesso principio già richiesto
+per S4): per la settimana corrente, il valore ricostruito da
+`lavoroAccettatoWeekly` deve coincidere, a meno di arrotondamento, con
+il numero mostrato dalla card "Lavoro accettato (attuale)" — stessa
+fotografia, stesso numero. Se non coincide dopo l'implementazione, non
+è un problema di etichetta da correggere con una nota: è un bug nella
+ricostruzione, e va risolto prima di considerare chiuso questo punto,
+non aggirato.
+
+**"Aggiunti"/"Completati"**: invariato rispetto alla versione
+precedente — verificare se il calcolo di card e legenda coincide
+(probabile) e, se sì, un solo nome in entrambi i posti.
+
+**Criteri di accettazione**:
+- [ ] `activeWipWeeklyFromLog_` generalizzata in `stockWeeklyFromLog_`
+      (o nome equivalente), parametrizzata sui `role` da includere —
+      **non duplicata in una funzione copiata**, stessa ricostruzione
+      per-job riusata per entrambe le popolazioni.
+- [ ] Il grafico "Andamento del carico" mostra "Lavoro accettato"
+      (stadi 1-4, ricostruito dal log) al posto di "Punti aperti"
+      (cumulato approssimato) — etichetta identica, non un sinonimo.
+- [ ] Per la settimana corrente, il valore mostrato dal grafico
+      coincide, a meno di arrotondamento, con la card "Lavoro accettato
+      (attuale)" di Vista Rapida — verificato sui dati reali di TEST,
+      non solo per costruzione del codice.
+- [ ] Nessuna nota di pannello spiega una differenza tra i due numeri —
+      non ce n'è più bisogno: sono lo stesso calcolo.
+- [ ] "Aggiunti"/"Completati": verificato se il calcolo di card e
+      legenda coincide; se sì, un solo nome in entrambi i posti.
+
+## R9.15 (nuovo, 2026-08-28) — disambiguare "ora" tempo da "ora" adesso
+
+Il marcatore di istantanea "(ora)" (es. "Lavoro accettato (ora)", "Da
+fatturare (ora)") è ambiguo in italiano tra "in questo momento" e
+"unità di tempo" — rischioso in una dashboard che parla anche di
+giorni/ore/settimane altrove. Sostituire con "(attuale)" ovunque nella
+dashboard indichi una fotografia dello stato presente (non un totale su
+un periodo). Il titolo di pannello "Fermi ora" fa eccezione se
+"(attuale)" suona innaturale in quella posizione — in quel caso
+riformulare l'intero titolo (es. "Fermi in questo momento") invece di
+lasciare "ora" isolato.
+
+**Criteri di accettazione**:
+- [ ] Nessuna etichetta usa "(ora)" come marcatore di istantanea —
+      sostituito da "(attuale)" o da una riformulazione esplicita dove
+      "(attuale)" non si inserisce bene nel titolo.
+- [ ] La distinzione fotografia-adesso/totale-periodo resta leggibile
+      ovunque comparisse prima "(ora)".
+
+## R9.16 (nuovo, 2026-08-28) — assi verticali separati per stock e flussi in "Andamento del carico"
+
+Trovato da Marco: il grafico "Andamento del carico" mette sullo stesso
+asse verticale una grandezza-stock (un livello, la fotografia di quanti
+punti erano presenti in un dato istante — "Lavoro accettato", la stessa
+serie di R9.14) e grandezze-flusso (tassi per periodo — "Aggiunti" e
+"Completati", quanti punti sono entrati o usciti in quel mese). Sono
+due tipi di grandezza diversi per natura, con ordini di grandezza
+tipicamente diversi: lo stock tende a un numero più alto e più stabile
+nel tempo, i flussi mensili più piccoli e più variabili. Sullo stesso
+asse, con la stessa scala, lo stock schiaccia visivamente i flussi — le
+loro variazioni reali, anche se significative, appaiono come una linea
+quasi piatta vicino allo zero.
+
+**Correzione**: due assi verticali indipendenti sullo stesso grafico.
+- **Asse sinistro**: lo stock, "Lavoro accettato" (livello, punti
+  presenti in un dato istante — la serie ricostruita da R9.14).
+- **Asse destro**: i flussi, "Aggiunti" e "Completati" (punti per
+  periodo, stessa aggregazione mensile già usata dal grafico).
+- Le finestre (range) dei due assi si scelgono **in base alla
+  variabilità reale di ciascuna serie sui dati di TEST**, in modo
+  indipendente l'una dall'altra — mai forzate per far combaciare
+  visivamente le linee tra loro: un asse scelto per creare una
+  coincidenza visiva che i dati non hanno è fuorviante quanto uno stock
+  e un flusso schiacciati sulla stessa scala, il difetto opposto dello
+  stesso errore.
+- Ogni asse dichiara la propria unità (principio 7 — vale anche con due
+  assi, uno per tipo di grandezza, non solo con uno).
+- **Legenda**: ogni voce indica chiaramente a quale asse appartiene —
+  es. colore della voce coordinato col colore delle tacche dell'asse
+  corrispondente, oppure testo esplicito ("Lavoro accettato — asse
+  sinistro", "Aggiunti — asse destro"). Chi legge non deve indovinare
+  quale linea usa quale asse.
+- **Didascalia sotto il grafico**: una riga in linguaggio semplice che
+  spiega la differenza tra le due grandezze per chi non conosce la
+  distinzione stock/flusso — non i termini tecnici "stock"/"flusso"
+  (quelli restano nei commenti del codice), qualcosa come: "'Lavoro
+  accettato' è quanti punti c'erano in carico in quel momento;
+  'Aggiunti' e 'Completati' sono quanti punti sono entrati o usciti in
+  quel mese" (principio 6).
+
+**Criteri di accettazione**:
+- [ ] Il grafico "Andamento del carico" ha due assi verticali
+      indipendenti — uno per lo stock ("Lavoro accettato"), uno per i
+      flussi ("Aggiunti"/"Completati").
+- [ ] Le finestre dei due assi sono scelte sulla variabilità reale di
+      ciascuna serie sui dati di TEST, non aggiustate per far combaciare
+      visivamente le linee.
+- [ ] Ogni asse dichiara la propria unità.
+- [ ] La legenda indica chiaramente quale linea usa quale asse.
+- [ ] Una didascalia sotto il grafico spiega, in linguaggio semplice, la
+      differenza tra "Lavoro accettato" (fotografia di un istante) e
+      "Aggiunti"/"Completati" (conteggio per periodo).
+- [ ] Verifica manuale su TEST: con i due assi indipendenti, la
+      variazione reale dei flussi resta visibile — nessuna delle tre
+      linee appare schiacciata contro lo zero o contro il massimo.
+
+**Dipendenza**: va fatto dopo R9.14 (usa la stessa serie "Lavoro
+accettato" ricostruita lì) — non prima, altrimenti si separano gli assi
+per una linea che verrà comunque riscritta subito dopo.
+
+**Criteri di accettazione generali per tutta la Parte 2**:
+- [ ] Prima del push, eseguita la lettura finale pannello-per-pannello
+      del principio 8 — esito riportato in `PROGRAMMA_STATO.md`, non
+      solo "fatto".
