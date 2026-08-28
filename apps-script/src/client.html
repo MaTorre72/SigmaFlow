@@ -2230,10 +2230,15 @@
     // in attesa (totale)" - etichetta rientrata (classe CSS) per
     // segnalarle come sottototale, non otto voci indipendenti sullo
     // stesso piano.
+    // R7, correzione aggiuntiva (2026-08-28): questa riga mostra il solo
+    // stadio 3 (isolato) - si chiama "Lavorazione", non "Lavoro in
+    // corso" (quel nome resta riservato all'aggregato stadi 2-4, usato
+    // nel grafico diagnostico sotto - altrimenti si ricrea la stessa
+    // ambiguita' che R7 doveva risolvere).
     renderDl('workload-metrics', {
       'Lavoro pronto': cardsAndPoints_(workload.ready, workload.ready_points),
       'In preparazione': cardsAndPoints_(workload.preparing, workload.preparing_points),
-      'Lavoro in corso': cardsAndPoints_(workload.in_progress, workload.in_progress_points),
+      'Lavorazione': cardsAndPoints_(workload.in_progress, workload.in_progress_points),
       'Lavoro in attesa (totale)': cardsAndPoints_(workload.blocked, workload.blocked_points),
       'In attesa di cliente': cardsAndPoints_(workload.waiting_client, workload.waiting_client_points),
       'In attesa di enti': cardsAndPoints_(workload.waiting_authority, workload.waiting_authority_points),
@@ -2302,7 +2307,7 @@
     renderAdvancedMetrics(metrics);
     var flowWeeklyBuckets = system.flowWeeklyBuckets || [];
     document.getElementById('wip-trend-weeks-note').textContent = flowWeeklyBuckets.length ? (flowWeeklyBuckets.length + ' settimane') : 'dato non ancora disponibile';
-    drawWipBandsCharts_(flowWeeklyBuckets, system.wipBands || []);
+    drawWipBandsCharts_(flowWeeklyBuckets, system.wipMovingAverage || [], system.cycleTimeFit || null, system.throughputFit || null);
 
     renderScenarios(system.scenarioReadiness || {});
     // R9.5: gauge-load/gauge-capacity rimossi (potevano superare il
@@ -2542,20 +2547,25 @@
     });
   }
 
-  // S2/S3 (corretto in collaudo, addendum): due grafici a dispersione
-  // (mai due linee sulle settimane grezze) - "Throughput vs WIP" e
-  // "Tempo di ciclo vs WIP", stesso asse X (WIP medio settimanale, in
-  // punti). Punti chiari = singole settimane di flowWeeklyBuckets (nessuna
-  // linea le collega: il WIP osservato oscilla, non e' monotono nel
-  // tempo). Punti scuri, piu' grandi = medie di fascia di wipBands,
-  // collegati da una linea in ordine di WIP CRESCENTE, mai in ordine
-  // temporale - la tendenza reale si legge li'. Meno di 3 fasce valide ->
-  // messaggio invece del grafico (stesso pattern di drawDelayHistogram_).
-  var MIN_WIP_BANDS_ = 3;
-  function drawWipScatter_(canvasId, emptyId, weeklyBuckets, bands, yField, yLabel) {
+  // S6 (addendum di collaudo, sostituisce le fasce a larghezza fissa
+  // S2/S3): due grafici a dispersione - "Throughput vs Lavoro in corso"
+  // e "Tempo di ciclo vs Lavoro in corso", stesso asse X (Lavoro in
+  // corso medio settimanale, in punti). Tre livelli: punti chiari =
+  // singole settimane di flowWeeklyBuckets (nessuna linea le collega: il
+  // WIP osservato oscilla, non e' monotono nel tempo); linea continua =
+  // media mobile a numero fisso di campioni, ordinata per WIP crescente
+  // (wipMovingAverage_ - MAI in ordine temporale); linea tratteggiata
+  // (solo sopra soglia minima di campioni) = fit teorico, fittato sui
+  // PUNTI GREZZI (mai sulla media mobile - vedi Model.gs). Nessuna media
+  // mobile -> messaggio invece del grafico.
+  var MIN_MOVING_AVERAGE_POINTS_ = 1;
+  function drawWipScatter_(canvasId, emptyId, weeklyBuckets, movingAverage, fitCurve, yField, yLabel) {
     var canvas = document.getElementById(canvasId);
     var empty = document.getElementById(emptyId);
-    if (!bands.length || bands.length < MIN_WIP_BANDS_) {
+    var bandField = yField === 'throughput_punti_settimana' ? 'throughput_medio' : 'ct_medio';
+    var rawPoints = weeklyBuckets.filter(function(b) { return b[yField] !== null && !isNaN(b[yField]); });
+    var maClean = movingAverage.filter(function(b) { return !isNaN(b.wip_medio) && !isNaN(b[bandField]); });
+    if (maClean.length < MIN_MOVING_AVERAGE_POINTS_) {
       canvas.hidden = true;
       empty.hidden = false;
       return;
@@ -2575,19 +2585,15 @@
     var pad = { left: 50, right: 16, top: 12, bottom: 46 };
     var plotWidth = width - pad.left - pad.right;
     var plotHeight = height - pad.top - pad.bottom;
-    var bandField = yField === 'throughput_punti_settimana' ? 'throughput_medio' : 'ct_medio';
-    var rawPoints = weeklyBuckets.filter(function(b) { return b[yField] !== null && !isNaN(b[yField]); });
-    var bandsClean = bands.filter(function(b) { return !isNaN(b.wip_medio) && !isNaN(b[bandField]); });
-    var maxWipRaw = Math.max.apply(null, rawPoints.map(function(b) { return b.wip_medio; }).concat(bandsClean.map(function(b) { return b.wip_medio; })).concat([1]));
-    var maxYRaw = Math.max.apply(null, rawPoints.map(function(b) { return b[yField]; }).concat(bandsClean.map(function(b) { return b[bandField]; })).concat([1]));
+    var maxWipRaw = Math.max.apply(null, rawPoints.map(function(b) { return b.wip_medio; }).concat(maClean.map(function(b) { return b.wip_medio; })).concat([1]));
+    var maxYRaw = Math.max.apply(null, rawPoints.map(function(b) { return b[yField]; }).concat(maClean.map(function(b) { return b[bandField]; })).concat([1]));
     // Difesa: se per qualche motivo un valore non numerico arriva fin qui,
     // il grafico degrada a "dato non sufficiente" invece di mostrare NaN sugli assi.
-    if (!bandsClean.length || bandsClean.length < MIN_WIP_BANDS_ || isNaN(maxWipRaw) || isNaN(maxYRaw)) {
+    if (isNaN(maxWipRaw) || isNaN(maxYRaw)) {
       canvas.hidden = true;
       empty.hidden = false;
       return;
     }
-    var bands_ = bandsClean;
     var maxWip = maxWipRaw;
     var maxY = maxYRaw;
     ctx.font = '11px Arial';
@@ -2629,30 +2635,73 @@
       ctx.fill();
     });
 
-    // Punti scuri: le medie di fascia (gia' ordinate per WIP crescente da
-    // wipBands_), collegate da una linea - MAI in ordine temporale.
+    // Linea tratteggiata: fit teorico, solo se disponibile (soglia
+    // minima di campioni verificata lato server) - fittato sui punti
+    // grezzi, mai sulla media mobile. Disegnata PRIMA della media mobile
+    // cosi' la linea continua (il dato osservato) resta sopra.
+    if (fitCurve) {
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = '#9CA9BC';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      var STEPS_ = 40;
+      var started = false;
+      for (var s = 0; s <= STEPS_; s++) {
+        var wx = maxWip * s / STEPS_;
+        var vy = fitCurve(wx);
+        if (vy === null || isNaN(vy) || vy < 0 || vy > maxY * 1.5) { started = false; continue; }
+        var x2 = pad.left + plotWidth * (wx / maxWip);
+        var y2 = height - pad.bottom - plotHeight * (Math.min(vy, maxY) / maxY);
+        if (!started) { ctx.moveTo(x2, y2); started = true; } else { ctx.lineTo(x2, y2); }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Linea continua: media mobile (wipMovingAverage_, gia' ordinata per
+    // WIP crescente) - MAI in ordine temporale, e' li' che si legge la
+    // tendenza reale osservata.
     ctx.strokeStyle = '#2F6B9A';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    bands_.forEach(function(b, index) {
+    maClean.forEach(function(b, index) {
       var x = pad.left + plotWidth * (b.wip_medio / maxWip);
       var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
       if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
     });
     ctx.stroke();
     ctx.fillStyle = '#2F6B9A';
-    bands_.forEach(function(b) {
+    maClean.forEach(function(b) {
       var x = pad.left + plotWidth * (b.wip_medio / maxWip);
       var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
       ctx.fill();
     });
   }
 
-  function drawWipBandsCharts_(weeklyBuckets, bands) {
-    drawWipScatter_('wip-throughput-scatter-chart', 'wip-throughput-scatter-empty', weeklyBuckets, bands, 'throughput_punti_settimana', 'Throughput (pt/settimana)');
-    drawWipScatter_('wip-cycle-scatter-chart', 'wip-cycle-scatter-empty', weeklyBuckets, bands, 'ct_medio_giorni', 'Tempo di ciclo (g)');
+  // S6: nota obbligatoria sotto ogni grafico, col numero REALE di
+  // settimane usate per il fit - mai una costante nel testo.
+  function wipFitNoteText_(fit) {
+    if (!fit) {
+      return 'La curva tratteggiata non e\' ancora mostrata: servono almeno 10 settimane con un tempo di ciclo osservato per calcolarla in modo non degenere.';
+    }
+    return 'La linea tratteggiata mostra la forma attesa dalla teoria delle code, calcolata su ' + fit.n_samples + ' settimane - con questo storico il valore preciso del "ginocchio" non e\' ancora affidabile, solo l\'andamento generale.';
+  }
+
+  function drawWipBandsCharts_(weeklyBuckets, movingAverage, cycleTimeFit, throughputFit) {
+    var throughputCurve = throughputFit ? function(w) {
+      return w <= 0 ? 0 : (throughputFit.t_max * w) / (throughputFit.k + w);
+    } : null;
+    var cycleCurve = cycleTimeFit ? function(w) {
+      var denom = cycleTimeFit.w0 - w;
+      return denom <= 0 ? null : cycleTimeFit.a / denom;
+    } : null;
+    drawWipScatter_('wip-throughput-scatter-chart', 'wip-throughput-scatter-empty', weeklyBuckets, movingAverage, throughputCurve, 'throughput_punti_settimana', 'Throughput (pt/settimana)');
+    document.getElementById('wip-throughput-fit-note').textContent = wipFitNoteText_(throughputFit);
+    drawWipScatter_('wip-cycle-scatter-chart', 'wip-cycle-scatter-empty', weeklyBuckets, movingAverage, cycleCurve, 'ct_medio_giorni', 'Tempo di ciclo (g)');
+    document.getElementById('wip-cycle-fit-note').textContent = wipFitNoteText_(cycleTimeFit);
   }
 
   function renderDelayProfile(profile) {
@@ -2741,7 +2790,7 @@
     root.innerHTML = '';
     rows.forEach(function(row) {
       var tr = document.createElement('tr');
-      [row.label, row.entered_cards, row.completed_cards, row.entered_points, row.completed_points, row.net_points, row.open_points].forEach(function(value) {
+      [row.label, row.entered_cards, row.completed_cards, row.entered_points, row.completed_points, row.net_points, row.accepted_points].forEach(function(value) {
         var td = document.createElement('td');
         td.textContent = valueOrDash(value);
         tr.appendChild(td);
@@ -2782,11 +2831,18 @@
     });
   }
 
+  // R9.16: "Lavoro accettato" (stock - una fotografia di un istante) e
+  // "Aggiunti"/"Completati" (flussi - un conteggio per mese) sono
+  // grandezze diverse per natura, con ordini di grandezza tipicamente
+  // diversi - sullo stesso asse/scala lo stock (piu' alto, piu' stabile)
+  // schiaccia visivamente i flussi (piu' piccoli, piu' variabili) contro
+  // lo zero. Due assi verticali indipendenti, ciascuno scelto sulla
+  // variabilita' reale della propria serie - mai forzati a combaciare.
   function drawPointsTimeline(rows) {
     var canvas = document.getElementById('points-timeline-chart');
     var empty = document.getElementById('points-chart-empty');
     var hasData = rows.some(function(row) {
-      return Number(row.entered_points || 0) > 0 || Number(row.completed_points || 0) > 0 || Number(row.open_points || 0) > 0;
+      return Number(row.entered_points || 0) > 0 || Number(row.completed_points || 0) > 0 || Number(row.accepted_points || 0) > 0;
     });
     if (!rows.length || !hasData) {
       canvas.hidden = true;
@@ -2804,26 +2860,45 @@
     canvas.style.height = height + 'px';
     var ctx = canvas.getContext('2d');
     ctx.scale(ratio, ratio);
-    var pad = { left: 42, right: 18, top: 18, bottom: 34 };
-    var max = Math.max.apply(null, rows.map(function(row) { return Math.max(row.entered_points, row.completed_points, row.open_points); }).concat([1]));
+    var pad = { left: 48, right: 48, top: 18, bottom: 34 };
+    // Asse sinistro: lo stock ("Lavoro accettato"). Asse destro: i
+    // flussi ("Aggiunti"/"Completati") - range indipendenti.
+    var maxStock = Math.max.apply(null, rows.map(function(row) { return Number(row.accepted_points || 0); }).concat([1]));
+    var maxFlow = Math.max.apply(null, rows.map(function(row) { return Math.max(Number(row.entered_points || 0), Number(row.completed_points || 0)); }).concat([1]));
     ctx.font = '12px Arial';
     ctx.strokeStyle = '#d8dee8';
-    ctx.fillStyle = '#627184';
+    ctx.fillStyle = '#B7791F';
+    ctx.textAlign = 'right';
     for (var g = 0; g <= 4; g++) {
       var gy = pad.top + (height - pad.top - pad.bottom) * g / 4;
       ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(width - pad.right, gy); ctx.stroke();
-      ctx.fillText(String(Math.round(max * (1 - g / 4))), 4, gy + 4);
+      ctx.fillText(String(Math.round(maxStock * (1 - g / 4))), pad.left - 6, gy + 4);
     }
-    var colors = { entered_points: '#2F6B9A', completed_points: '#238636', open_points: '#B7791F' };
+    ctx.fillStyle = '#2F6B9A';
+    ctx.textAlign = 'left';
+    for (var g2 = 0; g2 <= 4; g2++) {
+      var gy2 = pad.top + (height - pad.top - pad.bottom) * g2 / 4;
+      ctx.fillText(String(Math.round(maxFlow * (1 - g2 / 4))), width - pad.right + 6, gy2 + 4);
+    }
+    // Principio 7 (addendum): ogni asse dichiara la propria unita', mai
+    // lasciata solo al titolo/didascalia.
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#B7791F';
+    ctx.fillText('pt', pad.left - 6, pad.top - 6);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#2F6B9A';
+    ctx.fillText('pt/mese', width - pad.right + 6, pad.top - 6);
+    var colors = { entered_points: '#2F6B9A', completed_points: '#238636', accepted_points: '#B7791F' };
+    var axisMax = { entered_points: maxFlow, completed_points: maxFlow, accepted_points: maxStock };
     Object.keys(colors).forEach(function(field) {
       ctx.beginPath();
       ctx.strokeStyle = colors[field];
-      ctx.lineWidth = field === 'open_points' ? 3 : 2;
+      ctx.lineWidth = field === 'accepted_points' ? 3 : 2;
       rows.forEach(function(row, index) {
         var x = pad.left + (width - pad.left - pad.right) * index / Math.max(1, rows.length - 1);
-        var y = height - pad.bottom - (height - pad.top - pad.bottom) * Number(row[field] || 0) / max;
+        var y = height - pad.bottom - (height - pad.top - pad.bottom) * Number(row[field] || 0) / axisMax[field];
         if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
-        if (field === 'open_points') {
+        if (field === 'accepted_points') {
           // R9.4: stessa correzione di drawWaitTimeTrend_ - l'etichetta
           // dell'ultimo mese non deve uscire dal bordo destro.
           ctx.fillStyle = '#627184';

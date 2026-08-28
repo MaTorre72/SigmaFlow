@@ -292,8 +292,8 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   }
   // S2/S3 (corretto in collaudo, addendum): WIP espresso in punti a
   // grana settimanale (non in numero di visite concorrenti), aggregato
-  // su 26 settimane e raggruppato per fascia di WIP - la tendenza reale
-  // si legge sulle medie di fascia (wipBands), mai sulle settimane
+  // su 26 settimane. S6: la tendenza reale si legge sulla media mobile
+  // (wipMovingAverage_, ordinata per WIP crescente), mai sulle settimane
   // grezze collegate in ordine cronologico (il WIP osservato oscilla,
   // non e' monotono nel tempo).
   // S4: wip_medio di ogni settimana e' ora il WIP ATTIVO ricostruito dal
@@ -304,7 +304,13 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   var wipTrendWeeks = Number(config.wip_trend_weeks || 26);
   var activeWipWeekly = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, wipTrendWeeks);
   var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, wipTrendWeeks, activeWipWeekly.weekly);
-  var wipBands = wipBands_(flowWeeklyBuckets, 20, 3);
+  // S6 (sostituisce wipBands_): media mobile a numero fisso di campioni
+  // invece di fasce a larghezza fissa, piu' i due fit teorici (curva
+  // tratteggiata), fittati sui punti grezzi di flowWeeklyBuckets, mai
+  // sulla media mobile.
+  var wipMovingAverage = wipMovingAverage_(flowWeeklyBuckets, WIP_MOVING_AVERAGE_WINDOW_);
+  var cycleTimeFit = cycleTimeTheoreticalFit_(flowWeeklyBuckets);
+  var throughputFit = throughputTheoreticalFit_(flowWeeklyBuckets);
 
   // Chiesto da Marco (2026-08-20): mostrare "dove e' possibile" ogni
   // tasso anche in punti, non solo in iniziative/visite - le
@@ -391,7 +397,9 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
     },
     delayProfileMetrics: delayProfile,
     flowWeeklyBuckets: flowWeeklyBuckets,
-    wipBands: wipBands,
+    wipMovingAverage: wipMovingAverage,
+    cycleTimeFit: cycleTimeFit,
+    throughputFit: throughputFit,
     // S4: trasparenza sulla copertura del log - job esclusi dal calcolo
     // del WIP attivo perche' activity_log_json e' vuoto/non interpretabile
     // (nessun evento 'move' da cui ricostruire la timeline di colonna).
@@ -450,7 +458,7 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
   var added = allJobs.filter(function(job) {
     return job.arrival_ts && new Date(job.arrival_ts) >= since;
   });
-  var months = monthBuckets_(allJobs, now, 6);
+  var months = monthBuckets_(allJobs, now, 6, columnMap);
 
   return {
     pipeline_points: sumJobPoints_(pipelineJobs),
@@ -475,23 +483,32 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
   };
 }
 
-function monthBuckets_(jobs, now, count) {
+// R9.14 (addendum di collaudo): 'open_points' era un saldo cumulato
+// approssimato (entrato meno completato, mese dopo mese) - confrontava
+// un'approssimazione con la fotografia vera della card "Lavoro
+// accettato (attuale)" di Vista Rapida, per questo i due numeri non
+// coincidevano mai. Sostituito da 'accepted_points', ricostruito con lo
+// stesso motore di stockSeriesFromLog_ usato per "Lavoro in corso" (S4),
+// sui role di "Lavoro accettato" (stadi 1-4) - stesso calcolo, stesso
+// nome, sopra (Vista Rapida) e sotto (questo grafico/tabella).
+// 'columnMap' e' facoltativo (retrocompatibilita' coi chiamanti che non
+// hanno bisogno di 'accepted_points', es. i test che verificano solo
+// entered/completed) - senza, i bucket restano a 0. 'jobs' qui e' gia'
+// l'unione jobs+archivedJobs decisa dal chiamante (pointsStatistics_) -
+// passato cosi' com'e' a stockSeriesFromLog_, mai un secondo array di
+// archiviati altrimenti li conterebbe due volte.
+function monthBuckets_(jobs, now, count, columnMap) {
   var first = new Date(now.getFullYear(), now.getMonth() - count + 1, 1);
   var buckets = [];
   var byKey = {};
   for (var i = 0; i < count; i++) {
     var date = new Date(first.getFullYear(), first.getMonth() + i, 1);
+    var nextDate = new Date(first.getFullYear(), first.getMonth() + i + 1, 1);
     var key = Utilities.formatDate(date, SIGMAFLOW.TZ, 'yyyy-MM');
-    var bucket = { key: key, label: Utilities.formatDate(date, SIGMAFLOW.TZ, 'MM/yyyy'), entered_points: 0, completed_points: 0, entered_cards: 0, completed_cards: 0, open_points: 0, net_points: 0 };
+    var bucket = { key: key, label: Utilities.formatDate(date, SIGMAFLOW.TZ, 'MM/yyyy'), start: date, end: nextDate, entered_points: 0, completed_points: 0, entered_cards: 0, completed_cards: 0, accepted_points: 0, net_points: 0 };
     buckets.push(bucket);
     byKey[key] = bucket;
   }
-
-  var running = jobs.reduce(function(sum, job) {
-    var arrived = job.arrival_ts ? new Date(job.arrival_ts) : null;
-    var done = job.done_ts ? new Date(job.done_ts) : null;
-    return sum + (arrived && arrived < first && (!done || done >= first) ? jobPoints_(job) : 0);
-  }, 0);
 
   jobs.forEach(function(job) {
     var points = jobPoints_(job);
@@ -507,10 +524,12 @@ function monthBuckets_(jobs, now, count) {
     }
   });
 
+  if (columnMap) {
+    var accepted = stockSeriesFromLog_(jobs, [], columnMap, now, buckets, ['backlog', 'prep', 'wip', 'stand_by']);
+    buckets.forEach(function(bucket, index) { bucket.accepted_points = accepted.values[index]; });
+  }
   buckets.forEach(function(bucket) {
     bucket.net_points = bucket.entered_points - bucket.completed_points;
-    running += bucket.net_points;
-    bucket.open_points = Math.max(0, running);
   });
   return buckets;
 }
@@ -1128,28 +1147,27 @@ function jobColumnIntervalsFromLog_(job, columnMap, now) {
     var start = new Date(moveLog[i].ts);
     var end = (i + 1 < moveLog.length) ? new Date(moveLog[i + 1].ts) : new Date(job.incarico_chiuso_ts || now);
     var column = columnMap[moveLog[i].to] || { role: 'neutral' };
-    intervals.push({ start: start, end: end, wip_class: wipColumnClass_(column) });
+    // R9.14: 'role' esposto oltre a 'wip_class' - stockSeriesFromLog_ ne
+    // ha bisogno per distinguere 'backlog' (stadio 1, incluso in "Lavoro
+    // accettato") da 'neutral' (stadio 0, escluso) - wip_class li
+    // confondeva entrambi nella classe 'backlog' (S4 non doveva
+    // distinguerli, S4 guardava solo 'active').
+    intervals.push({ start: start, end: end, wip_class: wipColumnClass_(column), role: column.role });
   }
   return intervals;
 }
 
-// S4: per ogni settimana delle ultime weeksCount, quanti punti erano
-// realmente in lavorazione (colonne 'active', ne' backlog ne' done) -
-// media pesata sui giorni della settimana passati in una colonna
-// 'active', ricostruita dallo storico di colonna (jobColumnIntervalsFromLog_)
-// invece che stimata come "entrato meno completato" (che include il
-// backlog). Un job senza log interpretabile viene escluso esplicitamente
-// (mai stimato alla cieca) - il chiamante riceve l'elenco per poterlo
-// segnalare.
-function activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount) {
-  var first = new Date(now.getTime() - weeksCount * 7 * 86400000);
-  var weeks = [];
-  for (var i = 0; i < weeksCount; i++) {
-    var start = new Date(first.getTime() + i * 7 * 86400000);
-    var end = new Date(start.getTime() + 7 * 86400000);
-    weeks.push({ start: start, end: end, active_points: 0 });
-  }
-
+// R9.14: motore unico di ricostruzione "quanti punti erano in un dato
+// insieme di colonne (per role), settimana/mese per settimana/mese" -
+// generalizza activeWipWeeklyFromLog_ (S4, filtro fisso su 'active')
+// sull'insieme di 'role' da includere, cosi' la stessa logica per-job
+// serve sia "Lavoro in corso" (prep/wip/stand_by) sia "Lavoro accettato"
+// (backlog/prep/wip/stand_by) senza duplicare la ricostruzione degli
+// intervalli. 'buckets' e' un array di { start, end } di qualunque
+// durata (settimana o mese) - il peso e' proporzionale ai giorni di
+// sovrapposizione sulla durata del singolo bucket, non fissato a 7.
+function stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, buckets, includeRoles) {
+  var series = buckets.map(function(b) { return { start: b.start, end: b.end, points: 0 }; });
   var excludedJobIds = [];
   jobs.concat(archivedJobs || []).forEach(function(job) {
     var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
@@ -1159,50 +1177,134 @@ function activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount)
     }
     var points = jobPoints_(job);
     intervals.forEach(function(interval) {
-      if (interval.wip_class !== 'active') { return; }
-      weeks.forEach(function(week) {
-        var overlapStart = interval.start > week.start ? interval.start : week.start;
-        var overlapEnd = interval.end < week.end ? interval.end : week.end;
+      if (includeRoles.indexOf(interval.role) === -1) { return; }
+      series.forEach(function(bucket) {
+        var overlapStart = interval.start > bucket.start ? interval.start : bucket.start;
+        var overlapEnd = interval.end < bucket.end ? interval.end : bucket.end;
         var overlapDays = (overlapEnd - overlapStart) / 86400000;
-        if (overlapDays > 0) {
-          week.active_points += (overlapDays / 7) * points;
+        var bucketDays = (bucket.end - bucket.start) / 86400000;
+        if (overlapDays > 0 && bucketDays > 0) {
+          bucket.points += (overlapDays / bucketDays) * points;
         }
       });
     });
   });
-
   return {
-    weekly: weeks.map(function(w) { return round_(w.active_points); }),
+    values: series.map(function(b) { return round_(b.points); }),
     excluded_job_ids: excludedJobIds
   };
 }
 
-// S2/S3: raggruppa le settimane di flowWeeklyBuckets_ per fascia di WIP
-// (bandWidth punti a fascia) e calcola le medie di fascia - la tendenza
-// reale va letta qui, in ordine di WIP crescente, mai sulle settimane
-// grezze in ordine cronologico (il WIP osservato oscilla, collegarlo per
-// data produce uno zig-zag senza significato). Scarta le fasce con meno
-// di minSamples settimane.
-function wipBands_(weeklyBuckets, bandWidth, minSamples) {
-  var byBand = {};
-  weeklyBuckets.filter(function(b) { return b.ct_medio_giorni !== null; }).forEach(function(b) {
-    var start = Math.floor(b.wip_medio / bandWidth) * bandWidth;
-    if (!byBand[start]) { byBand[start] = []; }
-    byBand[start].push(b);
-  });
-  return Object.keys(byBand).map(function(k) { return byBand[k]; })
-    .filter(function(weeks) { return weeks.length >= minSamples; })
-    .map(function(weeks) {
-      var n = weeks.length;
-      var sum = function(f) { return weeks.reduce(function(s, w) { return s + f(w); }, 0); };
-      return {
-        wip_medio: round_(sum(function(w) { return w.wip_medio; }) / n),
-        throughput_medio: round_(sum(function(w) { return w.throughput_punti_settimana; }) / n),
-        ct_medio: round_(sum(function(w) { return w.ct_medio_giorni; }) / n),
-        n_settimane: n
-      };
-    })
+// Definizione dei bucket settimanali (usata da S4/S6 - "Lavoro in
+// corso", e dai test) - separata da stockSeriesFromLog_ perche' il
+// bucketing mensile di "Lavoro accettato" (R9.14, monthBuckets_) usa
+// bucket di durata diversa (mese solare, non 7 giorni fissi).
+function weeklyBucketDefs_(now, weeksCount) {
+  var first = new Date(now.getTime() - weeksCount * 7 * 86400000);
+  var weeks = [];
+  for (var i = 0; i < weeksCount; i++) {
+    var start = new Date(first.getTime() + i * 7 * 86400000);
+    weeks.push({ start: start, end: new Date(start.getTime() + 7 * 86400000) });
+  }
+  return weeks;
+}
+
+// S4, generalizzata in R9.14 (addendum di collaudo): resta con questo
+// nome e questa firma (usata da S4/S6, grafici diagnostici) - delega
+// pero' allo stesso motore di stockSeriesFromLog_ usato anche per
+// "Lavoro accettato" (R9.14, monthBuckets_), invece di ricostruire gli
+// intervalli una seconda volta con un filtro copiato.
+function activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount) {
+  var result = stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, weeklyBucketDefs_(now, weeksCount), ['prep', 'wip', 'stand_by']);
+  return { weekly: result.values, excluded_job_ids: result.excluded_job_ids };
+}
+
+// S6 (addendum di collaudo, sostituisce wipBands_): media mobile
+// ordinata per WIP crescente, finestra a NUMERO FISSO di campioni (non
+// a larghezza fissa in punti come le vecchie fasce - si adatta meglio
+// quando i campioni non sono distribuiti uniformemente lungo l'asse
+// WIP: con le fasce a larghezza fissa, le fasce a WIP basso avevano
+// molte settimane dentro, quelle a WIP alto ne avevano appena il
+// minimo, media ballerina).
+var WIP_MOVING_AVERAGE_WINDOW_ = 5;
+function wipMovingAverage_(weeklyBuckets, windowSize) {
+  var valid = weeklyBuckets.filter(function(b) { return b.ct_medio_giorni !== null; })
     .sort(function(a, b) { return a.wip_medio - b.wip_medio; });
+  var result = [];
+  for (var i = 0; i + windowSize <= valid.length; i++) {
+    var windowRows = valid.slice(i, i + windowSize);
+    var avg = function(f) { return round_(windowRows.reduce(function(s, w) { return s + f(w); }, 0) / windowSize); };
+    result.push({
+      wip_medio: avg(function(w) { return w.wip_medio; }),
+      throughput_medio: avg(function(w) { return w.throughput_punti_settimana; }),
+      ct_medio: avg(function(w) { return w.ct_medio_giorni; }),
+      n_campioni: windowSize
+    });
+  }
+  return result;
+}
+
+// S6: regressione lineare (minimi quadrati) y = A + Bx - base comune per
+// i due fit teorici sotto, entrambi risolti per linearizzazione (mai un
+// solutore non lineare iterativo: con questi pochi campioni un
+// solutore iterato rischia di non convergere, o di convergere su un
+// minimo locale senza un modo semplice per accorgersene).
+function linearRegression_(points) {
+  var n = points.length;
+  if (n < 2) { return null; }
+  var sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  points.forEach(function(p) {
+    sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumXX += p.x * p.x;
+  });
+  var denom = n * sumXX - sumX * sumX;
+  if (denom === 0) { return null; }
+  var B = (n * sumXY - sumX * sumY) / denom;
+  var A = (sumY - B * sumX) / n;
+  return { A: A, B: B };
+}
+
+// S6: soglia minima per la curva tratteggiata - non tarata su quanti
+// campioni ci sono oggi (sarebbe lo stesso trucco gia' trovato altrove:
+// una soglia scelta per far entrare i dati attuali invece che per un
+// criterio a monte). Una curva a 2 parametri ha bisogno di almeno 4-5
+// volte tanti punti quanti parametri per non essere degenere.
+var MIN_SAMPLES_FOR_THEORETICAL_FIT_ = 10;
+
+// S6: fit teorico del tempo di ciclo - forma asintotica (cresce senza
+// limite quando il WIP si avvicina al WIP critico del sistema),
+// fittata sui PUNTI GREZZI settimanali (mai sulla media mobile -
+// fittare su dati gia' smussati smorza il rumore due volte e
+// restituisce una curva piu' precisa di quanto i dati giustifichino).
+// Modello: ct(w) = a / (w0 - w) - linearizzato in 1/ct = (w0/a) -
+// (1/a)*w, una retta in (w, 1/ct), risolta con OLS.
+function cycleTimeTheoreticalFit_(weeklyBuckets) {
+  var raw = weeklyBuckets.filter(function(b) { return b.ct_medio_giorni !== null && b.ct_medio_giorni > 0; });
+  if (raw.length < MIN_SAMPLES_FOR_THEORETICAL_FIT_) { return null; }
+  var reg = linearRegression_(raw.map(function(b) { return { x: b.wip_medio, y: 1 / b.ct_medio_giorni }; }));
+  // B deve essere negativo (1/ct decresce al crescere del WIP, cioe' il
+  // tempo di ciclo cresce) perche' l'asintoto abbia senso - altrimenti i
+  // dati non mostrano ancora la forma attesa: meglio nessuna curva che
+  // una curva fuorviante.
+  if (!reg || reg.B >= 0) { return null; }
+  var a = -1 / reg.B;
+  var w0 = reg.A * a;
+  if (w0 <= 0) { return null; }
+  return { a: round_(a), w0: round_(w0), n_samples: raw.length };
+}
+
+// S6: fit teorico del throughput - forma a saturazione (cresce poi si
+// appiattisce verso un massimo), stessa scelta di linearizzazione
+// (Lineweaver-Burk: 1/th = 1/Tmax + (K/Tmax)*(1/w)), sui punti grezzi
+// settimanali con throughput > 0 e WIP > 0 (1/0 non definito).
+function throughputTheoreticalFit_(weeklyBuckets) {
+  var raw = weeklyBuckets.filter(function(b) { return b.ct_medio_giorni !== null && b.throughput_punti_settimana > 0 && b.wip_medio > 0; });
+  if (raw.length < MIN_SAMPLES_FOR_THEORETICAL_FIT_) { return null; }
+  var reg = linearRegression_(raw.map(function(b) { return { x: 1 / b.wip_medio, y: 1 / b.throughput_punti_settimana }; }));
+  if (!reg || reg.A <= 0) { return null; }
+  var tMax = 1 / reg.A;
+  var k = reg.B * tMax;
+  if (k <= 0) { return null; }
+  return { t_max: round_(tMax), k: round_(k), n_samples: raw.length };
 }
 
 // Fase L4: 'visite' non ha size_class (e' anagrafica del caso, non della
@@ -1341,13 +1443,18 @@ function checkS4WipCoverage_() {
   // S2/S3, correzione aggiuntiva (addendum di collaudo, 2026-08-28):
   // verifica obbligatoria dopo il fix del throughput (consegna_ts,
   // non piu' incarico_chiuso_ts) - se i grafici scatter restano vuoti
-  // su TEST live, wipBands.length e un riepilogo di flowWeeklyBuckets
-  // vanno riportati esplicitamente, non dati per scontato come
-  // scarsita' di dati.
+  // su TEST live, la lunghezza della media mobile (S6) e un riepilogo di
+  // flowWeeklyBuckets vanno riportati esplicitamente, non dati per
+  // scontato come scarsita' di dati.
   var visite = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE));
   var visiteArchivio = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
   var flowWeekly = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, weeksCount, weeklyAverage.weekly);
-  var bands = wipBands_(flowWeekly, 20, 3);
+  // S6 (sostituisce wipBands_): stessa verifica di prima (i grafici
+  // diagnostici mostrano dati reali, non "Dato non ancora sufficiente"),
+  // ora sulla media mobile invece delle fasce a larghezza fissa.
+  var movingAverage = wipMovingAverage_(flowWeekly, WIP_MOVING_AVERAGE_WINDOW_);
+  var cycleFit = cycleTimeTheoreticalFit_(flowWeekly);
+  var throughputFitResult = throughputTheoreticalFit_(flowWeekly);
   var weeksWithThroughput = flowWeekly.filter(function(w) { return w.throughput_punti_settimana > 0; }).length;
   var weeksWithCycleTimeSample = flowWeekly.filter(function(w) { return w.n_campioni_ct > 0; }).length;
 
@@ -1367,6 +1474,35 @@ function checkS4WipCoverage_() {
   });
   var completedInitiatives = Object.keys(initiativeGroups_(completedVisitesInWindow)).length;
   var completedPassages = completedVisitesInWindow.length;
+
+  // R9.14: verifica obbligatoria, stesso principio gia' applicato a S4
+  // (istante contro istante, non media contro istante - una MEDIA su
+  // tutto il mese corrente, confrontata con una fotografia di adesso,
+  // differirebbe legittimamente con qualunque churn nel mese, come gia'
+  // visto per il WIP settimanale - non sarebbe una verifica vera).
+  // "in che colonna e' questo job ADESSO, secondo l'ultimo intervallo
+  // ricostruito dal log" per l'insieme di role di "Lavoro accettato"
+  // (backlog/prep/wip/stand_by) deve dare lo stesso totale della card
+  // live (points.committed_points, stessa popolazione via workStage_).
+  var acceptedRoles = ['backlog', 'prep', 'wip', 'stand_by'];
+  var instantAcceptedPoints = 0;
+  jobs.forEach(function(job) {
+    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
+    if (!intervals) { return; } // gia' contato in excluded_job_ids
+    var lastInterval = intervals[intervals.length - 1];
+    if (acceptedRoles.indexOf(lastInterval.role) !== -1) {
+      instantAcceptedPoints += jobPoints_(job);
+    }
+  });
+  instantAcceptedPoints = round_(instantAcceptedPoints);
+  // Informativo (come current_week_average_wip sopra): la MEDIA sul
+  // mese corrente che finisce davvero nel grafico "Andamento del
+  // carico" (monthBuckets_.accepted_points) - puo' differire
+  // legittimamente dalla fotografia di adesso con qualunque churn nel
+  // mese, non e' il criterio di pass/fail.
+  var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  var monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  var currentMonthAcceptedAverage = stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, [{ start: monthStart, end: monthEnd }], acceptedRoles).values[0];
 
   return {
     executed_at: nowIso_(),
@@ -1395,12 +1531,23 @@ function checkS4WipCoverage_() {
     // indagare (vedi commento sopra).
     weeks_with_throughput_gt_0: weeksWithThroughput,
     weeks_with_cycle_time_sample: weeksWithCycleTimeSample,
-    wip_bands_length: bands.length,
+    wip_moving_average_length: movingAverage.length,
+    cycle_time_theoretical_fit: cycleFit,
+    throughput_theoretical_fit: throughputFitResult,
     // R6.6, completamento: attesa una differenza strutturale (pipeline
     // diverse), non piu' una coincidenza garantita.
     completed_initiatives_periodo: completedInitiatives,
     completed_passages_periodo: completedPassages,
-    completed_cards_periodo_punti: points.completed_cards
+    completed_cards_periodo_punti: points.completed_cards,
+    // R9.14: istante-contro-istante, deve tornare 0 (a meno di
+    // arrotondamento) - se non torna e' un bug reale nella ricostruzione,
+    // da risolvere prima di considerare chiuso il punto, non una
+    // differenza da spiegare con una nota.
+    accepted_work_instant_from_log: instantAcceptedPoints,
+    accepted_work_instant_live_panel: points.committed_points,
+    accepted_work_instant_difference: round_(instantAcceptedPoints - points.committed_points),
+    // Informativo, non un criterio di pass/fail - vedi commento sopra.
+    accepted_work_current_month_average: currentMonthAcceptedAverage
   };
 }
 

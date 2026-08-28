@@ -319,6 +319,7 @@ function runAllTests() {
     testBuildSystemStateExposesWaitTimeSummaryRow,
     testWorkStageClassifiesAllSevenStages,
     testPointsStatisticsSeparatesPipelineFromCommittedWork,
+    testMonthBucketsAcceptedPointsReconstructedFromLog,
     testCurrentWorkloadKeepsCommittedWorkSeparateFromToInvoice,
     testInitiativeGroupsCountsOnlyObservedReentriesNotHistoryPosition,
     testBuildSystemStateReworkCountsOnlyReentriesWithinWindow,
@@ -332,13 +333,17 @@ function runAllTests() {
     testFlowWeeklyBucketsThroughputFollowsConsegnaTsNotIncaricoChiusoTs,
     testFlowWeeklyBucketsThroughputExcludesReentriesWithoutConsegna,
     testActiveWipWeeklyFromLogTracksBacklogActiveWaitAndClosedIntervals,
+    testStockSeriesFromLogGeneralizesOverIncludedRoles,
     testActiveWipWeeklyFromLogExcludesJobsWithoutParseableLog,
     testBuildSystemStateExposesWipCoverageAndUsesReconstructedWip,
     testActiveWipWeeklyFromLogArchivedJobsInflateCurrentWeekButNotLivePanel,
     testActiveWipWeeklyFromLogWeeklyAverageDiffersFromInstantSnapshotOnChurn,
-    testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending,
-    testWipBandsExcludesWeeksWithoutCycleTimeSamples,
-    testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands,
+    testWipMovingAverageOrdersByWipAscendingWithFixedWindow,
+    testWipMovingAverageExcludesWeeksWithoutCycleTimeSamples,
+    testCycleTimeTheoreticalFitRecoversKnownParametersFromRawPoints,
+    testCycleTimeTheoreticalFitReturnsNullBelowMinimumSamples,
+    testThroughputTheoreticalFitRecoversKnownParametersFromRawPoints,
+    testBuildSystemStateExposesFlowWeeklyBucketsAndWipMovingAverage,
     testBuildSystemStateUsesWipTrendWeeksFromConfig,
     testCurrentlyBlockedGetsColorBandsWhenEnoughCycleTimeSamples,
     testCurrentlyBlockedHasNoBandsWhenNotEnoughCycleTimeSamples,
@@ -2496,6 +2501,24 @@ function testPointsStatisticsSeparatesPipelineFromCommittedWork() {
   assertEquals_(2, points.committed_cards, 'due lavori impegnati');
 }
 
+// R9.14: 'accepted_points' (monthBuckets_, via stockSeriesFromLog_)
+// sostituisce il vecchio 'open_points' cumulato - job in backlog da
+// ben prima dell'inizio del mese, ancora aperto oggi: il mese
+// PRECEDENTE (pienamente trascorso, mai troncato a 'now' come farebbe
+// il mese corrente ancora in corso) deve avere una media ricostruita
+// pari esattamente a size_points, copertura piena per tutto il mese.
+function testMonthBucketsAcceptedPointsReconstructedFromLog() {
+  var now = new Date(2026, 7, 27);
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var log = [{ id: 'e1', type: 'move', to: 'backlog', ts: testIsoDaysAgo_(now, 90) }];
+  var jobs = [{ job_id: 'JOB-ACCEPTED', size_points: 9, size_class: 'M', activity_log_json: JSON.stringify(log) }];
+
+  var buckets = monthBuckets_(jobs, now, 2, columnMap); // [luglio (pieno), agosto (parziale, non verificato qui)]
+
+  assertEquals_(9, buckets[0].accepted_points, 'mese pienamente trascorso (luglio), job in backlog da prima del suo inizio -> media ricostruita = size_points intero');
+}
+
 // R7: "Lavoro presente e capacita'" - il lavoro impegnato (stadi 1-4) e
 // il "da fatturare" (stadio 5) restano campi distinti, mai sommati in
 // un unico totale da questa funzione.
@@ -2749,37 +2772,86 @@ function testFlowWeeklyBucketsThroughputExcludesReentriesWithoutConsegna() {
 // wipBands_: tre settimane fittizie in due fasce diverse (bandWidth=20) -
 // la fascia con una sola settimana va scartata (minSamples=2), l'ordine
 // di uscita deve essere per WIP crescente.
-function testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending() {
+// S6 (addendum di collaudo, sostituisce wipBands_): media mobile a
+// finestra fissa di campioni, ordinata per WIP crescente - non a
+// larghezza fissa in punti.
+function testWipMovingAverageOrdersByWipAscendingWithFixedWindow() {
   var weeklyBuckets = [
-    { key: '2026-W10', wip_medio: 5, throughput_punti_settimana: 10, ct_medio_giorni: 4 },
-    { key: '2026-W11', wip_medio: 8, throughput_punti_settimana: 12, ct_medio_giorni: 6 },
-    { key: '2026-W12', wip_medio: 45, throughput_punti_settimana: 20, ct_medio_giorni: 15 } // fascia isolata (1 sola settimana)
+    { key: '2026-W10', wip_medio: 8, throughput_punti_settimana: 12, ct_medio_giorni: 6 },
+    { key: '2026-W11', wip_medio: 5, throughput_punti_settimana: 10, ct_medio_giorni: 4 },
+    { key: '2026-W12', wip_medio: 45, throughput_punti_settimana: 20, ct_medio_giorni: 15 }
   ];
 
-  var bands = wipBands_(weeklyBuckets, 20, 2);
+  var result = wipMovingAverage_(weeklyBuckets, 2);
 
-  assertEquals_(1, bands.length, 'la fascia 40-60 ha una sola settimana (< minSamples=2) e va scartata');
-  assertEquals_(6.5, bands[0].wip_medio, 'fascia 0-20: media WIP delle due settimane (5+8)/2');
-  assertEquals_(2, bands[0].n_settimane, 'due settimane nella fascia superstite');
+  assertEquals_(2, result.length, 'con finestra=2 su 3 campioni validi, 2 finestre scorrevoli');
+  assertEquals_(6.5, result[0].wip_medio, 'prima finestra (WIP crescente): media di 5 e 8');
+  assertEquals_(26.5, result[1].wip_medio, 'seconda finestra: media di 8 e 45');
 }
 
 // Settimane senza campioni di tempo di ciclo (ct_medio_giorni null) non
-// devono entrare in nessuna fascia - non c'e' un tempo di ciclo da
+// devono entrare nella media mobile - non c'e' un tempo di ciclo da
 // mediare per quella settimana.
-function testWipBandsExcludesWeeksWithoutCycleTimeSamples() {
+function testWipMovingAverageExcludesWeeksWithoutCycleTimeSamples() {
   var weeklyBuckets = [
     { key: '2026-W10', wip_medio: 5, throughput_punti_settimana: 10, ct_medio_giorni: null },
     { key: '2026-W11', wip_medio: 6, throughput_punti_settimana: 12, ct_medio_giorni: 5 },
     { key: '2026-W12', wip_medio: 7, throughput_punti_settimana: 11, ct_medio_giorni: 6 }
   ];
 
-  var bands = wipBands_(weeklyBuckets, 20, 2);
+  var result = wipMovingAverage_(weeklyBuckets, 2);
 
-  assertEquals_(1, bands.length, 'una sola fascia (0-20), con le due settimane che hanno un tempo di ciclo');
-  assertEquals_(2, bands[0].n_settimane, 'la settimana senza campioni di ciclo non entra nella fascia');
+  assertEquals_(1, result.length, 'una sola finestra possibile, con le due settimane che hanno un tempo di ciclo');
+  assertEquals_(6.5, result[0].wip_medio, 'media WIP delle due settimane con ct valido (6+7)/2');
 }
 
-function testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands() {
+// S6: il fit teorico del tempo di ciclo va fatto sui PUNTI GREZZI
+// settimanali, non sulla media mobile - generato un dataset che segue
+// esattamente ct(w) = a/(w0-w) con a=10, w0=50 (nessun rumore): il fit
+// deve recuperare i parametri veri sui dati grezzi.
+function testCycleTimeTheoreticalFitRecoversKnownParametersFromRawPoints() {
+  var a = 10, w0 = 50;
+  var weeklyBuckets = [];
+  for (var w = 5; w <= 45; w += 4) {
+    weeklyBuckets.push({ wip_medio: w, throughput_punti_settimana: 10, ct_medio_giorni: a / (w0 - w) });
+  }
+  assertTrue_(weeklyBuckets.length >= 10, 'fixture deve avere almeno 10 campioni (soglia minima del fit)');
+
+  var fit = cycleTimeTheoreticalFit_(weeklyBuckets);
+
+  assertTrue_(Boolean(fit), 'con dati che seguono esattamente il modello, il fit deve riuscire');
+  assertEquals_(a, fit.a, 'parametro a recuperato esattamente da dati senza rumore');
+  assertEquals_(w0, fit.w0, 'parametro w0 (WIP critico) recuperato esattamente da dati senza rumore');
+}
+
+// Sotto la soglia minima di campioni, nessun fit - una curva a 2
+// parametri su pochi punti sarebbe degenere, non un'indicazione utile.
+function testCycleTimeTheoreticalFitReturnsNullBelowMinimumSamples() {
+  var weeklyBuckets = [
+    { wip_medio: 5, throughput_punti_settimana: 10, ct_medio_giorni: 2 },
+    { wip_medio: 10, throughput_punti_settimana: 12, ct_medio_giorni: 3 }
+  ];
+  assertEquals_(null, cycleTimeTheoreticalFit_(weeklyBuckets), 'meno di 10 campioni validi -> nessun fit');
+}
+
+// S6: stessa verifica per il fit del throughput (saturazione), dataset
+// che segue esattamente throughput(w) = tMax*w/(k+w) con tMax=20, k=10.
+function testThroughputTheoreticalFitRecoversKnownParametersFromRawPoints() {
+  var tMax = 20, k = 10;
+  var weeklyBuckets = [];
+  for (var w = 2; w <= 40; w += 4) {
+    weeklyBuckets.push({ wip_medio: w, throughput_punti_settimana: (tMax * w) / (k + w), ct_medio_giorni: 5 });
+  }
+  assertTrue_(weeklyBuckets.length >= 10, 'fixture deve avere almeno 10 campioni (soglia minima del fit)');
+
+  var fit = throughputTheoreticalFit_(weeklyBuckets);
+
+  assertTrue_(Boolean(fit), 'con dati che seguono esattamente il modello, il fit deve riuscire');
+  assertEquals_(tMax, fit.t_max, 'parametro t_max recuperato esattamente da dati senza rumore');
+  assertEquals_(k, fit.k, 'parametro k recuperato esattamente da dati senza rumore');
+}
+
+function testBuildSystemStateExposesFlowWeeklyBucketsAndWipMovingAverage() {
   var now = new Date();
   var jobs = [{ job_id: 'JOB-FLOW-WEEKLY', status: 'wip', arrival_ts: nowIso_(), visit_number: 1 }];
   var visite = [{ job_id: 'JOB-FLOW-WEEKLY', numero_visita: 1, apertura_ts: nowIso_(), start_ts: testIsoDaysAgo_(now, 5), consegna_ts: nowIso_() }];
@@ -2788,7 +2860,9 @@ function testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands() {
 
   assertTrue_(Array.isArray(state.flowWeeklyBuckets), 'flowWeeklyBuckets deve essere un array');
   assertEquals_(26, state.flowWeeklyBuckets.length, '26 settimane richieste');
-  assertTrue_(Array.isArray(state.wipBands), 'wipBands deve essere un array (anche vuoto)');
+  assertTrue_(Array.isArray(state.wipMovingAverage), 'wipMovingAverage deve essere un array (anche vuoto)');
+  assertTrue_(state.cycleTimeFit === null || typeof state.cycleTimeFit === 'object', 'cycleTimeFit deve essere null o un oggetto con i parametri del fit');
+  assertTrue_(state.throughputFit === null || typeof state.throughputFit === 'object', 'throughputFit deve essere null o un oggetto con i parametri del fit');
 }
 
 // S5 (DESIGN_R_S_addendum_collaudo.md, sez. S5): wip_trend_weeks in
@@ -2840,6 +2914,40 @@ function testActiveWipWeeklyFromLogTracksBacklogActiveWaitAndClosedIntervals() {
 
   assertEquals_(0, result.excluded_job_ids.length, 'il job ha un log interpretabile, non deve essere escluso');
   assertEquals_(4, result.weekly[0], 'wip attivo settimanale = (2g wip + 2g wait_client) / 7 * 7 punti = 4');
+}
+
+// R9.14: stockSeriesFromLog_ e' il motore generalizzato dietro
+// activeWipWeeklyFromLog_ - stessa fixture di sopra, chiamato sia con
+// ['prep','wip','stand_by'] (deve dare lo stesso risultato di
+// activeWipWeeklyFromLog_, 4 punti: il job non era mai ne' prep ne'
+// stand_by qui, solo wip+wait_client) sia con
+// ['backlog','prep','wip','stand_by'] (deve includere anche i 2 giorni
+// di backlog: (2g backlog + 2g wip + 2g wait_client)/7*7 = 6).
+function testStockSeriesFromLogGeneralizesOverIncludedRoles() {
+  var now = new Date(2026, 7, 27);
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var closedAt = testIsoDaysAgo_(now, 1);
+  var log = [
+    { id: 'e1', type: 'move', to: 'backlog', ts: testIsoDaysAgo_(now, 7) },
+    { id: 'e2', type: 'move', to: 'wip', ts: testIsoDaysAgo_(now, 5) },
+    { id: 'e3', type: 'move', to: 'wait_client', ts: testIsoDaysAgo_(now, 3) },
+    { id: 'e4', type: 'move', to: 'done', ts: closedAt }
+  ];
+  var jobs = [{
+    job_id: 'JOB-TIMELINE',
+    size_points: 7,
+    size_class: 'M',
+    incarico_chiuso_ts: closedAt,
+    activity_log_json: JSON.stringify(log)
+  }];
+  var buckets = weeklyBucketDefs_(now, 1);
+
+  var activeOnly = stockSeriesFromLog_(jobs, [], columnMap, now, buckets, ['prep', 'wip', 'stand_by']);
+  var accepted = stockSeriesFromLog_(jobs, [], columnMap, now, buckets, ['backlog', 'prep', 'wip', 'stand_by']);
+
+  assertEquals_(4, activeOnly.values[0], '"Lavoro in corso" (prep/wip/stand_by): stesso numero di activeWipWeeklyFromLog_');
+  assertEquals_(6, accepted.values[0], '"Lavoro accettato" (+ backlog): include anche i 2 giorni di backlog');
 }
 
 // Un job senza eventi 'move' interpretabili (log vuoto o non JSON) deve

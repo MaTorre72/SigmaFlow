@@ -20,15 +20,26 @@
     <article class="gauge-card"><div id="gauge-rework" class="gauge"><span>-</span></div><strong>Rilavorazione</strong></article>
   </div>
   <div class="points-summary">
-    <article><span>Punti impegnati</span><strong id="points-committed">-</strong></article>
+    <article><span>Punti accettati</span><strong id="points-committed">-</strong></article>
     <article><span>Punti aggiunti</span><strong id="points-added">-</strong></article>
     <article><span>Punti completati</span><strong id="points-completed">-</strong></article>
   </div>
   <article class="chart-panel">
-    <div><h2>Andamento del carico</h2><p>Punti entrati, completati e ancora aperti</p></div>
+    <div><h2>Andamento del carico</h2><p>Lavoro accettato, punti aggiunti e completati</p></div>
     <canvas id="points-timeline-chart" height="240" aria-label="Andamento punti nel tempo"></canvas>
-    <div class="chart-legend"><span class="legend-entered">Punti entrati</span><span class="legend-completed">Punti completati</span><span class="legend-open">Punti aperti</span></div>
+    <div class="chart-legend">
+      <span class="legend-open">Lavoro accettato - asse sinistro</span>
+      <span class="legend-entered">Aggiunti - asse destro</span>
+      <span class="legend-completed">Completati - asse destro</span>
+    </div>
     <div id="points-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
+    <!-- R9.16: didascalia in linguaggio semplice - "Lavoro accettato" e'
+         una fotografia (quanti punti c'erano in carico in quel momento),
+         "Aggiunti"/"Completati" sono un conteggio per periodo (quanti
+         punti sono entrati o usciti in quel mese) - per questo hanno un
+         asse verticale indipendente, sulla stessa scala i flussi
+         sarebbero schiacciati contro lo zero dallo stock. -->
+    <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Aggiunti" e "Completati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
   </article>
 </section>
 
@@ -59,7 +70,7 @@
       <thead><tr><th></th><th>Lavori</th><th>Punti</th><th>Lavori/settimana</th><th>Punti/settimana</th></tr></thead>
       <tbody>
         <tr><th>Pipeline commerciale (preventivi)</th><td id="flow-pipeline-cards">-</td><td id="flow-pipeline-points">-</td><td>-</td><td>-</td></tr>
-        <tr><th>Lavoro impegnato (ora)</th><td id="flow-committed-cards">-</td><td id="flow-committed-points">-</td><td>-</td><td>-</td></tr>
+        <tr><th>Lavoro accettato (attuale)</th><td id="flow-committed-cards">-</td><td id="flow-committed-points">-</td><td>-</td><td>-</td></tr>
         <tr><th>Aggiunti (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td><td id="flow-added-points-rate">-</td></tr>
         <tr><th>Completati (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
       </tbody>
@@ -89,7 +100,7 @@
       </tbody>
     </table></div>
 
-    <h3>Fermi ora</h3>
+    <h3>Fermi in questo momento</h3>
     <p class="panel-note">I 5 lavori fermi da piu' tempo, in questo momento.</p>
     <div class="table-scroll"><table class="monthly-load-table" id="currently-blocked-table">
       <thead><tr><th>Lavoro</th><th>Cliente</th><th>Tipo attesa</th><th>Giorni</th></tr></thead>
@@ -119,13 +130,13 @@
   </article>
 
   <article class="panel">
-    <!-- R7: "Lavoro impegnato" (stadi 1-4, team tecnico) e "Da
+    <!-- R7: "Lavoro accettato" (stadi 1-4, team tecnico) e "Da
          fatturare" (stadio 5, amministrazione) - due dl distinti, mai
          sommati in una sola card. -->
-    <h2>Lavoro impegnato e capacita'</h2>
-    <h3>Lavoro impegnato (ora)</h3>
+    <h2>Lavoro accettato e capacita'</h2>
+    <h3>Lavoro accettato (attuale)</h3>
     <dl id="workload-metrics"></dl>
-    <h3>Da fatturare (ora)</h3>
+    <h3>Da fatturare (attuale)</h3>
     <dl id="to-invoice-metrics"></dl>
     <h3>Capacita' (stimata, alla settimana)</h3>
     <dl id="capacity-metrics"></dl>
@@ -147,10 +158,14 @@
   <article class="panel wide">
     <h2>Carico mensile</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th>Mese</th><th>Lavori entrati</th><th>Lavori completati</th><th>Punti entrati</th><th>Punti completati</th><th>Saldo punti</th><th>Punti aperti</th></tr></thead>
+      <thead><tr><th>Mese</th><th>Lavori aggiunti</th><th>Lavori completati</th><th>Punti aggiunti</th><th>Punti completati</th><th>Saldo punti</th><th>Lavoro accettato</th></tr></thead>
       <tbody id="monthly-load-body"></tbody>
     </table></div>
-    <p class="panel-note">Nel primo mese, "Punti aperti" e' il saldo ereditato dai mesi precedenti.</p>
+    <!-- R9.14: "Lavoro accettato" qui e' la stessa ricostruzione dal log
+         del grafico "Andamento del carico" sopra (media del mese, stadi
+         1-4) - non piu' un saldo cumulato approssimato, nessuna nota di
+         differenza necessaria. -->
+    <p class="panel-note">"Lavoro accettato" e' la media di quanti punti erano in carico durante quel mese (stadi 1-4, ricostruita dallo storico) - non un saldo cumulato.</p>
   </article>
 
   <article class="panel wide scenarios-panel">
@@ -172,13 +187,15 @@
     <h3>Rilavorazione</h3>
     <dl id="advanced-rework-metrics"></dl>
     <h3>Throughput e tempo di ciclo vs Lavoro in corso (diagnostico)</h3>
-    <p class="panel-note">Confronta il lavoro in corso con la velocita' di consegna e il tempo di ciclo, settimana per settimana (ultime <span id="wip-trend-weeks-note">-</span>). I punti chiari sono le singole settimane. I punti scuri, uniti da una linea, sono le medie per fascia: e' li' che si legge la tendenza reale.</p>
+    <p class="panel-note">Confronta il lavoro in corso con la velocita' di consegna e il tempo di ciclo, settimana per settimana (ultime <span id="wip-trend-weeks-note">-</span>). I punti chiari sono le singole settimane. La linea scura e' la media mobile: e' li' che si legge la tendenza reale.</p>
     <h4>Throughput vs Lavoro in corso</h4>
     <canvas id="wip-throughput-scatter-chart" height="200" aria-label="Dispersione throughput settimanale rispetto al lavoro in corso medio"></canvas>
     <div id="wip-throughput-scatter-empty" class="chart-empty" hidden>Dato non ancora sufficiente</div>
+    <p class="panel-note" id="wip-throughput-fit-note"></p>
     <h4>Tempo di ciclo vs Lavoro in corso</h4>
     <canvas id="wip-cycle-scatter-chart" height="200" aria-label="Dispersione tempo di ciclo settimanale rispetto al lavoro in corso medio"></canvas>
     <div id="wip-cycle-scatter-empty" class="chart-empty" hidden>Dato non ancora sufficiente</div>
+    <p class="panel-note" id="wip-cycle-fit-note"></p>
   </details>
 </section>
 </details>

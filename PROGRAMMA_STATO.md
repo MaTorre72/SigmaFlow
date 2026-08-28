@@ -1,7 +1,163 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
-## Fase R e S — terzo giro di collaudo: bocciatura su 7 screenshot reali (2026-08-28, sessione 12)
+## Fase R e S — quarto giro: Parte 1 (R7 correzione/R5/R6.6/S2-S3/S5/R8/R9.1-13, riverificati) + Parte 2 (terminologia "Lavoro accettato", S6, R9.14-16) (2026-08-28, sessione 13)
+
+Eseguito il prompt "Fase R/S, secondo giro di collaudo (R7/R8/S5/S6/R9 +
+correzioni R5/R6.6/S2-S3)" per intero — Parte 1 (gia' inviata, qui
+riverificata voce per voce contro il codice reale, non ridata per
+scontata) e Parte 2 (nuova). 211/211 test Node, `client.html`
+controllato per errori di sintassi (0 errori), push su TEST verificato
+(16/16 file identici), collaudo visivo nel Browser pane via
+`/tmp/sf-scratch/repro-server.js` con dati demo (60 job seedati) — nessun
+errore console, entrambi i grafici diagnostici popolati, note dinamiche
+corrette.
+
+### Parte 1 — riverificata voce per voce
+
+- **R7** (schema stadi 0-6): confermato gia' strutturalmente corretto
+  (`workStage_`, `currentWorkload_`, `pointsStatistics_` in
+  [Model.gs](apps-script/src/Model.gs) — nessuna modifica necessaria li').
+  **Trovata e corretta la sola lacuna reale**: la riga "Lavoro in corso"
+  nel pannello "Lavoro accettato e capacita'" mostrava lo stadio 3
+  isolato (in_progress) con lo stesso nome riservato all'aggregato
+  stadi 2-4 dei grafici diagnostici — rinominata "Lavorazione"
+  ([client.html:2236](apps-script/src/client.html)).
+- **Terminologia "impegnato" -> "accettato"**: cercato in tutto
+  `dashboard.html`/`client.html` (le sole etichette rivolte
+  all'utente) — 5 occorrenze corrette: "Punti impegnati" ->
+  "Punti accettati" (Vista Rapida), "Lavoro impegnato (ora)" -> "Lavoro
+  accettato (attuale)" (tabella Flusso e carico + h3 pannello), h2
+  "Lavoro impegnato e capacita'" -> "Lavoro accettato e capacita'", h3
+  "Da fatturare (ora)" -> "Da fatturare (attuale)". Le occorrenze
+  residue di "impegnato" sono tutte in commenti di codice o messaggi di
+  assert nei test (mai rivolte all'utente) - fuori dallo scope del
+  glossario R6.1, lasciate.
+- **R9.15 ("ora" -> "attuale")**: applicato insieme al punto sopra (le
+  due etichette con "(ora)" erano le stesse due gia' corrette per
+  "impegnato"). "Fermi ora" -> "Fermi in questo momento" (titolo
+  riformulato, "(attuale)" non si inseriva bene li').
+- **R5, R6.6, S2/S3, S5, R8**: verificati gia' implementati e corretti
+  da un giro precedente (`allVisite.forEach` per `waitSamplesByField`,
+  `flow.completed_initiatives` per "Lavori completati", throughput da
+  `consegna_ts`, `wip_trend_weeks` in config, nessun riferimento "Cap."
+  residuo, `formatDurationLabel_` solo in giorni) — nessuna modifica
+  necessaria, confermato via lettura diretta del codice, non per
+  assunzione.
+- **R9.1-R9.13**: confermati gia' implementati da un giro precedente
+  (virgola decimale, unita' non ripetute, tacche sugli assi, gauge
+  sostituiti, gerarchia subtotali, stile scenari non attivi, righe
+  vuote compattate, "card"->"lavori", correzioni testuali, enfasi
+  fuori scala) - nessuna modifica necessaria in questo giro.
+
+### Parte 2 — nuovo lavoro
+
+- **S6 (media mobile + fit teorico)**: `wipBands_` (fasce a larghezza
+  fissa) **rimossa** dal codice, sostituita da `wipMovingAverage_`
+  (finestra fissa di 5 campioni, `WIP_MOVING_AVERAGE_WINDOW_`) in
+  [Model.gs](apps-script/src/Model.gs). Curva teorica tratteggiata: due
+  fit a 2 parametri, entrambi risolti per **linearizzazione + minimi
+  quadrati** (non un solutore iterativo — con questi pochi campioni
+  rischierebbe di non convergere), sempre sui **punti grezzi
+  settimanali**, mai sulla media mobile:
+  - Tempo di ciclo: `ct(w) = a / (w0 - w)` (asintotico), linearizzato in
+    `1/ct = (w0/a) - (1/a)*w`.
+  - Throughput: `th(w) = tMax*w / (k + w)` (saturazione,
+    Michaelis-Menten), linearizzato con Lineweaver-Burk.
+  - Soglia minima 10 settimane con campione di tempo di ciclo valido
+    (`MIN_SAMPLES_FOR_THEORETICAL_FIT_`), altrimenti nessuna curva.
+  - Test con dataset sintetico generato ESATTAMENTE dal modello (zero
+    rumore): il fit recupera i parametri veri esattamente
+    (`testCycleTimeTheoreticalFitRecoversKnownParametersFromRawPoints`,
+    `testThroughputTheoreticalFitRecoversKnownParametersFromRawPoints`).
+  - Nota di pannello sotto ENTRAMBI i grafici, testo dinamico col
+    numero reale di settimane usate (o la spiegazione di cosa manca se
+    sotto soglia) — verificato nel Browser pane: con dati demo (sotto
+    soglia) mostra correttamente "la curva tratteggiata non e' ancora
+    mostrata: servono almeno 10 settimane...".
+  - **Su TEST reale** (dati veri, non demo): da verificare da Marco se
+    la curva tratteggiata compare — serve sapere se ci sono almeno 10
+    settimane con tempo di ciclo valido (vedi diagnostica sotto).
+- **R9.14 (stesso dato, stesso nome, sopra e sotto)**: causa reale
+  confermata leggendo il codice — `monthBuckets_` calcolava "Punti
+  aperti" come saldo cumulato approssimato (`entrato - completato`,
+  mese su mese), mai una vera ricostruzione delle colonne nel tempo,
+  per questo non poteva mai coincidere con "Lavoro accettato (attuale)"
+  (fotografia vera delle colonne, via `workStage_`).
+  - **Generalizzato** `activeWipWeeklyFromLog_` (S4) nel motore comune
+    `stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, buckets,
+    includeRoles)` — stessa ricostruzione per-job degli intervalli di
+    colonna (`jobColumnIntervalsFromLog_`, esteso per esporre anche
+    `role` oltre a `wip_class`), parametrizzata sui `role` da includere
+    e sulla durata dei bucket (settimana o mese) invece di duplicata.
+    `activeWipWeeklyFromLog_` resta con lo stesso nome/firma (usata da
+    S4/S6) ma ora delega a `stockSeriesFromLog_` con
+    `['prep','wip','stand_by']`.
+  - `monthBuckets_` ora calcola `accepted_points` (stadi 1-4, via
+    `stockSeriesFromLog_` con `['backlog','prep','wip','stand_by']`) al
+    posto di `open_points` — stesso identico nome "Lavoro accettato" nel
+    grafico "Andamento del carico" e nella card di Vista Rapida.
+  - **Verifica di coerenza**: la media mensile e la fotografia istante
+    non sono comparabili 1:1 con tolleranza zero (la media su tutto un
+    mese diverge legittimamente dall'istantaneo con qualunque churn nel
+    mese, stesso principio gia' visto in S4 per la media settimanale) —
+    quindi `checkS4WipCoverage_` e' stato esteso con un confronto
+    **istante contro istante** vero (`accepted_work_instant_from_log`
+    via ultimo intervallo ricostruito per job, ruoli
+    `['backlog','prep','wip','stand_by']`, contro
+    `accepted_work_instant_live_panel` = `points.committed_points`) —
+    questo e' il criterio di pass/fail (deve dare `accepted_work_instant_
+    difference: 0`); `accepted_work_current_month_average` resta
+    informativo. **Da eseguire da Marco su TEST reale**
+    (`checkS4WipCoverageOnTest`, in
+    [Model.gs](apps-script/src/Model.gs)) per la verifica sui dati veri
+    — non ancora fatta in questa sessione.
+  - Verificato sul Browser pane con dati demo: "Carico mensile" mostra
+    ora una serie "Lavoro accettato" reale e crescente (20,3 / 76,02 /
+    150,53 / 210,2 / 279,79 / 312,07 sui 6 mesi) invece del vecchio
+    saldo cumulato, e "Lavoro accettato (attuale)" di Vista Rapida
+    (372 pt) e' vicino al valore dell'ultimo mese (312,07, mese
+    corrente parziale — la differenza residua e' attesa, e' una media
+    di un mese non ancora concluso, non un bug).
+  - **"Aggiunti"/"Entrati"**: verificato che `entered_points`
+    (`monthBuckets_`) e `added_points` (`pointsStatistics_`) derivano
+    entrambi da `job.arrival_ts` — stesso calcolo, granularita' diversa
+    (mensile vs finestra). Unificato il nome: header tabella "Carico
+    mensile" da "Punti entrati"/"Lavori entrati" a "Punti
+    aggiunti"/"Lavori aggiunti", stesso termine gia' usato da Vista
+    Rapida e "Flusso e carico".
+- **R9.16 (assi separati stock/flussi)**: `drawPointsTimeline`
+  (client.html) riscritta con due assi Y indipendenti — sinistro
+  (arancio, "Lavoro accettato", stock) e destro (blu, "Aggiunti"/
+  "Completati", flussi), range calcolati separatamente sul massimo di
+  ciascun gruppo, mai forzati a combaciare. Unita' dichiarata su
+  entrambi gli assi ("pt" / "pt/mese"). Legenda con testo esplicito
+  "- asse sinistro"/"- asse destro". Didascalia sotto il grafico in
+  linguaggio semplice (nessun termine "stock"/"flusso"). Verificato nel
+  Browser pane: nessun errore, valori resi correttamente.
+
+### Diagnostica da eseguire da Marco
+
+`checkS4WipCoverageOnTest()` in **[Model.gs](apps-script/src/Model.gs)**
+ha nuovi campi da questo giro, da controllare sui dati reali di TEST:
+- `accepted_work_instant_difference` — deve essere **0** (a meno di
+  arrotondamento). Se non lo e', e' un bug reale nella ricostruzione di
+  R9.14, da segnalare con `accepted_work_instant_from_log` e
+  `accepted_work_instant_live_panel` (i due numeri confrontati).
+- `wip_moving_average_length` — quante fasce di media mobile si
+  formano (sostituisce il vecchio `wip_bands_length`).
+- `cycle_time_theoretical_fit`/`throughput_theoretical_fit` — `null`
+  se sotto soglia (10 settimane), altrimenti `{a, w0, n_samples}` /
+  `{t_max, k, n_samples}`: se non-null su TEST reale, la curva
+  tratteggiata dovrebbe comparire nei due grafici diagnostici.
+
+### Lettura finale pannello-per-pannello (principio 8)
+
+Fatta sui dati demo nel Browser pane (non su TEST reale — non
+disponibile in questa sessione). Nessuna nuova incongruenza trovata
+oltre a quelle gia' coperte dai punti sopra. Non ancora rivista: il
+finding (b) dell'audit originale su `mu = 0,14` come possibile valore
+anomalo (R6.2) — resta fuori scope di questo giro, non toccato.
 
 Marco ha ricollaudato il giro precedente (vedi voce sotto) su TEST reale
 con 7 screenshot dell'intera dashboard, confrontandoli col file di
