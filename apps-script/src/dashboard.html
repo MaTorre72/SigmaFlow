@@ -21,25 +21,29 @@
   </div>
   <div class="points-summary">
     <article><span>Punti accettati</span><strong id="points-committed">-</strong></article>
-    <article><span>Punti aggiunti</span><strong id="points-added">-</strong></article>
+    <article><span>Nuovi punti</span><strong id="points-added">-</strong></article>
     <article><span>Punti completati</span><strong id="points-completed">-</strong></article>
   </div>
   <article class="chart-panel">
-    <div><h2>Andamento del carico</h2><p>Lavoro accettato, punti aggiunti e completati</p></div>
+    <div><h2>Andamento del carico</h2><p>Lavoro accettato, nuovi punti e completati</p></div>
     <canvas id="points-timeline-chart" height="240" aria-label="Andamento punti nel tempo"></canvas>
     <div class="chart-legend">
       <span class="legend-open">Lavoro accettato - asse sinistro</span>
-      <span class="legend-entered">Aggiunti - asse destro</span>
+      <span class="legend-entered">Nuovi - asse destro</span>
       <span class="legend-completed">Completati - asse destro</span>
     </div>
     <div id="points-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
-    <!-- R9.16: didascalia in linguaggio semplice - "Lavoro accettato" e'
-         una fotografia (quanti punti c'erano in carico in quel momento),
-         "Aggiunti"/"Completati" sono un conteggio per periodo (quanti
-         punti sono entrati o usciti in quel mese) - per questo hanno un
-         asse verticale indipendente, sulla stessa scala i flussi
-         sarebbero schiacciati contro lo zero dallo stock. -->
-    <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Aggiunti" e "Completati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
+    <!-- R9.16/R10.2: didascalia in linguaggio semplice - "Lavoro
+         accettato" e' una fotografia (quanti punti c'erano in carico in
+         quel momento), "Nuovi"/"Completati" sono un conteggio per
+         periodo (quanti punti sono entrati o usciti in quel mese) - per
+         questo hanno un asse verticale indipendente, sulla stessa scala
+         i flussi sarebbero schiacciati contro lo zero dallo stock.
+         "Nuovi" (non piu' "Aggiunti", R10.2): "aggiunto" non comunicava
+         il significato di "lavoro accettato" (R7, stadi 1-4) e rischiava
+         di confondersi con quel nome - "Nuovi" indica il flusso in
+         ingresso nel periodo, distinto dallo stock. -->
+    <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Nuovi" e "Completati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
   </article>
 </section>
 
@@ -71,7 +75,7 @@
       <tbody>
         <tr><th>Pipeline commerciale (preventivi)</th><td id="flow-pipeline-cards">-</td><td id="flow-pipeline-points">-</td><td>-</td><td>-</td></tr>
         <tr><th>Lavoro accettato (attuale)</th><td id="flow-committed-cards">-</td><td id="flow-committed-points">-</td><td>-</td><td>-</td></tr>
-        <tr><th>Aggiunti (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td><td id="flow-added-points-rate">-</td></tr>
+        <tr><th>Nuovi (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td><td id="flow-added-points-rate">-</td></tr>
         <tr><th>Completati (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
       </tbody>
     </table></div>
@@ -107,11 +111,7 @@
       <tbody id="currently-blocked-body"></tbody>
     </table></div>
     <div id="currently-blocked-empty" class="chart-empty" hidden>Nessun lavoro attualmente fermo in attesa</div>
-
-    <h3>Andamento mensile dell'attesa</h3>
-    <canvas id="wait-time-trend-chart" height="200" aria-label="Andamento mensile dell'attesa per tipo"></canvas>
-    <div id="wait-time-trend-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
-    <div class="chart-legend"><span class="legend-entered">Attesa cliente</span><span class="legend-completed">Attesa enti</span><span class="legend-open">Decisione interna</span></div>
+    <p id="currently-blocked-legend" class="panel-note" hidden></p>
 
     <h3>Esposizione futura a rilavorazione</h3>
     <dl id="latent-backlog-metrics"></dl>
@@ -140,7 +140,7 @@
     <dl id="to-invoice-metrics"></dl>
     <h3>Capacita' (stimata, alla settimana)</h3>
     <dl id="capacity-metrics"></dl>
-    <p class="panel-note">La capacita' va confrontata con lavoro nuovo e rilavorazioni insieme.</p>
+    <p class="panel-note">La capacita' va confrontata con lavoro nuovo e rilavorazioni insieme. "Margine residuo" e' lo stesso sovraccarico mostrato sopra come percentuale (pannello "Rilavorazione"), qui in passaggi/settimana.</p>
   </article>
 
   <article class="panel wide">
@@ -158,14 +158,15 @@
   <article class="panel wide">
     <h2>Carico mensile</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th>Mese</th><th>Lavori aggiunti</th><th>Lavori completati</th><th>Punti aggiunti</th><th>Punti completati</th><th>Saldo punti</th><th>Lavoro accettato</th></tr></thead>
+      <thead><tr><th>Mese</th><th>Nuovi lavori</th><th>Lavori completati</th><th>Nuovi punti</th><th>Punti completati</th><th>Saldo punti</th><th>Lavoro accettato</th></tr></thead>
       <tbody id="monthly-load-body"></tbody>
     </table></div>
-    <!-- R9.14: "Lavoro accettato" qui e' la stessa ricostruzione dal log
-         del grafico "Andamento del carico" sopra (media del mese, stadi
-         1-4) - non piu' un saldo cumulato approssimato, nessuna nota di
-         differenza necessaria. -->
-    <p class="panel-note">"Lavoro accettato" e' la media di quanti punti erano in carico durante quel mese (stadi 1-4, ricostruita dallo storico) - non un saldo cumulato.</p>
+    <!-- R9.14/R10.3: "Lavoro accettato" qui e' la stessa ricostruzione
+         dal log del grafico "Andamento del carico" sopra (media del
+         mese, stadi 1-4) - non piu' un saldo cumulato approssimato,
+         nessuna nota di differenza necessaria; stesso motore
+         (stockSeriesFromIndex_) di quel grafico. -->
+    <p class="panel-note">"Nuovi lavori"/"Nuovi punti" sono quanti lavori/punti sono entrati in quel mese (un conteggio per periodo). "Lavoro accettato" e' invece una media: quanti punti c'erano in carico durante quel mese (stadi 1-4, ricostruita dallo storico delle colonne) - non un totale del mese ne' un saldo cumulato, per questo non e' un numero intero.</p>
   </article>
 
   <article class="panel wide scenarios-panel">

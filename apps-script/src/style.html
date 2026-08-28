@@ -1226,6 +1226,15 @@
     margin: 0;
   }
 
+  /* R10.5 (terzo giro di correzioni, 2026-08-28): due <dl> consecutivi
+     nello stesso pannello (es. "Rilavorazione": system-load-metrics +
+     system-rework-metrics) restavano attaccati - il gap della grid vale
+     solo DENTRO un <dl>, margin:0 non lascia spazio tra due <dl> sibling
+     successivi. Stessa spaziatura verticale del gap interno (8px). */
+  dl + dl {
+    margin-top: 8px;
+  }
+
   /* R9.8: sottototali indentati/raggruppati visivamente sotto la riga
      padre (es. le tre attese per tipo sotto "Lavoro in attesa"). */
   dt.dl-subitem {

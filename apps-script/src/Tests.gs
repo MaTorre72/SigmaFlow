@@ -325,7 +325,6 @@ function runAllTests() {
     testBuildSystemStateReworkCountsOnlyReentriesWithinWindow,
     testReworkByCauseSplitsControllableFromExternal,
     testBuildSystemStateExposesReworkByCause,
-    testWaitTimeMonthBucketsAttributesToCloseMonth,
     testCurrentlyBlockedListsOnlyWaitingJobsOrderedByElapsedDays,
     testPercentileHelperNearestRank,
     testDelayProfileExposesP80DaysWhenEnoughSamples,
@@ -2597,24 +2596,6 @@ function testBuildSystemStateExposesReworkByCause() {
 
   assertTrue_(Boolean(state.reworkMetrics.by_cause), 'reworkMetrics.by_cause presente in systemState');
   assertEquals_(1, state.reworkMetrics.by_cause.total, 'un rientro per causa cliente osservato nella finestra');
-}
-
-// R5 (DESIGN_R_S.md §3.5): trend mensile dell'attesa - ogni visita
-// chiusa attribuisce la sua attesa cumulata al mese in cui si e' chiusa
-// (consegna_ts o, in mancanza, rientro_ts).
-function testWaitTimeMonthBucketsAttributesToCloseMonth() {
-  var now = new Date(2026, 7, 27); // 27/08/2026, coerente con le date del progetto
-  var visite = [
-    { job_id: 'JOB-TREND-1', numero_visita: 1, consegna_ts: '2026-07-15T09:00:00+02:00', t_cliente_d: 3, t_ente_d: 0, t_interno_d: 0 },
-    { job_id: 'JOB-TREND-2', numero_visita: 2, rientro_ts: '2026-08-10T09:00:00+02:00', t_cliente_d: 0, t_ente_d: 5, t_interno_d: 0 }
-  ];
-
-  var buckets = waitTimeMonthBuckets_(visite, now, 6);
-  var july = buckets.filter(function(b) { return b.key === '2026-07'; })[0];
-  var august = buckets.filter(function(b) { return b.key === '2026-08'; })[0];
-
-  assertEquals_(3, july.client_days, 'la visita chiusa a luglio (consegna_ts) attribuisce la sua attesa cliente a luglio');
-  assertEquals_(5, august.authority_days, 'la visita chiusa ad agosto (rientro_ts, nessuna consegna_ts) attribuisce la sua attesa enti ad agosto');
 }
 
 // R5: elenco "Fermi ora" - solo job con status_since_ts in una colonna

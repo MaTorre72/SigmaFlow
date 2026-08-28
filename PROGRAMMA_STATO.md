@@ -1,6 +1,123 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — terzo giro di correzioni dashboard: verifica R9 residuo + R10 (2026-08-28, sessione 15)
+
+Eseguito il prompt "Fase R/S, terzo giro di correzioni dashboard
+(verifica R9 residuo + R10 nuovo)", scritto da una sessione senza
+accesso al repository sulla base degli screenshot del 28/08.
+
+**Parte 0 (verifica preliminare)**: confermato su questo stesso file
+(voce sessione 14 e sessione 13, sopra) che R9.14/R9.16/S6 risultano
+chiusi, pushati su TEST e confermati funzionanti da Marco - via libera
+a procedere con la Parte 2 (R10) senza fermarsi.
+
+**Parte 1 (residuo)**:
+- **R9.1, parte residua** (cifre decimali non uniformi per
+  tassi/rapporti): nuova `rateValue()` (client.html) - 2 decimali fissi
+  sempre, a differenza di `metricValue()`/`estimableValue()` che non
+  completano con zeri finali. Applicata a: tutte le righe
+  "passaggi/settimana" (via `perWeekValue`, ora basata su `rateValue`),
+  "Rilavorazioni medie quando capitano", "Passaggi medi per lavoro",
+  "Rilavorazioni medie per passaggio (r)", "Passaggi attesi per lavoro
+  (E[K])", Cv² (entrambe le occorrenze), "Fattore di congestione",
+  "Fattore di variabilita'", "Quota di passaggi rilavorati (alpha)".
+  Verificato su Browser pane: "Carico da lavoro nuovo" ora "2,80" (era
+  "2,8"), "Rilavorazioni medie quando capitano" ora "1,00" (era "1").
+- **R9.6, parte residua** ("Margine residuo" isolato): non rimosso
+  (resta un dettaglio complementare in unita' diverse, legittimo per il
+  principio "Livello 2" gia' in uso) - aggiunto un rimando esplicito
+  nella nota di pannello "Capacita'": *""Margine residuo" e' lo stesso
+  sovraccarico mostrato sopra come percentuale (pannello
+  "Rilavorazione"), qui in passaggi/settimana."*
+- **R6.2, mai chiuso** (campo "mu" incoerente): la lettura statica del
+  codice non ha trovato una divergenza evidente tra la formula di `mu`
+  (calculateMetrics_) e quella di "Capacita' effettiva" (buildSystemState_)
+  - entrambe usano la stessa popolazione filtrata (stessa finestra,
+  stesso `since`, incluso l'archivio). **Non risolvibile da qui senza
+  eseguire codice su dati reali** - aggiunta una diagnostica di sola
+  lettura, `checkMuConsistencyOnTest()` (Model.gs), che ricalcola `mu`
+  in due modi indipendenti (stessa formula/popolazione ricostruita a
+  mano, e il mu implicito dividendo la capacita' mostrata per
+  team_size) e li confronta col valore effettivamente esposto. **Da
+  eseguire da Marco** dall'editor Apps Script (Model.gs) per chiudere
+  il punto - se `displayed_matches_recomputed`/`displayed_matches_capacity_implied`
+  sono entrambi `true`, l'incoerenza vista nell'audit del 28/08 non e'
+  piu' presente (dato del momento, non un bug di calcolo); se `false`,
+  i campi della risposta (`recomputed_mu_same_formula`,
+  `capacity_implied_mu`, `recomputed_completed_samples`) dicono dove
+  guardare.
+- **Verifica dati "Lavori completati" = "Passaggi completati" = 12**:
+  confermato via lettura del codice (non solo per costruzione, gia'
+  verificato su dati demo in una sessione precedente con risultati
+  diversi, 8/9/5) che le due righe usano popolazioni distinte -
+  `flow.completed_initiatives` (job distinti) e `flow.completed_passages`
+  (ogni visita) derivano dallo stesso insieme filtrato ma con
+  deduplicazione diversa. La coincidenza 12=12 e' quindi possibile (e
+  presente sui dati reali odierni) quando nessun job ha piu' di una
+  visita consegnata nella finestra - non e' un sintomo di bug, nessuna
+  modifica necessaria.
+- **Nuovo: legenda colori "Fermi in questo momento"**: aggiunta una
+  nota dinamica (non un testo statico con soglie inventate) che mostra
+  i percentili REALI usati per colorare le righe (`system.cycleTimeBands`,
+  gia' calcolato server-side) - "Colore in base al confronto con lo
+  storico dei tempi di ciclo: verde fino a N g (mediana), giallo fino a
+  M g (85° percentile), rosso oltre."
+
+**Parte 2 (R10)**:
+- **R10.1**: pannello/grafico "Andamento mensile dell'attesa" rimosso
+  dalla dashboard. Verificato che `waitTimeMonthBuckets_` non serviva a
+  nessun altro pannello - rimossa anche la funzione (Model.gs), il
+  campo `waitTimeTrend` in `buildSystemState_`, `drawWaitTimeTrend_`
+  (client.html) e il test dedicato (nessun codice morto lasciato).
+- **R10.2**: nome confermato da Marco: **"Nuovi lavori"/"Nuovi punti"**
+  per il flusso di lavoro in ingresso nel periodo (era "Aggiunti"/
+  "Punti aggiunti"), distinto da "Lavoro accettato" (lo stock).
+  Applicato in tutti i punti dove compariva "Aggiunti" per lo stesso
+  concetto: card Vista Rapida ("Nuovi punti"), tabella "Flusso e
+  carico" (riga "Nuovi (periodo)"), tabella "Carico mensile" (header
+  "Nuovi lavori"/"Nuovi punti"), legenda e didascalia del grafico
+  "Andamento del carico" ("Nuovi - asse destro"). Verificata l'assenza
+  di "Aggiunti"/"Punti aggiunti" residuo in `dashboard.html` (ricerca
+  testuale, zero risultati rivolti all'utente).
+- **R10.3**: colonna "Lavoro accettato" in "Carico mensile" ora con
+  virgola decimale (passava per `valueOrDash` senza `metricValue`,
+  stesso tipo di bug di R9.1 riapparso in un punto nuovo - corretto).
+  Nota sotto la tabella riscritta per spiegare sia la differenza con
+  "Nuovi lavori"/"Nuovi punti" (conteggio per periodo) sia l'origine di
+  "Lavoro accettato" (media ricostruita dallo storico colonne, non un
+  totale/saldo). Confermato che usa gia' lo stesso motore
+  (`stockSeriesFromIndex_`) del grafico "Andamento del carico" - stesso
+  lavoro gia' fatto in R9.14, nessuna doppia implementazione da
+  allineare.
+- **R10.4**: soglie BASSA/MEDIA/ALTA di Cv² rese esplicite in pagina,
+  accanto al valore - sono le soglie gia' presenti nel codice
+  (`variabilityInterpretation_`, Model.gs: BASSA sotto 0,5, MEDIA
+  0,5-1, ALTA da 1 in su, classificazione standard di teoria delle code
+  per la variabilita' del tempo di servizio) - non inventate per questo
+  giro, solo rese visibili. **Da confermare da Marco** che siano
+  effettivamente quelle da pubblicare (o un riferimento diverso dalla
+  dispensa FSC).
+- **R10.5**: spaziatura mancante tra due `<dl>` consecutivi nello
+  stesso pannello (bug di CSS: il gap della grid vale solo dentro un
+  `<dl>`, non tra due `<dl>` sibling) - aggiunta regola `dl + dl {
+  margin-top: 8px }` (style.html), stessa spaziatura del gap interno.
+
+**Verifica**: 210/210 test Node (uno in meno di prima: rimosso insieme
+a R10.1), `client.html` senza errori di sintassi, push su TEST
+verificato (16/16 file identici), collaudo visivo completo su Browser
+pane con dati demo (60 job) - nessun errore in console, tutte le
+modifiche confermate visivamente (decimali, legenda, rimozione
+grafico, rename, spaziatura).
+
+**Non ancora chiuso, richiede l'intervento di Marco**:
+- R6.2 (mu): eseguire `checkMuConsistencyOnTest()` dall'editor Apps
+  Script (Model.gs) e riportare il risultato.
+- R10.4: confermare le soglie Cv² pubblicate (0,5 e 1) o indicarne di
+  diverse da una fonte esplicita.
+
+---
+
 ## Fase R e S — "Errore sconosciuto" su TEST dopo il giro precedente: risolto e confermato (2026-08-28, sessione 14)
 
 Marco ha segnalato un crash della sessione precedente seguito da

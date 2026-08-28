@@ -268,10 +268,12 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // buildJobIntervalsIndex_ (Model.gs) per il perche'.
   var jobIntervalsIndex = buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now);
   var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs), jobIntervalsIndex);
-  // R5: trend mensile dell'attesa (su tutto allVisite, finestra fissa a 6
-  // mesi come "Carico mensile" - non windowDays) e stato attuale dei job
-  // fermi ora (su jobs attivi, nessun tetto di finestra).
-  var waitTimeTrend = waitTimeMonthBuckets_(allVisite, now, 6);
+  // R5: stato attuale dei job fermi ora (su jobs attivi, nessun tetto
+  // di finestra). Il grafico "Andamento mensile dell'attesa" (che
+  // usava waitTimeMonthBuckets_ su allVisite, finestra fissa a 6 mesi)
+  // e' stato rimosso su richiesta di Marco (R10.1, terzo giro di
+  // correzioni) - waitTimeMonthBuckets_ non serviva a nient'altro,
+  // rimossa insieme alla visualizzazione (nessun codice morto).
   var currentlyBlocked = currentlyBlocked_(jobs, columnMap, now);
   // S3 (fasce sulla lista "Fermi ora"): percentili storici del tempo di
   // ciclo su tutte le visite chiuse disponibili - non dipende piu' dallo
@@ -393,7 +395,6 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       internal: waitTime.internal,
       summary: waitTime.summary
     },
-    waitTimeTrend: waitTimeTrend,
     currentlyBlocked: currentlyBlocked,
     cycleTimeBands: cycleTimeBands,
     latentBacklogMetrics: {
@@ -1017,37 +1018,6 @@ function percentile_(sortedAscendingValues, p) {
   return sortedAscendingValues[Math.max(0, index)];
 }
 
-// R5: trend dell'attesa a grana mensile - ogni visita chiusa (con
-// consegna_ts o rientro_ts) attribuisce la sua attesa cumulata
-// (t_cliente_d/t_ente_d/t_interno_d) al mese in cui si e' chiusa.
-// A differenza del pannello "stato attuale" (sotto), qui NON entra
-// l'attesa in corso: e' un trend su eventi conclusi, per vedere se
-// una leva di controllo sta funzionando nel tempo (mesi, non giorni).
-function waitTimeMonthBuckets_(visite, now, count) {
-  var first = new Date(now.getFullYear(), now.getMonth() - count + 1, 1);
-  var buckets = [];
-  var byKey = {};
-  for (var i = 0; i < count; i++) {
-    var date = new Date(first.getFullYear(), first.getMonth() + i, 1);
-    var key = Utilities.formatDate(date, SIGMAFLOW.TZ, 'yyyy-MM');
-    var bucket = { key: key, label: Utilities.formatDate(date, SIGMAFLOW.TZ, 'MM/yyyy'), client_days: 0, authority_days: 0, internal_days: 0 };
-    buckets.push(bucket);
-    byKey[key] = bucket;
-  }
-  visite.forEach(function(visit) {
-    var closeTs = visit.consegna_ts || visit.rientro_ts;
-    if (!closeTs) { return; }
-    var key = Utilities.formatDate(new Date(closeTs), SIGMAFLOW.TZ, 'yyyy-MM');
-    if (!byKey[key]) { return; }
-    byKey[key].client_days += Number(visit.t_cliente_d || 0);
-    byKey[key].authority_days += Number(visit.t_ente_d || 0);
-    byKey[key].internal_days += Number(visit.t_interno_d || 0);
-  });
-  return buckets.map(function(b) {
-    return { key: b.key, label: b.label, client_days: round_(b.client_days), authority_days: round_(b.authority_days), internal_days: round_(b.internal_days) };
-  });
-}
-
 // R5: elenco dei job attualmente fermi in una colonna di attesa,
 // ordinato per giorni trascorsi decrescenti - lo "stato attuale" che
 // serve per sollecitare, distinto dal trend mensile sopra (che copre
@@ -1630,6 +1600,65 @@ function checkS4WipCoverageOnTest() {
 function checkS4WipCoverageSuProd() {
   return withEnvironment_('prod', function() {
     var result = checkS4WipCoverage_();
+    Logger.log(JSON.stringify(result));
+    return result;
+  }, false);
+}
+
+// R6.2 (terzo giro di correzioni, 2026-08-28): l'audit del 28/08 aveva
+// isolato "Tasso di servizio per persona (mu)" come l'unico valore
+// incoerente con gli altri cinque della stessa pagina (E[S]/capacita'/
+// rho/carico effettivo/margine) - se si ricalcola rho con mu=0,14 non
+// torna il 570% mostrato, prova che il resto della pagina non usa gia'
+// 0,14. Diagnostica di sola lettura, nessuna scrittura: ricalcola mu
+// in due modi indipendenti (la stessa formula/popolazione di
+// calculateMetrics_, e il mu implicito nella capacita' effettiva
+// mostrata gia' divisa per team_size) e li confronta col valore
+// effettivamente esposto (metrics.mu) - se tutti e tre coincidono,
+// l'incoerenza vista nell'audit non e' piu' presente (o era un dato
+// del momento, non un bug di calcolo); se calculated_mu/displayed_mu
+// non coincidono, e' un bug reale nel campo "mu" specificamente.
+function checkMuConsistency_() {
+  var config = readConfig_();
+  var jobs = loadJobsWithVisitSummary_();
+  var archivedJobs = loadArchivedJobsWithVisitSummary_();
+  var visite = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+  var visiteArchivio = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+  var now = new Date();
+  var metrics = calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchivio);
+
+  // Stessa formula/popolazione di calculateMetrics_ (righe 54-67),
+  // ricalcolata qui in modo indipendente per il confronto.
+  var windowDays = Math.max(1, Number(config.observation_window_days || 30));
+  var since = new Date(now.getTime() - windowDays * 864e5);
+  var allVisite = visite.concat(visiteArchivio || []);
+  var completed = allVisite.filter(function(v) { return v.consegna_ts && new Date(v.consegna_ts) >= since; });
+  var completedSamples = completed.filter(function(v) { return visitServiceTimeDays_(v) > 0; });
+  var serviceTimes = completedSamples.map(visitServiceTimeDays_);
+  var stats = sampleStats_(serviceTimes);
+  var teamSize = Math.max(1, Number(config.team_size || 1));
+  var recomputedMu = stats.mean > 0 ? round_(1 / stats.mean) : null;
+  var effectiveCapacity = metrics.systemState.capacityMetrics.effective_per_day;
+  var capacityImpliedMu = effectiveCapacity !== null ? round_(effectiveCapacity / teamSize) : null;
+
+  return {
+    displayed_mu: metrics.mu,
+    recomputed_mu_same_formula: recomputedMu,
+    capacity_implied_mu: capacityImpliedMu,
+    displayed_matches_recomputed: metrics.mu === recomputedMu,
+    displayed_matches_capacity_implied: metrics.mu === capacityImpliedMu,
+    recomputed_stats_mean_days: round_(stats.mean),
+    recomputed_completed_samples: completedSamples.length,
+    team_size: teamSize,
+    effective_capacity_per_day: effectiveCapacity,
+    window_days: windowDays,
+    since: since.toISOString()
+  };
+}
+
+function checkMuConsistencyOnTest() {
+  return withEnvironment_('test', function() {
+    var result = checkMuConsistency_();
     Logger.log(JSON.stringify(result));
     return result;
   }, false);
