@@ -135,18 +135,19 @@ settimane minime) — entrambi mostrano correttamente "Dato non ancora
 sufficiente", comportamento atteso su questo dataset, verificato non
 essere un errore silenzioso.
 
-**Bloccante, non risolto da questa sessione**: `push-and-verify.sh`
-fallisce di nuovo con `invalid_grant`/`invalid_rapt` — il token OAuth
-di `clasp` (gia' risolto una volta in questa fase con `npx clasp
-login`) e' scaduto un'altra volta. Stesso limite di prima, richiede un
-nuovo re-login interattivo di Marco. **Push su TEST e verifica
-`clasp pull` isolata restano da fare** non appena il login e' rinnovato.
+**Bloccante incontrato e risolto da Marco**: `push-and-verify.sh` aveva
+fallito con `invalid_grant`/`invalid_rapt` (token OAuth di `clasp`
+scaduto una seconda volta in questa fase). Marco ha rieseguito `npx
+clasp login`. Dopo il re-login: **push su TEST eseguito e verificato —
+16/16 file identici** (`push-and-verify.sh`, `clasp pull` isolato +
+diff).
 
-**Prossimo passo**: 1) Marco esegue `npx clasp login`, poi si riprende
-per completare push-and-verify; 2) in attesa di indicazioni di Marco
-per **S4** (WIP attivo ricostruito dal log — lavoro vero, non ancora
-iniziato). Nessuna
-PR aperta, nessun merge su `main`.
+**Fase R/S — correzioni R5/R6/S2-S3 complete.** Codice scritto e
+collaudato (194/194 test Node + collaudo Browser pane end-to-end), push
+su TEST verificato. **Prossimo passo**: in attesa di indicazioni di
+Marco per **S4** (WIP attivo ricostruito dal log — lavoro vero, non
+ancora iniziato). Nessuna PR aperta, nessun merge su `main` — branch
+`feat/fase-r-s-metriche-2026-08-27` pronto per la review di Marco.
 
 ---
 
