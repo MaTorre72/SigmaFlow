@@ -209,11 +209,17 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // fermo ora in quel tipo di attesa) - waitStats_ ne deriva totale,
   // numero di occorrenze, media, minimo, massimo.
   // R5 (DESIGN_R_S.md, §3.5): questo campione resta SOLO sulle attese
-  // gia' concluse dentro la finestra ('observed') - lo "stato attuale"
-  // (job ancora fermi ora, senza tetto di finestra) e' ora una lista a
-  // se' (currentlyBlocked_, sotto), non piu' mescolato qui.
+  // gia' concluse - lo "stato attuale" (job ancora fermi ora, senza
+  // tetto di finestra) e' ora una lista a se' (currentlyBlocked_,
+  // sotto), non piu' mescolato qui.
+  // R5, correzione aggiuntiva (addendum di collaudo, 2026-08-28): i
+  // campioni vengono da TUTTO lo storico (allVisite), non da 'observed'
+  // (finestra di osservazione) - lo scopo qui e' il collo di bottiglia
+  // storico ("Dove si blocca il lavoro"), non un tasso sulla finestra
+  // (quello resta lambda/mu/rho/capacita', invariati, ancora su
+  // 'observed' per il loro scopo diverso).
   var waitSamplesByField = { t_cliente_d: [], t_ente_d: [], t_interno_d: [] };
-  observed.forEach(function(visit) {
+  allVisite.forEach(function(visit) {
     Object.keys(waitSamplesByField).forEach(function(field) {
       var value = Number(visit[field] || 0);
       if (value > 0) { waitSamplesByField[field].push(value); }
@@ -293,8 +299,11 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // S4: wip_medio di ogni settimana e' ora il WIP ATTIVO ricostruito dal
   // log dei passaggi di colonna (activeWipWeeklyFromLog_), non piu' la
   // stima cumulata "entrato meno completato" (che includeva il backlog).
-  var activeWipWeekly = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, 26);
-  var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, 26, activeWipWeekly.weekly);
+  // S5: finestra configurabile (default 26), non piu' un letterale
+  // ripetuto in tre punti.
+  var wipTrendWeeks = Number(config.wip_trend_weeks || 26);
+  var activeWipWeekly = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, wipTrendWeeks);
+  var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, wipTrendWeeks, activeWipWeekly.weekly);
   var wipBands = wipBands_(flowWeeklyBuckets, 20, 3);
 
   // Chiesto da Marco (2026-08-20): mostrare "dove e' possibile" ogni
@@ -426,9 +435,14 @@ function assigneeOrderFromConfig_(config, jobs) {
 // (pointsByColumn_, gia' non filtrata a solo openJobs prima di N6).
 function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrder) {
   var allJobs = jobs.concat(archivedJobs || []);
-  var openJobs = jobs.filter(function(job) {
-    var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
-    return column.role !== 'done';
+  // R7: "Aperti (ora)" mescolava Pipeline commerciale (stadio 0,
+  // preventivi non ancora acquisiti) con Lavoro impegnato (stadi 1-4) -
+  // eliminato come numero unico, sostituito da due popolazioni distinte
+  // che non vanno mai sommate in un solo totale.
+  var pipelineJobs = jobs.filter(function(job) { return workStage_(job, columnMap) === 0; });
+  var committedJobs = jobs.filter(function(job) {
+    var stage = workStage_(job, columnMap);
+    return stage >= 1 && stage <= 4;
   });
   var completed = allJobs.filter(function(job) {
     return job.done_ts && new Date(job.done_ts) >= since;
@@ -439,10 +453,12 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
   var months = monthBuckets_(allJobs, now, 6);
 
   return {
-    open_points: sumJobPoints_(openJobs),
+    pipeline_points: sumJobPoints_(pipelineJobs),
+    pipeline_cards: pipelineJobs.length,
+    committed_points: sumJobPoints_(committedJobs),
+    committed_cards: committedJobs.length,
     completed_points: sumJobPoints_(completed),
     added_points: sumJobPoints_(added),
-    open_cards: openJobs.length,
     // Consolidamento dashboard (segnalato da Marco, 2026-08-20): il
     // pannello "Flusso e carico" mostra conteggio E punti nella stessa
     // tabella, invece di leggerli da due fonti separate — servono i
@@ -450,9 +466,12 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
     completed_cards: completed.length,
     added_cards: added.length,
     timeline: months,
-    by_size: pointsBreakdown_(openJobs, 'size_class', ['XS', 'S', 'M', 'L', 'XL']),
+    // R7: le distribuzioni per taglia/assegnatario restano sul Lavoro
+    // impegnato (stadi 1-4) - un preventivo non ancora acquisito non e'
+    // ancora lavoro da distribuire nel team.
+    by_size: pointsBreakdown_(committedJobs, 'size_class', ['XS', 'S', 'M', 'L', 'XL']),
     by_column: pointsByColumn_(allJobs, columnMap),
-    by_assignee: pointsBreakdown_(openJobs, 'assignee', assigneeOrder)
+    by_assignee: pointsBreakdown_(committedJobs, 'assignee', assigneeOrder)
   };
 }
 
@@ -598,9 +617,41 @@ function columnsFromConfig_(config) {
   return normalizeColumns_(config);
 }
 
+// R7 (DESIGN_R_S_addendum_collaudo.md, sez. R7): unica fonte di verita'
+// per lo stadio di lavoro (0-6), mappata 1:1 sul 'role' gia' esistente
+// in columns_json (nessun campo nuovo) piu' 'invoiced' per distinguere
+// stadio 5 da 6. Riusata ovunque serve una di queste popolazioni
+// (pointsStatistics_, currentWorkload_) invece di ricalcolare filtri
+// leggermente diversi in punti diversi.
+//   0 Preventivo    - role 'neutral'
+//   1 Backlog       - role 'backlog'
+//   2 Preparazione  - role 'prep'
+//   3 Lavorazione   - role 'wip' (WIP in senso stretto)
+//   4 Attesa        - role 'stand_by'
+//   5 Da fatturare  - role 'done', invoiced falso
+//   6 Chiuso        - role 'done', invoiced vero
+function workStage_(job, columnMap) {
+  var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
+  switch (column.role) {
+    case 'backlog': return 1;
+    case 'prep': return 2;
+    case 'wip': return 3;
+    case 'stand_by': return 4;
+    case 'done': return coerceBoolean_(job.invoiced) ? 6 : 5;
+    default: return 0;
+  }
+}
+
 // Chiesto da Marco (2026-08-20): anche il lavoro presente in punti, non
 // solo in conteggio card - stesso ciclo, un secondo accumulatore in
 // parallelo (_points per ogni categoria _count esistente).
+// R7: 'ready'/'preparing'/'in_progress'/'blocked' (stadi 1-4, "Lavoro
+// impegnato") e 'can_return' (stadio 5, "Da fatturare") restano campi
+// distinti dello stesso oggetto (nessuna somma li mescola qui) - la
+// separazione in due card, mai sommate, e' un vincolo di
+// presentazione lato client (dashboard.html/client.html), non di
+// questa funzione. Classificazione centralizzata via workStage_,
+// riusata anche da pointsStatistics_.
 function currentWorkload_(jobs, columnMap) {
   var result = {
     ready: 0, ready_points: 0,
@@ -613,13 +664,13 @@ function currentWorkload_(jobs, columnMap) {
     waiting_internal: 0, waiting_internal_points: 0
   };
   jobs.forEach(function(job) {
-    var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
+    var stage = workStage_(job, columnMap);
     var points = jobPoints_(job);
-    if (column.role === 'backlog') { result.ready++; result.ready_points += points; }
-    if (column.role === 'prep') { result.preparing++; result.preparing_points += points; }
-    if (column.role === 'wip') { result.in_progress++; result.in_progress_points += points; }
-    if (column.role === 'stand_by') { result.blocked++; result.blocked_points += points; }
-    if (column.role === 'done' && !coerceBoolean_(job.invoiced)) { result.can_return++; result.can_return_points += points; }
+    if (stage === 1) { result.ready++; result.ready_points += points; }
+    if (stage === 2) { result.preparing++; result.preparing_points += points; }
+    if (stage === 3) { result.in_progress++; result.in_progress_points += points; }
+    if (stage === 4) { result.blocked++; result.blocked_points += points; }
+    if (stage === 5) { result.can_return++; result.can_return_points += points; }
     if (job.status === 'wait_client') { result.waiting_client++; result.waiting_client_points += points; }
     if (job.status === 'wait_authority') { result.waiting_authority++; result.waiting_authority_points += points; }
     if (job.status === 'wait_internal') { result.waiting_internal++; result.waiting_internal_points += points; }
@@ -1007,13 +1058,25 @@ function flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, wee
     buckets.push(bucket);
     byKey[key] = bucket;
   }
-  jobs.concat(archivedJobs || []).forEach(function(job) {
-    if (job.incarico_chiuso_ts) {
-      var dk = Utilities.formatDate(new Date(job.incarico_chiuso_ts), SIGMAFLOW.TZ, "yyyy-'W'ww");
-      if (byKey[dk]) { byKey[dk].completed_points += jobPoints_(job); }
-    }
-  });
+  // S2/S3, correzione aggiuntiva (addendum di collaudo, 2026-08-28):
+  // throughput dal completamento TECNICO (consegna_ts sulla visita),
+  // non dalla chiusura amministrativa (job.incarico_chiuso_ts, scritta
+  // solo quando si spunta "Chiuso"/invoiced - verificato sui dati
+  // reali: un solo job su 54 in tutta la storia l'ha mai valorizzato,
+  // throughput quasi sempre a zero non per mancanza di consegne ma per
+  // l'evento sbagliato). Bucketing per settimana sulle VISITE chiuse,
+  // stessa nozione di "completato" di flow.completed_passages (R6.6):
+  // solo consegna_ts, non rientro_ts (un rientro non e' un
+  // completamento).
+  var jobsById = indexBy_(jobs.concat(archivedJobs || []), 'job_id');
   visite.concat(visiteArchivio || []).forEach(function(visit) {
+    if (visit.consegna_ts) {
+      var job = jobsById[visit.job_id];
+      if (job) {
+        var dk = Utilities.formatDate(new Date(visit.consegna_ts), SIGMAFLOW.TZ, "yyyy-'W'ww");
+        if (byKey[dk]) { byKey[dk].completed_points += jobPoints_(job); }
+      }
+    }
     var closeTs = visit.consegna_ts || visit.rientro_ts;
     if (!closeTs) { return; }
     var key = Utilities.formatDate(new Date(closeTs), SIGMAFLOW.TZ, "yyyy-'W'ww");
@@ -1240,7 +1303,7 @@ function checkS4WipCoverage_() {
   var columnMap = {};
   columnsFromConfig_(config).forEach(function(column) { columnMap[column.id] = column; });
   var now = new Date();
-  var weeksCount = 26;
+  var weeksCount = Number(config.wip_trend_weeks || 26); // S5
 
   var livePanelPoints = 0;
   jobs.forEach(function(job) {

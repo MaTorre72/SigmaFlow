@@ -119,6 +119,12 @@ var SIGMAFLOW = {
   DEFAULT_CONFIG: {
     team_size: 4,
     observation_window_days: 30,
+    // S5 (DESIGN_R_S_addendum_collaudo.md, sez. S5): finestra del
+    // grafico WIP/tempo di ciclo, prima un letterale fisso ripetuto in
+    // tre punti - stesso principio gia' in uso per
+    // observation_window_days. Default 26, nessun cambio di
+    // comportamento finche' non modificato a mano.
+    wip_trend_weeks: 26,
     archiviazione_giorni_default: 30,
     backup_retention_giorni: 14,
     theoretical_capacity_per_day: '',

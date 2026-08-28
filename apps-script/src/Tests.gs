@@ -311,11 +311,15 @@ function runAllTests() {
     testBuildSystemStateExposesStabilityMetrics,
     testBuildSystemStateStabilityMetricsNullWhenInsufficientData,
     testBuildSystemStateSumsWaitTimeByType,
+    testBuildSystemStateWaitStatsIncludeVisitsOutsideObservationWindow,
     testBuildSystemStateSeparatesOngoingWaitIntoCurrentlyBlocked,
     testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn,
     testWaitSummaryRowIsWeightedByOccurrencesNotAverageOfAverages,
     testWaitSummaryRowExcludesTypesWithNoOccurrencesFromMinMax,
     testBuildSystemStateExposesWaitTimeSummaryRow,
+    testWorkStageClassifiesAllSevenStages,
+    testPointsStatisticsSeparatesPipelineFromCommittedWork,
+    testCurrentWorkloadKeepsCommittedWorkSeparateFromToInvoice,
     testInitiativeGroupsCountsOnlyObservedReentriesNotHistoryPosition,
     testBuildSystemStateReworkCountsOnlyReentriesWithinWindow,
     testReworkByCauseSplitsControllableFromExternal,
@@ -325,6 +329,8 @@ function runAllTests() {
     testPercentileHelperNearestRank,
     testDelayProfileExposesP80DaysWhenEnoughSamples,
     testFlowWeeklyBucketsCopiesActiveWipAndKeepsThroughputAndCycleTimeUnchanged,
+    testFlowWeeklyBucketsThroughputFollowsConsegnaTsNotIncaricoChiusoTs,
+    testFlowWeeklyBucketsThroughputExcludesReentriesWithoutConsegna,
     testActiveWipWeeklyFromLogTracksBacklogActiveWaitAndClosedIntervals,
     testActiveWipWeeklyFromLogExcludesJobsWithoutParseableLog,
     testBuildSystemStateExposesWipCoverageAndUsesReconstructedWip,
@@ -333,6 +339,7 @@ function runAllTests() {
     testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending,
     testWipBandsExcludesWeeksWithoutCycleTimeSamples,
     testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands,
+    testBuildSystemStateUsesWipTrendWeeksFromConfig,
     testCurrentlyBlockedGetsColorBandsWhenEnoughCycleTimeSamples,
     testCurrentlyBlockedHasNoBandsWhenNotEnoughCycleTimeSamples,
     testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
@@ -1971,7 +1978,7 @@ function testGetMetricsReturnsEmptyArchivedDataWhenSheetsMissing() {
 
     var result = getMetrics();
     assertTrue_(result.success, 'getMetrics non deve lanciare se i fogli archivio non esistono');
-    assertEquals_(8, result.data.systemState.pointsMetrics.open_points, 'i punti aperti restano leggibili anche senza i fogli archivio');
+    assertEquals_(8, result.data.systemState.pointsMetrics.committed_points, 'i punti del lavoro impegnato restano leggibili anche senza i fogli archivio');
   });
 }
 
@@ -2322,6 +2329,39 @@ function testBuildSystemStateSumsWaitTimeByType() {
   assertEquals_(9, state.waitTimeMetrics.summary.total_days, 'totale = somma dei tre tipi');
 }
 
+// R5, correzione aggiuntiva (addendum di collaudo, 2026-08-28): "Dove
+// si blocca il lavoro" deve leggere da TUTTO lo storico (allVisite),
+// non dalla finestra di osservazione (90gg di default) - un'attesa
+// lunga conclusa mesi fa e' un segnale di governo reale, non va persa
+// perche' fuori dalla finestra "flusso". Visita con apertura_ts molto
+// vecchia (fuori da qualunque finestra ragionevole) ma con attesa
+// valorizzata: deve comunque comparire nella tabella.
+function testBuildSystemStateWaitStatsIncludeVisitsOutsideObservationWindow() {
+  var now = new Date();
+  var longAgo = testIsoDaysAgo_(now, 400); // ben oltre la finestra di 90/30 giorni
+  var jobs = [{ job_id: 'JOB-OLD-WAIT', status: 'wip', arrival_ts: longAgo, visit_number: 1 }];
+  var visite = [{
+    job_id: 'JOB-OLD-WAIT',
+    numero_visita: 1,
+    apertura_ts: longAgo,
+    consegna_ts: longAgo,
+    t_cliente_d: 12,
+    t_ente_d: 0,
+    t_interno_d: 0
+  }];
+  var config = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, { observation_window_days: 30 });
+
+  var state = buildSystemState_(jobs, visite, config, now);
+
+  assertEquals_(12, state.waitTimeMetrics.client.total_days, 'l\'attesa cliente di una visita vecchia di 400 giorni deve comunque essere sommata (storico, non finestra)');
+  assertEquals_(1, state.waitTimeMetrics.client.occurrences, 'deve contare come occorrenza anche se fuori dalla finestra di osservazione');
+  // lambda/mu/rho/capacita' restano sulla finestra - non toccati da
+  // questa correzione: nessuna iniziativa osservata nella finestra di
+  // 30 giorni (la visita e' vecchia di 400 giorni), quindi la
+  // popolazione osservata resta vuota.
+  assertEquals_(0, state.flowMetrics.new_initiatives_observed, 'flusso/finestra restano un concetto diverso, non toccato da questa correzione');
+}
+
 // M5, fix del 2026-08-20 (segnalato da Marco su dati PROD reali: 15
 // card ferme in attesa enti, ma "Attesa enti" mostrava 0,65 giorni in
 // totale). accumulateWaitTime_ scrive t_ente_d solo quando una visita
@@ -2416,6 +2456,63 @@ function testBuildSystemStateExposesWaitTimeSummaryRow() {
 // rientri OSSERVATI nell'insieme ricevuto, non la posizione del caso in
 // tutta la sua storia (numero_visita - 1 dell'ultima visita osservata
 // sovrastimava i rientri quando alcuni erano fuori finestra).
+// R7 (DESIGN_R_S_addendum_collaudo.md, sez. R7): unica funzione di
+// classificazione a 7 stadi (0-6), mappata sul 'role' di columns_json
+// piu' 'invoiced' per distinguere stadio 5 da 6. Un caso per ruolo,
+// piu' i due sotto-casi di 'done'.
+function testWorkStageClassifiesAllSevenStages() {
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var byRole = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { byRole[c.role] = byRole[c.role] || c.id; });
+
+  assertEquals_(0, workStage_({ status: byRole.neutral }, columnMap), 'stadio 0 Preventivo per role neutral');
+  assertEquals_(1, workStage_({ status: byRole.backlog }, columnMap), 'stadio 1 Backlog per role backlog');
+  assertEquals_(2, workStage_({ status: byRole.prep }, columnMap), 'stadio 2 Preparazione per role prep');
+  assertEquals_(3, workStage_({ status: byRole.wip }, columnMap), 'stadio 3 Lavorazione per role wip');
+  assertEquals_(4, workStage_({ status: byRole.stand_by }, columnMap), 'stadio 4 Attesa per role stand_by');
+  assertEquals_(5, workStage_({ status: byRole.done, invoiced: false }, columnMap), 'stadio 5 Da fatturare per role done, invoiced falso');
+  assertEquals_(6, workStage_({ status: byRole.done, invoiced: true }, columnMap), 'stadio 6 Chiuso per role done, invoiced vero');
+}
+
+// R7: "Aperti (ora)" eliminato come numero unico - un preventivo
+// (stadio 0) e un lavoro impegnato (stadio 1-4) devono contribuire a
+// due popolazioni distinte, mai sommate in un solo totale.
+function testPointsStatisticsSeparatesPipelineFromCommittedWork() {
+  var now = new Date();
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var jobs = [
+    { job_id: 'JOB-PREVENTIVO', status: 'notes', size_points: 3, arrival_ts: nowIso_() },
+    { job_id: 'JOB-BACKLOG', status: 'backlog', size_points: 5, arrival_ts: nowIso_() },
+    { job_id: 'JOB-WIP', status: 'wip', size_points: 8, arrival_ts: nowIso_() }
+  ];
+
+  var points = pointsStatistics_(jobs, [], columnMap, testIsoDaysAgo_(now, 30), now, []);
+
+  assertEquals_(3, points.pipeline_points, 'solo il preventivo (stadio 0) conta nella pipeline commerciale');
+  assertEquals_(1, points.pipeline_cards, 'un solo lavoro in pipeline');
+  assertEquals_(13, points.committed_points, 'backlog + wip (stadi 1-4) sommano nel lavoro impegnato, il preventivo no');
+  assertEquals_(2, points.committed_cards, 'due lavori impegnati');
+}
+
+// R7: "Lavoro presente e capacita'" - il lavoro impegnato (stadi 1-4) e
+// il "da fatturare" (stadio 5) restano campi distinti, mai sommati in
+// un unico totale da questa funzione.
+function testCurrentWorkloadKeepsCommittedWorkSeparateFromToInvoice() {
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var jobs = [
+    { job_id: 'JOB-WIP', status: 'wip', size_points: 8 },
+    { job_id: 'JOB-DONE-NOT-INVOICED', status: 'done', invoiced: false, size_points: 13 }
+  ];
+
+  var workload = currentWorkload_(jobs, columnMap);
+
+  assertEquals_(8, workload.in_progress_points, 'il lavoro in corso (stadio 3) resta nel suo campo');
+  assertEquals_(13, workload.can_return_points, 'il da-fatturare (stadio 5) resta in un campo separato');
+}
+
 function testInitiativeGroupsCountsOnlyObservedReentriesNotHistoryPosition() {
   var visite = [
     { job_id: 'JOB-ZNWU-LIKE', numero_visita: 5 },
@@ -2586,6 +2683,69 @@ function testFlowWeeklyBucketsCopiesActiveWipAndKeepsThroughputAndCycleTimeUncha
   assertEquals_(1, week2.n_campioni_ct, 'un solo campione di tempo di ciclo in settimana 2');
 }
 
+// S2/S3, correzione aggiuntiva (addendum di collaudo, 2026-08-28):
+// throughput dal completamento TECNICO (consegna_ts sulla visita), non
+// dalla chiusura amministrativa (job.incarico_chiuso_ts - verificato sui
+// dati reali: quasi mai valorizzato, 1 solo job su 54). Fixture dove i
+// due eventi cadono in settimane DIVERSE, per dimostrare che il
+// throughput segue consegna_ts e non incarico_chiuso_ts.
+function testFlowWeeklyBucketsThroughputFollowsConsegnaTsNotIncaricoChiusoTs() {
+  var now = new Date(2026, 7, 27); // giovedi' 27/08/2026 (settimana ISO 2026-W35)
+  var weekStart = function(daysAgo) { return testIsoDaysAgo_(now, daysAgo); };
+  var jobs = [{
+    job_id: 'JOB-CONSEGNA-VS-CHIUSO',
+    status: 'done',
+    size_points: 8,
+    size_class: 'M',
+    arrival_ts: weekStart(30),
+    // 4 giorni fa = 2026-W34 (verificato con l'algoritmo di settimana
+    // ISO usato dall'harness) - amministrativo, non deve determinare il
+    // throughput.
+    incarico_chiuso_ts: weekStart(4)
+  }];
+  var visite = [{
+    job_id: 'JOB-CONSEGNA-VS-CHIUSO',
+    numero_visita: 1,
+    apertura_ts: weekStart(30),
+    start_ts: weekStart(20),
+    // 15 giorni fa = 2026-W33 (settimana precedente a incarico_chiuso_ts)
+    // - tecnico, deve determinare il throughput.
+    consegna_ts: weekStart(15)
+  }];
+
+  // first = now - 2*7 giorni = 2026-08-13 (2026-W33); bucket[0] = W33, bucket[1] = W34.
+  var buckets = flowWeeklyBuckets_(jobs, [], visite, [], now, 2, [0, 0]);
+
+  assertEquals_(8, buckets[0].throughput_punti_settimana, 'il throughput deve seguire consegna_ts (W33), non incarico_chiuso_ts (W34)');
+  assertEquals_(0, buckets[1].throughput_punti_settimana, 'la settimana di incarico_chiuso_ts (amministrativo) non deve ricevere il throughput');
+}
+
+// Una visita rientrata (rientro_ts, mai consegna_ts) non e' un
+// completamento - non deve contribuire al throughput (coerente con
+// flow.completed_passages/R6.6, che richiede consegna_ts).
+function testFlowWeeklyBucketsThroughputExcludesReentriesWithoutConsegna() {
+  var now = new Date(2026, 7, 27); // giovedi' 27/08/2026
+  var weekStart = function(daysAgo) { return testIsoDaysAgo_(now, daysAgo); };
+  var jobs = [{ job_id: 'JOB-REENTRY-ONLY', status: 'backlog', size_points: 8, arrival_ts: weekStart(20) }];
+  var visite = [{
+    job_id: 'JOB-REENTRY-ONLY',
+    numero_visita: 1,
+    apertura_ts: weekStart(20),
+    start_ts: weekStart(15),
+    // 4 giorni fa = 2026-W34, la stessa (unica) settimana coperta da
+    // weeksCount=1 - dentro la finestra, cosi' il test verifica
+    // davvero "stessa settimana, nessun throughput", non solo un
+    // rientro fuori dalla finestra osservata.
+    rientro_ts: weekStart(4),
+    rientro_da: 'wait_client'
+  }];
+
+  // first = now - 1*7 giorni = 2026-08-20 (2026-W34); unico bucket = W34.
+  var buckets = flowWeeklyBuckets_(jobs, [], visite, [], now, 1, [0]);
+
+  assertEquals_(0, buckets[0].throughput_punti_settimana, 'un rientro senza consegna_ts non e\' un completamento, non deve contare come throughput');
+}
+
 // wipBands_: tre settimane fittizie in due fasce diverse (bandWidth=20) -
 // la fascia con una sola settimana va scartata (minSamples=2), l'ordine
 // di uscita deve essere per WIP crescente.
@@ -2629,6 +2789,23 @@ function testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands() {
   assertTrue_(Array.isArray(state.flowWeeklyBuckets), 'flowWeeklyBuckets deve essere un array');
   assertEquals_(26, state.flowWeeklyBuckets.length, '26 settimane richieste');
   assertTrue_(Array.isArray(state.wipBands), 'wipBands deve essere un array (anche vuoto)');
+}
+
+// S5 (DESIGN_R_S_addendum_collaudo.md, sez. S5): wip_trend_weeks in
+// config sostituisce il letterale 26 - nessun cambio di comportamento
+// col default, ma un valore esplicito in config deve determinare
+// davvero la lunghezza di flowWeeklyBuckets.
+function testBuildSystemStateUsesWipTrendWeeksFromConfig() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-CUSTOM-WEEKS', status: 'wip', arrival_ts: nowIso_(), visit_number: 1 }];
+  var configDefault = SIGMAFLOW.DEFAULT_CONFIG;
+  var configCustom = Object.assign({}, SIGMAFLOW.DEFAULT_CONFIG, { wip_trend_weeks: 8 });
+
+  var stateDefault = buildSystemState_(jobs, [], configDefault, now);
+  var stateCustom = buildSystemState_(jobs, [], configCustom, now);
+
+  assertEquals_(26, stateDefault.flowWeeklyBuckets.length, 'senza wip_trend_weeks in config, il default resta 26 (nessun cambio di comportamento)');
+  assertEquals_(8, stateCustom.flowWeeklyBuckets.length, 'con wip_trend_weeks=8 in config, flowWeeklyBuckets deve avere 8 settimane');
 }
 
 // S4 (DESIGN_R_S_addendum_collaudo.md, sez. S4): timeline nota - un job
@@ -2977,8 +3154,8 @@ function testBuildSystemStateOpenPointsNeverIncludeArchivedJobs() {
   var activeJobs = [{ job_id: 'ACTIVE-1', status: 'backlog', arrival_ts: nowIso_(), size_points: 5, size_class: 'M' }];
   var archivedJobs = [{ job_id: 'ARCHIVED-1', status: 'backlog', arrival_ts: nowIso_(), size_points: 100, size_class: 'XL' }];
   var state = buildSystemState_(activeJobs, [], SIGMAFLOW.DEFAULT_CONFIG, now, archivedJobs, []);
-  assertEquals_(5, state.pointsMetrics.open_points, 'punti aperti devono restare solo sui job attivi, mai sull\'archivio');
-  assertEquals_(1, state.pointsMetrics.open_cards, 'conteggio card aperte deve restare solo sui job attivi');
+  assertEquals_(5, state.pointsMetrics.committed_points, 'i punti del lavoro impegnato devono restare solo sui job attivi, mai sull\'archivio');
+  assertEquals_(1, state.pointsMetrics.committed_cards, 'conteggio del lavoro impegnato deve restare solo sui job attivi');
   assertEquals_(1, state.workloadMetrics.ready, 'lavoro presente (pronto) deve restare solo sui job attivi');
 }
 
@@ -3042,7 +3219,7 @@ function testGetMetricsIncludesArchivedCaseInHistoricPoints() {
     var pm = metrics.data.systemState.pointsMetrics;
     assertTrue_(pm.added_points >= points, 'i punti aggiunti devono contare anche il caso ormai archiviato');
     assertTrue_(pm.completed_points >= points, 'i punti completati devono contare anche il caso ormai archiviato');
-    assertEquals_(0, pm.open_cards, 'il caso archiviato non deve comparire tra le card aperte');
+    assertEquals_(0, pm.committed_cards, 'il caso archiviato non deve comparire tra il lavoro impegnato');
   });
 }
 
@@ -3060,7 +3237,7 @@ function testGetMetricsNeverReadsCestino() {
     cestinaJob_(created.job_id);
 
     var after = getMetrics().data.systemState.pointsMetrics;
-    assertEquals_(before.open_points, after.open_points, 'un job cestinato non deve mai comparire nei punti aperti');
+    assertEquals_(before.committed_points, after.committed_points, 'un job cestinato non deve mai comparire nei punti del lavoro impegnato');
     assertEquals_(before.added_points, after.added_points, 'un job cestinato non deve mai comparire nei punti aggiunti storici');
     assertEquals_(before.completed_points, after.completed_points, 'un job cestinato non deve mai comparire nei punti completati storici');
   });
