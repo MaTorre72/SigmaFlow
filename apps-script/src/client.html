@@ -2084,7 +2084,7 @@
     qualityEl.className = 'quality-badge quality-' + (quality.level || 'low');
     qualityEl.textContent = quality.label || 'BASSA';
     document.getElementById('data-quality-message').textContent = quality.message || '';
-    document.getElementById('data-quality-sample').textContent = 'Iniziative osservate: ' + valueOrDash(quality.observed_initiatives) + ' - lavori completati utili: ' + valueOrDash(quality.completed_samples);
+    document.getElementById('data-quality-sample').textContent = 'Lavori osservati: ' + valueOrDash(quality.observed_initiatives) + ' - lavori completati utili: ' + valueOrDash(quality.completed_samples);
     document.getElementById('quick-data-quality').textContent = quality.label || 'BASSA';
     document.getElementById('quick-data-quality').className = 'quick-quality quality-' + (quality.level || 'low');
 
@@ -2120,25 +2120,43 @@
     // avg_points_per_initiative, dimensione media dei casi arrivati
     // nel periodo) quando possibile.
     var avgPoints = flow.avg_points_per_initiative;
-    renderDl('flow-extra-metrics', {
-      'Capacita\' disponibile stimata': perWeekValue(flow.estimated_capacity_per_day, ' visite/settimana') + estimatedPointsSuffix_(flow.estimated_capacity_per_day, avgPoints),
-      'Differenza tra entrate e uscite (iniziative/settimana)': perWeekValue(flow.entry_exit_difference, '/settimana')
-    });
+    // R6.2 (addendum di collaudo): etichetta con team_size esplicito -
+    // verificato (PROGRAMMA_STATO.md) che non c'e' nessun disallineamento
+    // reale tra questa capacita' e mu*team_size, solo un artefatto di
+    // arrotondamento a 2 decimali sui tassi giornalieri prima della
+    // conversione settimanale - nessuna formula cambiata.
+    var flowExtraDl = {};
+    flowExtraDl['Capacita\' disponibile stimata (team, ' + valueOrDash(flow.team_size) + ' persone)'] = perWeekValue(flow.estimated_capacity_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(flow.estimated_capacity_per_day, avgPoints);
+    flowExtraDl['Differenza tra entrate e uscite (lavori/settimana)'] = perWeekValue(flow.entry_exit_difference, '/settimana');
+    // R6.6: passaggi (visite chiuse), non lavori - confrontabile
+    // direttamente con la capacita' (gia' in passaggi).
+    flowExtraDl['Lavori completati (periodo)'] = valueOrDash(points.completed_cards);
+    flowExtraDl['Passaggi completati (periodo)'] = valueOrDash(flow.completed_passages);
+    renderDl('flow-extra-metrics', flowExtraDl);
 
     var rework = system.reworkMetrics || {};
     // R4 (DESIGN_R_S.md §3.4): scomposizione dei rientri per causa
     // (rework_cause) - quota controllabile (cliente + interno, leva:
     // gating) vs non controllabile (enti).
     var byCause = rework.by_cause || {};
+    // R6.3 (addendum di collaudo): il carico va sempre mostrato nel suo
+    // contesto - lavoro nuovo e rilavorazione fianco a fianco piu' il
+    // totale, mai la rilavorazione isolata.
+    renderDl('system-load-metrics', {
+      'Carico da lavoro nuovo (a settimana)': perWeekValue(flow.new_work_per_day, ' passaggi/settimana'),
+      'Carico da rilavorazione (a settimana)': perWeekValue(rework.additional_passages_from_rework, ' passaggi/settimana'),
+      'Carico totale (a settimana)': perWeekValue(rework.total_passages_per_day, ' passaggi/settimana'),
+      'Quota di capacita\' occupata dal carico totale': nullablePercent(system.capacityMetrics.effective_load, true)
+    });
     renderDl('system-rework-metrics', {
-      'Iniziative con almeno un rientro': nullablePercent(rework.initiatives_with_rework, true),
-      'Rientri medi quando il lavoro rientra': estimableValue(rework.average_reentries_when_reworked),
-      'Visite medie per iniziativa': metricValue(rework.average_passages_per_initiative),
-      'Visite totali alla settimana': perWeekValue(rework.total_passages_per_day, ' visite/settimana') + estimatedPointsSuffix_(rework.total_passages_per_day, avgPoints),
-      'Carico aggiuntivo dei rientri (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' visite/settimana') + estimatedPointsSuffix_(rework.additional_passages_from_rework, avgPoints),
-      'Rientri per causa — cliente / enti / interno': byCause.total ? (byCause.client + ' / ' + byCause.authority + ' / ' + byCause.internal) : 'Dato non ancora stimabile',
+      'Lavori che hanno richiesto una rilavorazione': nullablePercent(rework.initiatives_with_rework, true),
+      'Rilavorazioni medie quando capitano': estimableValue(rework.average_reentries_when_reworked),
+      'Passaggi medi per lavoro': metricValue(rework.average_passages_per_initiative),
+      'Passaggi totali alla settimana': perWeekValue(rework.total_passages_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(rework.total_passages_per_day, avgPoints),
+      'Carico aggiuntivo dalla rilavorazione (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' passaggi/settimana') + estimatedPointsSuffix_(rework.additional_passages_from_rework, avgPoints),
+      'Rilavorazioni per causa - cliente / enti / interno': byCause.total ? (byCause.client + ' / ' + byCause.authority + ' / ' + byCause.internal) : 'Dato non ancora stimabile',
       'Quota controllabile (cliente + interno, leva: gating)': byCause.total ? nullablePercent(byCause.controllable_share, true) : 'Dato non ancora stimabile',
-      'Quota da enti (non controllabile direttamente)': byCause.total ? nullablePercent(byCause.external_share, true) : 'Dato non ancora stimabile'
+      'Quota di rilavorazioni da enti (non controllabile direttamente)': byCause.total ? nullablePercent(byCause.external_share, true) : 'Dato non ancora stimabile'
     });
 
     var time = system.timeMetrics || {};
@@ -2173,18 +2191,18 @@
     var capacity = system.capacityMetrics || {};
     // Chiesto da Marco (2026-08-20): tolta la riga "Capacita teorica
     // giornaliera" quando non configurata (theoretical_capacity_per_day
-    // in config) - non aggiungeva informazione, solo rumore. "passaggi"
-    // rinominato "visite" (termine ambiguo, segnalato da Marco), con
-    // l'equivalente stimato in punti quando calcolabile.
+    // in config) - non aggiungeva informazione, solo rumore.
+    // R6.1 (addendum di collaudo): "visite" -> "passaggi" nel glossario
+    // ufficiale del cruscotto.
     var capacityDl = {
-      'Capacita\' effettiva alla settimana': perWeekValue(capacity.effective_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.effective_per_day, avgPoints)
+      'Capacita\' effettiva alla settimana': perWeekValue(capacity.effective_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.effective_per_day, avgPoints)
     };
     if (capacity.theoretical_per_day !== null) {
-      capacityDl['Capacita\' teorica alla settimana'] = perWeekValue(capacity.theoretical_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.theoretical_per_day, avgPoints);
+      capacityDl['Capacita\' teorica alla settimana'] = perWeekValue(capacity.theoretical_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.theoretical_per_day, avgPoints);
     }
-    capacityDl['Assorbita dai nuovi lavori (alla settimana)'] = perWeekValue(capacity.absorbed_by_new_work, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_new_work, avgPoints);
-    capacityDl['Assorbita dai rientri (alla settimana)'] = perWeekValue(capacity.absorbed_by_rework, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_rework, avgPoints);
-    capacityDl['Margine residuo (alla settimana)'] = perWeekValue(capacity.residual_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.residual_per_day, avgPoints);
+    capacityDl['Assorbita dai nuovi lavori (alla settimana)'] = perWeekValue(capacity.absorbed_by_new_work, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_new_work, avgPoints);
+    capacityDl['Assorbita dalla rilavorazione (alla settimana)'] = perWeekValue(capacity.absorbed_by_rework, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_rework, avgPoints);
+    capacityDl['Margine residuo (alla settimana)'] = perWeekValue(capacity.residual_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.residual_per_day, avgPoints);
     capacityDl['Margine disponibile'] = nullablePercent(capacity.available_share, true);
     renderDl('capacity-metrics', capacityDl);
 
@@ -2204,7 +2222,7 @@
     renderWaitStatsRow_('wait-client', waitTime.client);
     renderWaitStatsRow_('wait-authority', waitTime.authority);
     renderWaitStatsRow_('wait-internal', waitTime.internal);
-    document.getElementById('wait-total-days').textContent = metricValue(waitTime.total_days, ' g');
+    renderWaitStatsRow_('wait-summary', waitTime.summary);
 
     renderCurrentlyBlocked_(system.currentlyBlocked || []);
     drawWaitTimeTrend_(system.waitTimeTrend || []);
@@ -2217,7 +2235,7 @@
 
     renderDelayProfile(system.delayProfileMetrics || {});
     renderAdvancedMetrics(metrics);
-    drawWipCycleScatter_(system.wipCycleTimeScatter || []);
+    drawWipBandsCharts_(system.flowWeeklyBuckets || [], system.wipBands || []);
 
     renderScenarios(system.scenarioReadiness || {});
     renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
@@ -2250,51 +2268,51 @@
   // calcolati da calculateMetrics_ ma mai renderizzati prima di M9
   // (verificato in M3).
   function renderAdvancedMetrics(metrics) {
+    // R6.4 (addendum di collaudo): stessa idea del pannello principale,
+    // ricalcolata per singolo passaggio invece che per lavoro -
+    // popolazione/unita' dichiarate in ogni etichetta, non piu' lasciate
+    // indovinare.
     renderDl('advanced-base-metrics', {
-      // M9, fix del 2026-08-20 (segnalato da Marco: due numeri quasi
-      // uguali ma diversi in due pannelli diversi, "Nuove iniziative
-      // osservate" in Flusso del lavoro conta CASI unici, questo conta
-      // VISITE - un caso con 2 rientri nella finestra ne aggiunge 3 qui
-      // ma 1 solo li'. Etichetta corretta per non sembrare un doppione
-      // con un numero sbagliato.
-      'Visite osservate nel periodo (con rientri)': valueOrDash(metrics.n_jobs_observed),
-      'Tasso di arrivo (lambda)': perWeekValue(metrics.lambda, ' visite/settimana'),
-      'Tasso di servizio (mu)': perWeekValue(metrics.mu, ' visite/settimana/operatore'),
+      'Passaggi osservati nel periodo (comprese le rilavorazioni)': valueOrDash(metrics.n_jobs_observed),
+      'Tasso di arrivo dei passaggi (lambda)': perWeekValue(metrics.lambda, ' passaggi/settimana'),
+      'Tasso di servizio per persona (mu)': perWeekValue(metrics.mu, ' passaggi/settimana/operatore'),
       'Utilizzo (rho)': nullablePercent(metrics.rho, true),
-      'Tempo medio di servizio (E[S])': estimableValue(metrics.E_S, ' giorni'),
+      'Tempo medio per passaggio (E[S])': estimableValue(metrics.E_S, ' giorni'),
       'Variabilita\' del servizio (Cv^2)': estimableValue(metrics.Cs2),
-      'Tempo medio prima visita (E[S0])': estimableValue(metrics.E_S0, ' giorni'),
-      'Tempo medio visita di rework (E[S1])': estimableValue(metrics.E_S1, ' giorni')
+      'Tempo medio primo passaggio (E[S0])': estimableValue(metrics.E_S0, ' giorni'),
+      'Tempo medio passaggio di rilavorazione (E[S1])': estimableValue(metrics.E_S1, ' giorni')
     });
 
     var mm1 = metrics.MM1 || {};
     renderDl('advanced-mm1-metrics', {
       'Attesa in coda (Wq)': estimableValue(mm1.Wq, ' giorni'),
       'Tempo totale nel sistema (W)': estimableValue(mm1.W, ' giorni'),
-      'Visite in coda (Lq)': estimableValue(mm1.Lq),
-      'Visite nel sistema (L)': estimableValue(mm1.L)
+      'Passaggi in coda (Lq)': estimableValue(mm1.Lq),
+      'Passaggi nel sistema (L)': estimableValue(mm1.L)
     });
 
     var mg1 = metrics.MG1 || {};
     renderDl('advanced-mg1-metrics', {
       'Attesa in coda (Wq)': estimableValue(mg1.Wq, ' giorni'),
       'Tempo totale nel sistema (W)': estimableValue(mg1.W, ' giorni'),
-      'Visite in coda (Lq)': estimableValue(mg1.Lq),
-      'Visite nel sistema (L)': estimableValue(mg1.L)
+      'Passaggi in coda (Lq)': estimableValue(mg1.Lq),
+      'Passaggi nel sistema (L)': estimableValue(mg1.L)
     });
 
-    // R3 (DESIGN_R_S.md §3.3): questo blocco e' tutto calcolato per
-    // VISITA (reworkMetrics_, Model.gs), non per iniziativa come il
-    // pannello principale "Rientri e rework" (reworkShare di
-    // buildSystemState_) - le etichette lo dicono esplicitamente per
-    // non farle sembrare la stessa grandezza con un numero diverso.
+    // R3 (DESIGN_R_S.md §3.3)/R6.4 (addendum): questo blocco e' tutto
+    // calcolato PER PASSAGGIO (reworkMetrics_, Model.gs), non per lavoro
+    // come il pannello principale "Rilavorazione" (reworkShare di
+    // buildSystemState_) - le etichette lo dicono esplicitamente per non
+    // farle sembrare la stessa grandezza con un numero diverso. E[K] e'
+    // stato riscritto da zero (la versione precedente era contraddittoria:
+    // "per iniziativa" e "per visita" nella stessa frase).
     var rework = metrics.rework || {};
     renderDl('advanced-rework-metrics', {
-      'Quota di visite di rework (per visita, non per iniziativa)': nullablePercent(rework.p1, true),
-      'Rientri medi per visita di rework (per visita, non per iniziativa)': estimableValue(rework.r),
-      'Numero atteso di visite per iniziativa (E[K], per visita)': estimableValue(rework.E_K),
-      'Tasso di arrivo effettivo (lambda_effective, per visita)': perWeekValue(rework.lambda_effective, ' visite/settimana'),
-      'Utilizzo effettivo (rho_effective, per visita)': nullablePercent(rework.rho_effective, true)
+      'Quota di passaggi di rilavorazione - per passaggio, non per lavoro (p1)': nullablePercent(rework.p1, true),
+      'Rilavorazioni medie per passaggio di rilavorazione (r)': estimableValue(rework.r),
+      'Passaggi attesi per lavoro - calcolo per passaggio, vedi \'Passaggi medi per lavoro\' nel pannello principale per lo stesso concetto sulla finestra corrente (E[K])': estimableValue(rework.E_K),
+      'Tasso di arrivo effettivo dei passaggi, comprese le rilavorazioni (lambda effettivo)': perWeekValue(rework.lambda_effective, ' passaggi/settimana'),
+      'Utilizzo effettivo della capacita\', comprese le rilavorazioni (rho effettivo)': nullablePercent(rework.rho_effective, true)
     });
   }
 
@@ -2321,6 +2339,10 @@
   // riga porta anche 'band' ('green'/'yellow'/'red') - se assente,
   // nessun colore (comportamento identico a prima di S3).
   var WAIT_FIELD_LABELS_ = { t_cliente_d: 'Cliente', t_ente_d: 'Enti', t_interno_d: 'Interno' };
+  // R6.6 (addendum di collaudo): limitata alle 5 righe piu' urgenti
+  // (l'array arriva gia' ordinato per elapsed_days decrescente dal
+  // server, currentlyBlocked_ in Model.gs).
+  var CURRENTLY_BLOCKED_LIMIT_ = 5;
   function renderCurrentlyBlocked_(items) {
     var body = document.getElementById('currently-blocked-body');
     var empty = document.getElementById('currently-blocked-empty');
@@ -2333,7 +2355,7 @@
     }
     table.hidden = false;
     empty.hidden = true;
-    items.forEach(function(item) {
+    items.slice(0, CURRENTLY_BLOCKED_LIMIT_).forEach(function(item) {
       var tr = document.createElement('tr');
       if (item.band) { tr.className = 'blocked-band-' + item.band; }
       [item.title || item.job_id, item.client, WAIT_FIELD_LABELS_[item.wait_type] || item.wait_type, item.elapsed_days + ' g'].forEach(function(value) {
@@ -2397,14 +2419,20 @@
     });
   }
 
-  // S2 (DESIGN_R_S.md §3.7): scatter diagnostico WIP al momento di avvio
-  // vs tempo di ciclo (wipCycleTimeScatter_, Model.gs) - sotto soglia
-  // (10 punti) mostra "Dato non ancora stimabile" invece del canvas
-  // vuoto, stesso pattern di drawDelayHistogram_.
-  function drawWipCycleScatter_(points) {
-    var canvas = document.getElementById('wip-cycle-scatter-chart');
-    var empty = document.getElementById('wip-cycle-scatter-empty');
-    if (!points.length || points.length < 10) {
+  // S2/S3 (corretto in collaudo, addendum): due grafici a dispersione
+  // (mai due linee sulle settimane grezze) - "Throughput vs WIP" e
+  // "Tempo di ciclo vs WIP", stesso asse X (WIP medio settimanale, in
+  // punti). Punti chiari = singole settimane di flowWeeklyBuckets (nessuna
+  // linea le collega: il WIP osservato oscilla, non e' monotono nel
+  // tempo). Punti scuri, piu' grandi = medie di fascia di wipBands,
+  // collegati da una linea in ordine di WIP CRESCENTE, mai in ordine
+  // temporale - la tendenza reale si legge li'. Meno di 3 fasce valide ->
+  // messaggio invece del grafico (stesso pattern di drawDelayHistogram_).
+  var MIN_WIP_BANDS_ = 3;
+  function drawWipScatter_(canvasId, emptyId, weeklyBuckets, bands, yField, yLabel) {
+    var canvas = document.getElementById(canvasId);
+    var empty = document.getElementById(emptyId);
+    if (!bands.length || bands.length < MIN_WIP_BANDS_) {
       canvas.hidden = true;
       empty.hidden = false;
       return;
@@ -2424,33 +2452,64 @@
     var pad = { left: 34, right: 12, top: 12, bottom: 34 };
     var plotWidth = width - pad.left - pad.right;
     var plotHeight = height - pad.top - pad.bottom;
-    var maxWip = Math.max.apply(null, points.map(function(p) { return p.wip_at_start; }).concat([1]));
-    var maxCycle = Math.max.apply(null, points.map(function(p) { return p.cycle_time_days; }).concat([1]));
+    var bandField = yField === 'throughput_punti_settimana' ? 'throughput_medio' : 'ct_medio';
+    var rawPoints = weeklyBuckets.filter(function(b) { return b[yField] !== null; });
+    var maxWip = Math.max.apply(null, rawPoints.map(function(b) { return b.wip_medio; }).concat(bands.map(function(b) { return b.wip_medio; })).concat([1]));
+    var maxY = Math.max.apply(null, rawPoints.map(function(b) { return b[yField]; }).concat(bands.map(function(b) { return b[bandField]; })).concat([1]));
     ctx.font = '11px Arial';
     ctx.strokeStyle = '#d8dee8';
     ctx.fillStyle = '#627184';
     ctx.beginPath(); ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, height - pad.bottom); ctx.lineTo(width - pad.right, height - pad.bottom); ctx.stroke();
-    ctx.fillText('WIP al momento di avvio ->', pad.left, height - 8);
+    ctx.fillText('WIP medio (pt) ->', pad.left, height - 8);
     ctx.save();
     ctx.translate(10, height - pad.bottom);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillText('Tempo di ciclo (g) ->', 0, 0);
+    ctx.fillText(yLabel, 0, 0);
     ctx.restore();
-    ctx.fillStyle = '#2F6B9A';
-    points.forEach(function(p) {
-      var x = pad.left + plotWidth * (p.wip_at_start / maxWip);
-      var y = height - pad.bottom - plotHeight * (p.cycle_time_days / maxCycle);
+
+    // Punti chiari: le settimane grezze, senza linea.
+    ctx.fillStyle = '#c3cddb';
+    rawPoints.forEach(function(b) {
+      var x = pad.left + plotWidth * (b.wip_medio / maxWip);
+      var y = height - pad.bottom - plotHeight * (b[yField] / maxY);
       ctx.beginPath();
       ctx.arc(x, y, 3, 0, Math.PI * 2);
       ctx.fill();
     });
+
+    // Punti scuri: le medie di fascia (gia' ordinate per WIP crescente da
+    // wipBands_), collegate da una linea - MAI in ordine temporale.
+    ctx.strokeStyle = '#2F6B9A';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    bands.forEach(function(b, index) {
+      var x = pad.left + plotWidth * (b.wip_medio / maxWip);
+      var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
+      if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+    });
+    ctx.stroke();
+    ctx.fillStyle = '#2F6B9A';
+    bands.forEach(function(b) {
+      var x = pad.left + plotWidth * (b.wip_medio / maxWip);
+      var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  function drawWipBandsCharts_(weeklyBuckets, bands) {
+    drawWipScatter_('wip-throughput-scatter-chart', 'wip-throughput-scatter-empty', weeklyBuckets, bands, 'throughput_punti_settimana', 'Throughput (pt/settimana) ->');
+    drawWipScatter_('wip-cycle-scatter-chart', 'wip-cycle-scatter-empty', weeklyBuckets, bands, 'ct_medio_giorni', 'Tempo di ciclo (g) ->');
   }
 
   function renderDelayProfile(profile) {
+    // R6.5 (addendum di collaudo): "Profilo di rientro" -> "Profilo della
+    // rilavorazione" (vedi anche il titolo del pannello in dashboard.html).
     renderDl('delay-profile-metrics', {
-      'Rientri osservati (campione)': valueOrDash(profile.sample_size),
-      'Rientri medi per consegna (alpha)': estimableValue(profile.alpha),
-      '80° percentile del tempo prima del rientro': estimableValue(profile.p80_days, ' giorni')
+      'Rilavorazioni osservate (campione)': valueOrDash(profile.sample_size),
+      'Quota di passaggi che sono rilavorazione, su tutto lo storico disponibile (alpha)': estimableValue(profile.alpha),
+      '80° percentile del tempo prima della rilavorazione': estimableValue(profile.p80_days, ' giorni')
     });
     drawDelayHistogram_(profile.kernel, profile.bin_days || 7);
   }
@@ -2461,7 +2520,7 @@
     if (!kernel) {
       canvas.hidden = true;
       empty.hidden = false;
-      empty.textContent = 'Dato non ancora stimabile (servono almeno 5 rientri osservati)';
+      empty.textContent = 'Dato non ancora stimabile (servono almeno 5 rilavorazioni osservate)';
       return;
     }
     canvas.hidden = false;

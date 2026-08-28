@@ -224,6 +224,15 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
     authority: waitStats_(waitSamplesByField.t_ente_d),
     internal: waitStats_(waitSamplesByField.t_interno_d)
   };
+  // R5 (corretto in collaudo, addendum §R5): riga di riepilogo (quarta
+  // riga della tabella "Dove si blocca il lavoro") - aggrega le tre
+  // righe per tipo su tutte e cinque le colonne, non solo "Totale
+  // (giorni)" (gia' presente prima di questa correzione). La media e'
+  // totale/occorrenze su tutte le attese insieme, NON la media delle tre
+  // medie di riga (peserebbe ogni tipo allo stesso modo indipendentemente
+  // da quante occorrenze porta). I tipi senza occorrenze sono esclusi da
+  // min/max (altrimenti falserebbero il risultato).
+  waitTime.summary = waitSummaryRow_(waitTime.client, waitTime.authority, waitTime.internal);
   // M6 (DESIGN_dashboard.md, §4.2): B_lat(t) (dispensa FSC §10,
   // "esposizione futura a rientri") - consegne recenti (consegna_ts nella
   // finestra osservata) la cui visita non e' mai rientrata (rientro_ts
@@ -253,11 +262,15 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // fermi ora (su jobs attivi, nessun tetto di finestra).
   var waitTimeTrend = waitTimeMonthBuckets_(allVisite, now, 6);
   var currentlyBlocked = currentlyBlocked_(jobs, columnMap, now);
-  // S1 (DESIGN_R_S.md §3.6): percentili storici del tempo di ciclo,
-  // usati sia dal Profilo di ritardo (S1 vero e proprio) sia da S3 (fasce
-  // sulla lista "Fermi ora") - calcolati una sola volta qui.
-  var wipCycleTimeScatter = wipCycleTimeScatter_(allVisite);
-  var cycleTimeSamples = wipCycleTimeScatter.map(function(point) { return point.cycle_time_days; }).sort(function(a, b) { return a - b; });
+  // S3 (fasce sulla lista "Fermi ora"): percentili storici del tempo di
+  // ciclo su tutte le visite chiuse disponibili - non dipende piu' dallo
+  // strumento diagnostico S2 (wipCycleTimeScatter_/visitActiveInterval_,
+  // rimossi in sede di correzione collaudo, addendum §S2/S3: il WIP
+  // andava espresso in punti a grana settimanale, non contando le visite
+  // concorrenti), che comunque non avrebbe portato altro valore utile
+  // qui oltre alla stessa lista di tempi di ciclo gia' ottenibile
+  // direttamente da visitServiceTimeDays_.
+  var cycleTimeSamples = allVisite.map(visitServiceTimeDays_).filter(function(days) { return days > 0; }).sort(function(a, b) { return a - b; });
   var MIN_CYCLE_TIME_SAMPLES_FOR_BANDS = 20;
   var cycleTimeBands = cycleTimeSamples.length >= MIN_CYCLE_TIME_SAMPLES_FOR_BANDS ? {
     p50: percentile_(cycleTimeSamples, 0.50),
@@ -271,6 +284,14 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       else { item.band = 'red'; }
     });
   }
+  // S2/S3 (corretto in collaudo, addendum): WIP espresso in punti a
+  // grana settimanale (non in numero di visite concorrenti), aggregato
+  // su 26 settimane e raggruppato per fascia di WIP - la tendenza reale
+  // si legge sulle medie di fascia (wipBands), mai sulle settimane
+  // grezze collegate in ordine cronologico (il WIP osservato oscilla,
+  // non e' monotono nel tempo).
+  var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, 26);
+  var wipBands = wipBands_(flowWeeklyBuckets, 20, 3);
 
   // Chiesto da Marco (2026-08-20): mostrare "dove e' possibile" ogni
   // tasso anche in punti, non solo in iniziative/visite - le
@@ -290,11 +311,24 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       window_days: windowDays,
       new_initiatives_observed: initiativeList.length,
       new_initiatives_per_day: round_(newRate),
+      // R6.3 (addendum di collaudo): alias di newRate, gia' calcolato -
+      // nessun nuovo calcolo, solo il nome con cui il pannello
+      // "Rilavorazione" lo mostra fianco a fianco al carico da
+      // rilavorazione (mai piu' isolato).
+      new_work_per_day: round_(newRate),
       completed_initiatives: completedList.length,
       completed_per_day: completedList.length ? round_(completedRate) : null,
+      // R6.6: passaggi (visite) chiusi nella finestra, non lavori -
+      // 'completed' e' l'array di visite prima del raggruppamento per
+      // caso di initiativeGroups_ (completedList conta lavori distinti).
+      completed_passages: completed.length,
       estimated_capacity_per_day: effectiveCapacity === null ? null : round_(effectiveCapacity),
       entry_exit_difference: completedList.length ? round_(newRate - completedRate) : null,
-      avg_points_per_initiative: avgPointsPerInitiative
+      avg_points_per_initiative: avgPointsPerInitiative,
+      // R6.2: numero di persone usato per calcolare la capacita' - le
+      // etichette lo mostrano esplicitamente, non piu' un moltiplicatore
+      // implicito.
+      team_size: teamSize
     },
     reworkMetrics: {
       initiatives_with_rework: reworkShare === null ? null : round_(reworkShare),
@@ -333,7 +367,7 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       client: waitTime.client,
       authority: waitTime.authority,
       internal: waitTime.internal,
-      total_days: round_(waitTime.client.total_days + waitTime.authority.total_days + waitTime.internal.total_days)
+      summary: waitTime.summary
     },
     waitTimeTrend: waitTimeTrend,
     currentlyBlocked: currentlyBlocked,
@@ -343,7 +377,8 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       count: latentBacklogCount
     },
     delayProfileMetrics: delayProfile,
-    wipCycleTimeScatter: wipCycleTimeScatter,
+    flowWeeklyBuckets: flowWeeklyBuckets,
+    wipBands: wipBands,
     stabilityMetrics: stability === null ? null : {
       margin: stability.margin,
       congestion_factor: stability.congestion_factor,
@@ -689,6 +724,27 @@ function waitStats_(samples) {
   };
 }
 
+// R5 (corretto in collaudo, addendum §R5): riga di riepilogo della
+// tabella "Dove si blocca il lavoro" - aggrega le tre righe per tipo
+// (waitStats_) su tutte le colonne, non solo il totale giorni (gia'
+// presente prima di questa correzione). La media e' totale/occorrenze
+// su tutte le attese insieme, NON la media aritmetica delle tre medie
+// di riga (peserebbe ogni tipo allo stesso modo indipendentemente da
+// quante occorrenze porta). Un tipo senza occorrenze e' escluso da
+// min/max (altrimenti 0/null falserebbero il risultato).
+function waitSummaryRow_(client, authority, internal) {
+  var rows = [client, authority, internal].filter(function(row) { return row.occurrences > 0; });
+  var allOccurrences = client.occurrences + authority.occurrences + internal.occurrences;
+  var allTotalDays = client.total_days + authority.total_days + internal.total_days;
+  return {
+    total_days: round_(allTotalDays),
+    occurrences: allOccurrences,
+    average_days: allOccurrences ? round_(allTotalDays / allOccurrences) : null,
+    min_days: rows.length ? round_(Math.min.apply(null, rows.map(function(row) { return row.min_days; }))) : null,
+    max_days: rows.length ? round_(Math.max.apply(null, rows.map(function(row) { return row.max_days; }))) : null
+  };
+}
+
 function sampleStats_(values) {
   if (!values.length) {
     return { mean: 0, secondMoment: 0, variance: 0, cs2: 0 };
@@ -912,41 +968,88 @@ function currentlyBlocked_(jobs, columnMap, now) {
   return result.sort(function(a, b) { return b.elapsed_days - a.elapsed_days; });
 }
 
-// S2 (strumento diagnostico per la futura Fase T, Cap. 12 della
-// dispensa — "cercare il ginocchio" nella curva WIP/tempo di ciclo):
-// per ogni visita con un tempo di ciclo calcolabile, conta quante
-// ALTRE visite erano "attive" (WIP) nel momento esatto in cui questa
-// e' partita (start_ts). Attiva = start_ts <= t < fine (consegna_ts o
-// rientro_ts, quella che viene prima; nessuna fine = ancora aperta
-// ora). E' un'approssimazione di L_WIP(t) al momento dell'avvio di
-// ogni visita, non una serie storica esatta giorno per giorno -
-// sufficiente per uno scatter diagnostico, non per un conteggio di
-// audit.
-function visitActiveInterval_(visit) {
-  if (!visit.start_ts) { return null; }
-  var start = new Date(visit.start_ts);
-  var end = null;
-  if (visit.consegna_ts) { end = new Date(visit.consegna_ts); }
-  if (visit.rientro_ts) {
-    var rientro = new Date(visit.rientro_ts);
-    if (!end || rientro < end) { end = rientro; }
+// S2/S3 (corretto in collaudo, addendum): aggrega la storia a grana
+// settimanale (ultime weeksCount settimane) in tre numeri per settimana
+// - WIP medio in punti (running: entrato meno completato, cumulato -
+// stesso principio di monthBuckets_; include il backlog, non solo il
+// lavoro in colonne attive - semplificazione nota, non uno strumento di
+// audit, vedi S4 per il superamento), throughput osservato (punti
+// completati quella settimana) e tempo di ciclo medio osservato (media
+// di visitServiceTimeDays_ sulle visite chiuse quella settimana).
+// Sostituisce la prima versione (wipCycleTimeScatter_/
+// visitActiveInterval_, per-visita, WIP contato come numero grezzo di
+// visite concorrenti) - il WIP va espresso in punti per essere
+// confrontabile tra lavori di taglia diversa.
+function flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, weeksCount) {
+  var first = new Date(now.getTime() - weeksCount * 7 * 86400000);
+  var buckets = [];
+  var byKey = {};
+  for (var i = 0; i < weeksCount; i++) {
+    var date = new Date(first.getTime() + i * 7 * 86400000);
+    var key = Utilities.formatDate(date, SIGMAFLOW.TZ, "yyyy-'W'ww");
+    var bucket = { key: key, entered_points: 0, completed_points: 0, ct_samples: [] };
+    buckets.push(bucket);
+    byKey[key] = bucket;
   }
-  return { start: start, end: end };
+  jobs.concat(archivedJobs || []).forEach(function(job) {
+    if (job.arrival_ts) {
+      var ek = Utilities.formatDate(new Date(job.arrival_ts), SIGMAFLOW.TZ, "yyyy-'W'ww");
+      if (byKey[ek]) { byKey[ek].entered_points += jobPoints_(job); }
+    }
+    if (job.incarico_chiuso_ts) {
+      var dk = Utilities.formatDate(new Date(job.incarico_chiuso_ts), SIGMAFLOW.TZ, "yyyy-'W'ww");
+      if (byKey[dk]) { byKey[dk].completed_points += jobPoints_(job); }
+    }
+  });
+  visite.concat(visiteArchivio || []).forEach(function(visit) {
+    var closeTs = visit.consegna_ts || visit.rientro_ts;
+    if (!closeTs) { return; }
+    var key = Utilities.formatDate(new Date(closeTs), SIGMAFLOW.TZ, "yyyy-'W'ww");
+    if (!byKey[key]) { return; }
+    var ct = visitServiceTimeDays_(visit);
+    if (ct > 0) { byKey[key].ct_samples.push(ct); }
+  });
+
+  var running = 0;
+  return buckets.map(function(b) {
+    running += b.entered_points - b.completed_points;
+    var ctAvg = b.ct_samples.length ? round_(b.ct_samples.reduce(function(s, v) { return s + v; }, 0) / b.ct_samples.length) : null;
+    return {
+      key: b.key,
+      wip_medio: round_(Math.max(0, running)),
+      throughput_punti_settimana: round_(b.completed_points),
+      ct_medio_giorni: ctAvg,
+      n_campioni_ct: b.ct_samples.length
+    };
+  });
 }
 
-function wipCycleTimeScatter_(visite) {
-  var intervals = visite.map(visitActiveInterval_).filter(Boolean);
-  var points = [];
-  visite.forEach(function(visit) {
-    var cycleDays = visitServiceTimeDays_(visit);
-    if (cycleDays <= 0 || !visit.start_ts) { return; }
-    var t = new Date(visit.start_ts);
-    var wip = intervals.filter(function(iv) {
-      return iv.start <= t && (iv.end === null || iv.end > t);
-    }).length;
-    points.push({ wip_at_start: wip, cycle_time_days: round_(cycleDays) });
+// S2/S3: raggruppa le settimane di flowWeeklyBuckets_ per fascia di WIP
+// (bandWidth punti a fascia) e calcola le medie di fascia - la tendenza
+// reale va letta qui, in ordine di WIP crescente, mai sulle settimane
+// grezze in ordine cronologico (il WIP osservato oscilla, collegarlo per
+// data produce uno zig-zag senza significato). Scarta le fasce con meno
+// di minSamples settimane.
+function wipBands_(weeklyBuckets, bandWidth, minSamples) {
+  var byBand = {};
+  weeklyBuckets.filter(function(b) { return b.ct_medio_giorni !== null; }).forEach(function(b) {
+    var start = Math.floor(b.wip_medio / bandWidth) * bandWidth;
+    if (!byBand[start]) { byBand[start] = []; }
+    byBand[start].push(b);
   });
-  return points;
+  return Object.keys(byBand).map(function(k) { return byBand[k]; })
+    .filter(function(weeks) { return weeks.length >= minSamples; })
+    .map(function(weeks) {
+      var n = weeks.length;
+      var sum = function(f) { return weeks.reduce(function(s, w) { return s + f(w); }, 0); };
+      return {
+        wip_medio: round_(sum(function(w) { return w.wip_medio; }) / n),
+        throughput_medio: round_(sum(function(w) { return w.throughput_punti_settimana; }) / n),
+        ct_medio: round_(sum(function(w) { return w.ct_medio_giorni; }) / n),
+        n_settimane: n
+      };
+    })
+    .sort(function(a, b) { return a.wip_medio - b.wip_medio; });
 }
 
 // Fase L4: 'visite' non ha size_class (e' anagrafica del caso, non della

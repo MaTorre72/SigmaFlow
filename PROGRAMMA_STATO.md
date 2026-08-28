@@ -1,5 +1,128 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-27
+Aggiornato: 2026-08-28
+
+## Fase R e S — correzioni di chiusura collaudo: R5 (corretto), R6 (nuovo), S2/S3 (corretto) (2026-08-28, sessione 9)
+
+Seguito di `docs/DESIGN_R_S_addendum_collaudo.md` (Marco), stesso branch
+`feat/fase-r-s-metriche-2026-08-27` (non una nuova fase — prosegue la
+numerazione del documento originale). Copre esattamente i tre punti
+richiesti: R5 corretto, R6 nuovo (terminologia + carico), S2/S3
+corretto. **Fermato prima di S4**, come da istruzioni.
+
+**R5 — riga di riepilogo mancante ("Dove si blocca il lavoro")**:
+nuova funzione `waitSummaryRow_(client, authority, internal)` (Model.gs)
+— media pesata (`totale/occorrenze` su tutte le attese insieme, non la
+media delle tre medie di riga), min/max che escludono i tipi senza
+occorrenze. Integrata in `buildSystemState_`
+(`waitTimeMetrics.summary`, sostituisce il vecchio `total_days` di sola
+somma). Markup aggiornato (`dashboard.html`, riga "Totale" ora a 5
+colonne come le altre) e client (`renderWaitStatsRow_('wait-summary',
+waitTime.summary)`, stesso helper gia' usato per le tre righe per tipo).
+**Verifica richiesta dall'addendum** (righe "Attesa enti"/"Decisione
+interna" vuote in alcuni contesti): confermato che e' mancanza di dati
+nella finestra osservata, non un bug — `waitStats_` restituisce
+correttamente 0/null quando non ci sono occorrenze di quel tipo;
+nessuna riga per-tipo toccata da questo fix, solo il riepilogo. 3 nuovi
+test (media pesata su fixture con risultato diverso dalla media delle
+medie, esclusione dei tipi senza occorrenze da min/max, esposizione in
+`systemState`); 2 test esistenti aggiornati per leggere
+`waitTimeMetrics.summary.total_days` invece del vecchio
+`waitTimeMetrics.total_days` (rimosso).
+
+**R6 — terminologia e carico da rilavorazione (nuovo)**:
+- Glossario applicato a tutte le etichette del cruscotto (dashboard):
+  iniziativa/job/card/pratica/caso → **lavoro**, visita → **passaggio**,
+  rientro/rework → **rilavorazione**. **Decisione di scope, non
+  esplicitata nell'addendum**: applicato solo alle funzioni di
+  rendering della dashboard in `client.html` e a `dashboard.html`, non
+  al resto dell'interfaccia board (modali, conferme, badge "R1" sulle
+  card, messaggi di errore) — l'"OBBLIGO — terminologia" del prompt
+  parla esplicitamente del "cruscotto" (la dashboard), e tutti gli
+  esempi concreti forniti (R6.1-R6.6) sono etichette di pannelli
+  dashboard; `client.html` e' nominato solo perche' ospita anche il
+  rendering della dashboard nello stesso file. Verificato con grep
+  mirato: zero occorrenze nei tag di `dashboard.html` e nelle stringhe
+  delle funzioni `renderMetrics`/`renderAdvancedMetrics`/
+  `renderDelayProfile`/etc. di `client.html`; le occorrenze residue in
+  `client.html` sono tutte fuori da quelle funzioni (board/modale). Se
+  questa lettura non e' quella voluta, va segnalato — l'estensione al
+  resto della board e' un cambio più ampio, non fatto qui di
+  iniziativa.
+- **R6.2 — verifica capacita' (richiesta prima di qualunque fix)**:
+  riprodotto l'esatto scenario segnalato da Marco (`team_size=3`, tempo
+  medio di servizio ~43,5 giorni) con uno script isolato sull'harness
+  Node (`calculateMetrics_`/`buildSystemState_` sugli stessi dati) —
+  **nessun disallineamento reale**: `mu` e `estimated_capacity_per_day`
+  derivano dalla stessa `stats.mean`, quindi `effectiveCapacity` e'
+  matematicamente sempre `team_size * mu`. Il "0,14×3=0,42 ma il
+  cruscotto mostra 0,49" e' un artefatto di **arrotondamento a 2
+  decimali sui tassi giornalieri, molto piccoli** (`round_()` arrotonda
+  `mu`/`estimated_capacity_per_day` in giorni PRIMA della conversione
+  settimanale ×7 fatta dal client) — con tassi giornalieri piccoli
+  (pratiche lunghe, ~0,02/0,07 al giorno) l'arrotondamento a 2 decimali
+  ha un errore relativo enorme, amplificato indipendentemente su
+  entrambi i valori. Riprodotto esattamente (mu settimanale 0,14,
+  capacita' settimanale 0,49, moltiplicazione naive 0,42) con
+  `mean=43.5, team_size=3`. **Nessuna azione di formula necessaria** —
+  esito registrato come richiesto. Etichette comunque aggiornate con
+  `team_size` esplicito ("Capacita' disponibile stimata (team, N
+  persone)", "Tasso di servizio per persona (mu)"), nuovo campo
+  `flowMetrics.team_size` esposto (nessun nuovo calcolo).
+- **R6.3** — pannello "Rientri e rework" rinominato **"Rilavorazione"**;
+  nuova sezione `system-load-metrics` (carico da lavoro nuovo/
+  rilavorazione/totale + quota di capacita', sempre fianco a fianco, mai
+  isolato) — `flowMetrics.new_work_per_day` nuovo alias di `newRate`
+  gia' calcolato.
+- **R6.4** — Quadro avanzato: etichette con popolazione/unita' esplicite
+  ("per passaggio"), nota di pannello che rimanda al principale, E[K]
+  riscritta da zero (la versione precedente era contraddittoria).
+- **R6.5** — "Profilo di rientro" → **"Profilo della rilavorazione"**,
+  nuova nota "su tutto lo storico, non sulla finestra".
+- **R6.6** — "Lavori completati (periodo)"/"Passaggi completati
+  (periodo)" affiancati (nuovo campo `flowMetrics.completed_passages` =
+  visite chiuse nella finestra, distinto dal conteggio per lavoro gia'
+  esistente); "Fermi ora" limitata a 5 righe (`CURRENTLY_BLOCKED_LIMIT_`
+  lato client), colonna "Job" → "Lavoro".
+
+**S2/S3 — strumento WIP/tempo di ciclo (corretto)**: rimossi
+`wipCycleTimeScatter_`/`visitActiveInterval_` (per-visita, WIP come
+conteggio grezzo di visite concorrenti — non confrontabile tra lavori di
+taglia diversa). Nuove `flowWeeklyBuckets_` (aggregazione a grana
+settimanale su 26 settimane: WIP medio in punti — running entrato meno
+completato, cumulato — throughput osservato, tempo di ciclo medio) e
+`wipBands_` (raggruppamento per fascia di WIP da 20 punti, scarta fasce
+con meno di 3 settimane, ordina per WIP crescente). Client: due grafici
+a dispersione ("Throughput vs WIP", "Tempo di ciclo vs WIP") — punti
+chiari per le settimane grezze (nessuna linea, il WIP oscilla nel
+tempo), punti scuri per le medie di fascia (collegati da una linea in
+ordine di WIP crescente, mai temporale); sotto 3 fasce valide mostra
+"Dato non ancora sufficiente". La lista "Fermi ora" (S3, fasce a
+percentile verde/giallo/rosso) **non e' stata toccata nella logica** —
+l'addendum non la segnala come rotta — solo disaccoppiata dallo
+strumento S2 rimosso: i campioni storici di tempo di ciclo ora vengono
+da `allVisite.map(visitServiceTimeDays_)` direttamente, non piu' da
+`wipCycleTimeScatter_` (che li calcolava solo come sottoprodotto,
+ignorando la dimensione WIP per questo uso). Nessun test S3 esistente
+modificato, tutti verdi.
+
+**Harness Node esteso** (`gas-harness.js`): aggiunto supporto al
+pattern `"yyyy-'W'ww"` (numero di settimana ISO 8601) in
+`Utilities.formatDate` — necessario perche' `flowWeeklyBuckets_` lo usa
+e non era tra i pattern gia' mockati; senza, ogni chiave di settimana
+sarebbe caduta nel default (timestamp completo), rompendo
+l'aggregazione per settimana nei test.
+
+**194/194 test nell'harness Node** (192 prima di questa sessione + 2
+nuovi netti: R5 +3/-0 sostituzioni di 2 esistenti aggiornate,
+`flowWeeklyBuckets_`/`wipBands_` +4 a fronte di -2 test S2 rimossi
+insieme alle funzioni che testavano). Push su TEST verificato: 16/16
+file identici (`push-and-verify.sh`).
+
+**Prossimo passo**: in attesa di indicazioni di Marco per **S4** (WIP
+attivo ricostruito dal log — lavoro vero, non ancora iniziato). Nessuna
+PR aperta, nessun merge su `main`.
+
+---
 
 ## Fase R e S — governo delle metriche dashboard: COMPLETA, codice + test + push TEST + collaudo (2026-08-27, sessione 8)
 

@@ -313,6 +313,9 @@ function runAllTests() {
     testBuildSystemStateSumsWaitTimeByType,
     testBuildSystemStateSeparatesOngoingWaitIntoCurrentlyBlocked,
     testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn,
+    testWaitSummaryRowIsWeightedByOccurrencesNotAverageOfAverages,
+    testWaitSummaryRowExcludesTypesWithNoOccurrencesFromMinMax,
+    testBuildSystemStateExposesWaitTimeSummaryRow,
     testInitiativeGroupsCountsOnlyObservedReentriesNotHistoryPosition,
     testBuildSystemStateReworkCountsOnlyReentriesWithinWindow,
     testReworkByCauseSplitsControllableFromExternal,
@@ -321,8 +324,10 @@ function runAllTests() {
     testCurrentlyBlockedListsOnlyWaitingJobsOrderedByElapsedDays,
     testPercentileHelperNearestRank,
     testDelayProfileExposesP80DaysWhenEnoughSamples,
-    testWipCycleTimeScatterCountsOverlappingActiveVisitsAtStart,
-    testBuildSystemStateExposesWipCycleTimeScatter,
+    testFlowWeeklyBucketsComputesCumulativeWipThroughputAndCycleTime,
+    testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending,
+    testWipBandsExcludesWeeksWithoutCycleTimeSamples,
+    testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands,
     testCurrentlyBlockedGetsColorBandsWhenEnoughCycleTimeSamples,
     testCurrentlyBlockedHasNoBandsWhenNotEnoughCycleTimeSamples,
     testBuildSystemStateCountsLatentBacklogFromRecentUnclosedDeliveries,
@@ -2309,7 +2314,7 @@ function testBuildSystemStateSumsWaitTimeByType() {
   assertEquals_(3, state.waitTimeMetrics.client.average_days, 'media = totale su una sola occorrenza');
   assertEquals_(5, state.waitTimeMetrics.authority.total_days, 'attesa enti sommata dalla visita');
   assertEquals_(1, state.waitTimeMetrics.internal.total_days, 'attesa interna sommata dalla visita');
-  assertEquals_(9, state.waitTimeMetrics.total_days, 'totale = somma dei tre tipi');
+  assertEquals_(9, state.waitTimeMetrics.summary.total_days, 'totale = somma dei tre tipi');
 }
 
 // M5, fix del 2026-08-20 (segnalato da Marco su dati PROD reali: 15
@@ -2354,7 +2359,52 @@ function testBuildSystemStateOngoingWaitIgnoresJobsNotInStandByColumn() {
 
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
-  assertEquals_(0, state.waitTimeMetrics.total_days, 'un job in wip non contribuisce ad alcuna attesa');
+  assertEquals_(0, state.waitTimeMetrics.summary.total_days, 'un job in wip non contribuisce ad alcuna attesa');
+}
+
+// R5 (corretto in collaudo, addendum §R5): la riga di riepilogo NON e'
+// la media aritmetica delle tre medie di riga - e' totale/occorrenze su
+// tutte le attese insieme (pesata per numero di occorrenze). Fixture
+// scelta apposta perche' le due letture darebbero risultati diversi:
+// media delle medie = (2+10+4)/3 = 5,33; media pesata reale = (2*1 +
+// 10*1 + 4*3)/5 = 24/5 = 4,8.
+function testWaitSummaryRowIsWeightedByOccurrencesNotAverageOfAverages() {
+  var client = waitStats_([2]);           // 1 occorrenza, media 2
+  var authority = waitStats_([10]);       // 1 occorrenza, media 10
+  var internal = waitStats_([3, 4, 5]);   // 3 occorrenze, media 4
+
+  var summary = waitSummaryRow_(client, authority, internal);
+
+  assertEquals_(5, summary.occurrences, 'occorrenze totali = 1+1+3');
+  assertEquals_(24, summary.total_days, 'totale giorni = 2+10+12');
+  assertEquals_(4.8, summary.average_days, 'media pesata (24/5), non la media delle tre medie (5,33)');
+  assertEquals_(2, summary.min_days, 'minimo tra tutte le occorrenze');
+  assertEquals_(10, summary.max_days, 'massimo tra tutte le occorrenze');
+}
+
+// Un tipo senza occorrenze non deve falsare min/max con 0/null.
+function testWaitSummaryRowExcludesTypesWithNoOccurrencesFromMinMax() {
+  var client = waitStats_([6]);
+  var authority = waitStats_([]); // nessuna occorrenza
+  var internal = waitStats_([9]);
+
+  var summary = waitSummaryRow_(client, authority, internal);
+
+  assertEquals_(2, summary.occurrences, 'solo i due tipi con occorrenze contano');
+  assertEquals_(6, summary.min_days, 'il tipo senza occorrenze non deve abbassare il minimo a 0');
+  assertEquals_(9, summary.max_days, 'massimo tra i soli tipi con occorrenze');
+}
+
+function testBuildSystemStateExposesWaitTimeSummaryRow() {
+  var now = new Date();
+  var arrival = Utilities.formatDate(new Date(now.getTime() - 2 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var jobs = [{ job_id: 'JOB-WAIT-SUMMARY', status: 'backlog', arrival_ts: arrival, visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-WAIT-SUMMARY', numero_visita: 1, apertura_ts: arrival, t_cliente_d: 4, t_ente_d: 0, t_interno_d: 0 }];
+
+  var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Boolean(state.waitTimeMetrics.summary), 'waitTimeMetrics.summary presente in systemState');
+  assertEquals_(1, state.waitTimeMetrics.summary.occurrences, 'la riga di riepilogo riflette le occorrenze reali');
 }
 
 // R1 (DESIGN_R_S.md §3.1, 2026-08-27): initiativeGroups_ deve contare i
@@ -2485,36 +2535,87 @@ function testDelayProfileExposesP80DaysWhenEnoughSamples() {
   assertEquals_(4, profile.p80_days, '80esimo percentile (nearest-rank) su [1,2,3,4,20] = 4');
 }
 
-// S2 (DESIGN_R_S.md §3.7): scatter WIP al momento di avvio vs tempo di
-// ciclo - due visite si sovrappongono nel tempo (entrambe attive quando
-// la terza parte), una e' gia' conclusa prima.
-function testWipCycleTimeScatterCountsOverlappingActiveVisitsAtStart() {
-  var now = new Date();
-  var visite = [
-    // Conclusa ben prima che le altre due partano: non deve contare come "attiva" per loro.
-    { job_id: 'JOB-EARLY', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 30), consegna_ts: testIsoDaysAgo_(now, 25) },
-    // Attiva quando JOB-C parte (partita prima, ancora aperta - nessuna fine).
-    { job_id: 'JOB-B', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 15) },
-    // Parte quando JOB-B e' gia' attiva (e JOB-EARLY gia' concluso): wip_at_start atteso = 1 (solo JOB-B).
-    { job_id: 'JOB-C', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 10), consegna_ts: testIsoDaysAgo_(now, 5) }
-  ];
+// S2/S3 (corretto in collaudo, addendum): flowWeeklyBuckets_ aggrega
+// arrivi/completamenti/tempi di ciclo a grana settimanale. Fixture con
+// date fisse su 2 settimane note (weeksCount=2): settimana 1 riceve un
+// arrivo da 8 pt, nessun completamento (WIP cumulato = 8); settimana 2
+// completa quell'arrivo (8 pt di throughput, WIP torna a 0) e chiude una
+// visita con tempo di ciclo 6 giorni.
+function testFlowWeeklyBucketsComputesCumulativeWipThroughputAndCycleTime() {
+  var now = new Date(2026, 7, 27); // 27/08/2026, giovedi' di una settimana nota
+  var weekStart = function(daysAgo) { return testIsoDaysAgo_(now, daysAgo); };
+  var jobs = [{
+    job_id: 'JOB-WEEKLY-1',
+    status: 'wip',
+    size_points: 8,
+    size_class: 'M',
+    arrival_ts: weekStart(12), // settimana 1 (12 giorni fa)
+    incarico_chiuso_ts: weekStart(4) // settimana 2 (4 giorni fa)
+  }];
+  var visite = [{
+    job_id: 'JOB-WEEKLY-1',
+    numero_visita: 1,
+    apertura_ts: weekStart(12),
+    start_ts: weekStart(10),
+    consegna_ts: weekStart(4) // stessa settimana della chiusura - tempo di ciclo 6 giorni
+  }];
 
-  var points = wipCycleTimeScatter_(visite);
-  var pointC = points.filter(function(p) { return p.cycle_time_days === 5; })[0];
+  var buckets = flowWeeklyBuckets_(jobs, [], visite, [], now, 2);
 
-  assertTrue_(Boolean(pointC), 'JOB-C deve produrre un punto (5 giorni di ciclo)');
-  assertEquals_(1, pointC.wip_at_start, 'solo JOB-B era attiva quando JOB-C e\' partita (JOB-EARLY gia\' concluso)');
+  assertEquals_(2, buckets.length, 'due settimane richieste, due settimane restituite');
+  var week1 = buckets[0];
+  var week2 = buckets[1];
+  assertEquals_(8, week1.wip_medio, 'settimana 1: 8 punti entrati, nulla completato -> WIP cumulato 8');
+  assertEquals_(0, week1.throughput_punti_settimana, 'settimana 1: nessun completamento');
+  assertEquals_(0, week2.wip_medio, 'settimana 2: 8 punti completati pareggiano gli 8 entrati la settimana prima -> WIP torna a 0');
+  assertEquals_(8, week2.throughput_punti_settimana, 'settimana 2: il completamento vale come throughput');
+  assertEquals_(6, week2.ct_medio_giorni, 'settimana 2: tempo di ciclo della visita chiusa quella settimana (start_ts -> consegna_ts, 6 giorni)');
+  assertEquals_(1, week2.n_campioni_ct, 'un solo campione di tempo di ciclo in settimana 2');
 }
 
-function testBuildSystemStateExposesWipCycleTimeScatter() {
+// wipBands_: tre settimane fittizie in due fasce diverse (bandWidth=20) -
+// la fascia con una sola settimana va scartata (minSamples=2), l'ordine
+// di uscita deve essere per WIP crescente.
+function testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending() {
+  var weeklyBuckets = [
+    { key: '2026-W10', wip_medio: 5, throughput_punti_settimana: 10, ct_medio_giorni: 4 },
+    { key: '2026-W11', wip_medio: 8, throughput_punti_settimana: 12, ct_medio_giorni: 6 },
+    { key: '2026-W12', wip_medio: 45, throughput_punti_settimana: 20, ct_medio_giorni: 15 } // fascia isolata (1 sola settimana)
+  ];
+
+  var bands = wipBands_(weeklyBuckets, 20, 2);
+
+  assertEquals_(1, bands.length, 'la fascia 40-60 ha una sola settimana (< minSamples=2) e va scartata');
+  assertEquals_(6.5, bands[0].wip_medio, 'fascia 0-20: media WIP delle due settimane (5+8)/2');
+  assertEquals_(2, bands[0].n_settimane, 'due settimane nella fascia superstite');
+}
+
+// Settimane senza campioni di tempo di ciclo (ct_medio_giorni null) non
+// devono entrare in nessuna fascia - non c'e' un tempo di ciclo da
+// mediare per quella settimana.
+function testWipBandsExcludesWeeksWithoutCycleTimeSamples() {
+  var weeklyBuckets = [
+    { key: '2026-W10', wip_medio: 5, throughput_punti_settimana: 10, ct_medio_giorni: null },
+    { key: '2026-W11', wip_medio: 6, throughput_punti_settimana: 12, ct_medio_giorni: 5 },
+    { key: '2026-W12', wip_medio: 7, throughput_punti_settimana: 11, ct_medio_giorni: 6 }
+  ];
+
+  var bands = wipBands_(weeklyBuckets, 20, 2);
+
+  assertEquals_(1, bands.length, 'una sola fascia (0-20), con le due settimane che hanno un tempo di ciclo');
+  assertEquals_(2, bands[0].n_settimane, 'la settimana senza campioni di ciclo non entra nella fascia');
+}
+
+function testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands() {
   var now = new Date();
-  var jobs = [{ job_id: 'JOB-SCATTER', status: 'wip', arrival_ts: nowIso_(), visit_number: 1 }];
-  var visite = [{ job_id: 'JOB-SCATTER', numero_visita: 1, start_ts: testIsoDaysAgo_(now, 5), consegna_ts: nowIso_() }];
+  var jobs = [{ job_id: 'JOB-FLOW-WEEKLY', status: 'wip', arrival_ts: nowIso_(), visit_number: 1 }];
+  var visite = [{ job_id: 'JOB-FLOW-WEEKLY', numero_visita: 1, apertura_ts: nowIso_(), start_ts: testIsoDaysAgo_(now, 5), consegna_ts: nowIso_() }];
 
   var state = buildSystemState_(jobs, visite, SIGMAFLOW.DEFAULT_CONFIG, now);
 
-  assertTrue_(Array.isArray(state.wipCycleTimeScatter), 'wipCycleTimeScatter deve essere un array (anche con un solo campione)');
-  assertEquals_(1, state.wipCycleTimeScatter.length, 'una visita con tempo di ciclo calcolabile produce un punto');
+  assertTrue_(Array.isArray(state.flowWeeklyBuckets), 'flowWeeklyBuckets deve essere un array');
+  assertEquals_(26, state.flowWeeklyBuckets.length, '26 settimane richieste');
+  assertTrue_(Array.isArray(state.wipBands), 'wipBands deve essere un array (anche vuoto)');
 }
 
 // S3 (DESIGN_R_S.md §3.8): fasce a percentile sulla lista "Fermi ora" -
