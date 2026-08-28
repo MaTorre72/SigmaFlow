@@ -1,7 +1,56 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
-## Fase R e S — secondo giro di collaudo: R7/R8/S5/R9 + correzioni R5/R6.6/S2-S3 (2026-08-28, sessione 11) — codice pronto, in attesa della verifica finale su dati reali
+## Fase R e S — secondo giro di collaudo: R7/R8/S5/R9 + correzioni R5/R6.6/S2-S3 (2026-08-28, sessione 11) — BOCCIATO in prima consegna sulla qualita' del testo, corretto
+
+**Esito della verifica su dati reali di TEST** (`checkS4WipCoverageOnTest`,
+dopo il fix del throughput): `wip_bands_length: 3` — sopra la soglia
+minima (3), i due grafici scatter ("Throughput vs Lavoro in
+corso"/"Tempo di ciclo vs Lavoro in corso") si popolano davvero sui
+dati reali, non piu' "Dato non ancora sufficiente". `instant_difference:
+0` conferma nessuna regressione su S4. R6.6: sui dati reali di oggi
+`completed_initiatives`/`completed_passages`/`completed_cards` sono
+risultati tutti e tre uguali (12) — coincidenza reale del dataset
+attuale, non piu' una garanzia strutturale (la separazione delle
+pipeline resta corretta, verificato che diventano diverse su altri
+dati, es. il dataset demo: 8/9/5).
+
+**Bocciatura di Marco sulla prima consegna di questo giro**: nonostante
+tutti i criteri di accettazione R9 fossero tecnicamente soddisfatti
+(virgola invece di punto, tacche sui grafici, un solo numero di
+sovraccarico, ecc.), le note di pannello e diverse etichette del
+Quadro avanzato erano scritte come commenti tecnici — frasi lunghe,
+comparazioni "a differenza della tabella sopra", parentetiche di
+giustificazione interne. Citazione diretta di Marco su una nota
+("non e' nemmeno classificabile in italiano"): *"I 5 lavori piu' a
+lungo fermi in una colonna di attesa in questo momento - a differenza
+della tabella sopra (solo attese gia' concluse nel periodo), qui non
+c'e' finestra: e' lo stato adesso."* — corretto in: *"I 5 lavori fermi
+da piu' tempo, in questo momento."*
+
+**Correzione applicata**: riscritte da zero tutte le note di pannello
+di `dashboard.html` (Margine di stabilita', Flusso e carico,
+Rilavorazione, Dove si blocca il lavoro, Fermi ora, Profilo della
+rilavorazione, Capacita', Carico mensile, Quadro avanzato, grafico
+Lavoro in corso) in frasi brevi e dirette, senza gergo di
+implementazione ne' comparazioni meta-testuali. Accorciate anche le
+etichette dense del Quadro avanzato (E[K], p1, r, lambda/rho
+effettivo — la spiegazione "per passaggio, non per lavoro" ora vive
+una sola volta nella nota di pannello, non ripetuta in ogni riga) e il
+testo dinamico di "Affidabilita' della lettura" (mostra solo la
+soglia della fascia attuale, non tutte e tre insieme). Nessun dato o
+calcolo toccato — solo testo. 206/206 test, push su TEST verificato,
+ricollaudato nel Browser pane leggendo il testo riga per riga.
+
+**Lezione per le prossime sessioni**: soddisfare la lettera di un
+criterio di accettazione (es. "virgola non punto", "tacche sugli
+assi") non basta se il criterio di fondo — leggibilita' reale per un
+utente umano — resta non verificato. Il collaudo di un cambio
+editoriale deve includere una lettura del testo ad alta voce /
+end-to-end, non solo un controllo dei singoli requisiti tecnici
+elencati.
+
+---
 
 Da `docs/DESIGN_R_S_addendum_collaudo.md` (aggiornamento 2026-08-28,
 sezione "secondo giro"). Stesso branch, prosegue la stessa fase — non
