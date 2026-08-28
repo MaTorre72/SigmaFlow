@@ -2200,9 +2200,9 @@
       // R9.7: il numero (Cv^2) che determina l'etichetta categorica va
       // mostrato nello stesso pannello, non solo nel Quadro avanzato.
       // R10.4 (terzo giro di correzioni): soglie esplicite in pagina
-      // (non solo nel codice) - stesse di variabilityInterpretation_,
-      // Model.gs (BASSA sotto 0,5, MEDIA 0,5-1, ALTA da 1 in su).
-      'Variabilita dei tempi': (time.variability_level || 'Dato non ancora stimabile') + (time.variability !== null && time.variability !== undefined ? ' (Cv² = ' + rateValue(time.variability) + ' - soglie: BASSA sotto 0,5, MEDIA 0,5-1, ALTA da 1 in su)' : ''),
+      // (non solo nel codice) - confermate da Marco (dispensa FSC),
+      // stesse di variabilityInterpretation_ (Model.gs).
+      'Variabilita dei tempi': (time.variability_level || 'Dato non ancora stimabile') + (time.variability !== null && time.variability !== undefined ? ' (Cv² = ' + rateValue(time.variability) + ' - soglie: BASSA sotto 0,75, MEDIA 0,75-1,33, ALTA oltre 1,33)' : ''),
       'Tempo alto osservato': estimableValue(time.high_observed_days, ' giorni'),
       'Tempo prudenziale consigliato': estimableValue(time.prudent_service_days, ' giorni')
     };

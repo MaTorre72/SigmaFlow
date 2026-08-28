@@ -110,11 +110,30 @@ pane con dati demo (60 job) - nessun errore in console, tutte le
 modifiche confermate visivamente (decimali, legenda, rimozione
 grafico, rename, spaziatura).
 
-**Non ancora chiuso, richiede l'intervento di Marco**:
-- R6.2 (mu): eseguire `checkMuConsistencyOnTest()` dall'editor Apps
-  Script (Model.gs) e riportare il risultato.
-- R10.4: confermare le soglie Cv² pubblicate (0,5 e 1) o indicarne di
-  diverse da una fonte esplicita.
+**R6.2 (mu) — chiuso**: `checkMuConsistencyOnTest()` eseguita da Marco
+sui dati reali di TEST: `displayed_mu` (0,02), `recomputed_mu_same_formula`
+(0,02) e `capacity_implied_mu` (0,02) coincidono tutti e tre - **nessun
+bug di calcolo**, mu e' internamente coerente con capacita' effettiva.
+La discrepanza vista nell'audit del 28/08 (mu=0,14 contro un mu
+implicito di ~0,168) non si riproduce sui dati odierni (team_size=3,
+5 campioni completati, E[S]=41,57gg - stesso E[S] dell'audit, ma
+team_size/campione diversi) - probabilmente uno snapshot di dati
+diverso al momento dell'audit, non un difetto del codice. Trovato pero'
+un artefatto reale di leggibilita' (non un bug): `round_()` arrotonda
+sempre a 2 decimali fissi, che per un tasso piccolo come mu (0,024 ->
+"0,02") lascia una sola cifra significativa - un controllo a mano
+("capacita' = team_size × mu mostrato") non torna usando i numeri
+arrotondati, pur essendo il calcolo vero perfettamente coerente.
+**Deciso con Marco**: lasciare 2 decimali fissi anche per i tassi
+piccoli (coerenza con R9.1), nessuna eccezione - la coerenza resta
+verificabile con la diagnostica, non a colpo d'occhio.
+
+**R10.4 — soglie Cv² aggiornate**: confermate da Marco (dispensa FSC),
+diverse da quelle indicative usate finora - **BASSA sotto 0,75, MEDIA
+0,75-1,33 (inclusi entrambi gli estremi), ALTA oltre 1,33** (erano:
+sotto 0,5 / 0,5-1 / oltre 1). Aggiornate in `variabilityInterpretation_`
+(Model.gs) e nel testo mostrato in pagina (client.html). 210/210 test
+(nessuno dipendeva dalle soglie precedenti), push su TEST verificato.
 
 ---
 

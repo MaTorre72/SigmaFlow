@@ -756,14 +756,17 @@ function systemStatus_(load, dataQuality) {
   return { code: 'critical', label: 'CRITICO', message: 'Il carico supera la capacita disponibile. Il lavoro tendera ad accumularsi.' };
 }
 
+// R10.4 (terzo giro di correzioni, 2026-08-28): soglie confermate da
+// Marco (dispensa FSC) - sostituiscono le precedenti 0,5/1 (indicative,
+// mai confermate da una fonte esplicita).
 function variabilityInterpretation_(value) {
   if (value === null) {
     return { level: null, message: 'Dato non ancora stimabile.' };
   }
-  if (value < 0.5) {
+  if (value < 0.75) {
     return { level: 'BASSA', message: 'I tempi sono abbastanza regolari.' };
   }
-  if (value < 1) {
+  if (value <= 1.33) {
     return { level: 'MEDIA', message: 'I tempi cambiano in modo sensibile tra un lavoro e l altro.' };
   }
   return { level: 'ALTA', message: 'Pochi lavori lunghi possono bloccare molta capacita.' };
