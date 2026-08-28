@@ -499,10 +499,15 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
 // approssimato (entrato meno completato, mese dopo mese) - confrontava
 // un'approssimazione con la fotografia vera della card "Lavoro
 // accettato (attuale)" di Vista Rapida, per questo i due numeri non
-// coincidevano mai. Sostituito da 'accepted_points', ricostruito con lo
-// stesso motore di stockSeriesFromLog_ usato per "Lavoro in corso" (S4),
-// sui role di "Lavoro accettato" (stadi 1-4) - stesso calcolo, stesso
-// nome, sopra (Vista Rapida) e sotto (questo grafico/tabella).
+// coincidevano mai. Sostituito da 'accepted_points'.
+// R10.6 (Marco, 2026-08-28): la prima versione di 'accepted_points'
+// era una MEDIA mensile (stockSeriesFromIndex_) - ancora diversa dalla
+// fotografia istantanea della card, per lo stesso motivo (media contro
+// istante non tornano mai esattamente). Corretto usando
+// stockInstantSeriesFromIndex_: ogni bucket e' valutato a un istante
+// preciso (fine mese, o 'now' per il mese in corso) - l'ultimo bucket
+// coincide cosi' esattamente con "Lavoro accettato (attuale)", per
+// costruzione, non per un caso fortunato sui dati del momento.
 // 'columnMap' e' facoltativo (retrocompatibilita' coi chiamanti che non
 // hanno bisogno di 'accepted_points', es. i test che verificano solo
 // entered/completed) - senza, i bucket restano a 0. 'jobIndex'
@@ -541,8 +546,8 @@ function monthBuckets_(jobs, now, count, columnMap, jobIndex) {
 
   if (jobIndex || columnMap) {
     var index = jobIndex || buildJobIntervalsIndex_(jobs, [], columnMap, now);
-    var accepted = stockSeriesFromIndex_(index, buckets, ['backlog', 'prep', 'wip', 'stand_by']);
-    buckets.forEach(function(bucket, bucketIndex) { bucket.accepted_points = accepted.values[bucketIndex]; });
+    var accepted = stockInstantSeriesFromIndex_(index, buckets, now, ['backlog', 'prep', 'wip', 'stand_by']);
+    buckets.forEach(function(bucket, bucketIndex) { bucket.accepted_points = accepted[bucketIndex]; });
   }
   // 'start'/'end' servivano solo come input a stockSeriesFromIndex_ qui
   // sopra - mai letti dal client (drawPointsTimeline/renderMonthlyLoad
@@ -1256,6 +1261,43 @@ function stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, buckets, includ
   return stockSeriesFromIndex_(buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now), buckets, includeRoles);
 }
 
+// R10.6 (Marco, 2026-08-28): "Lavoro accettato" nel grafico "Andamento
+// del carico" e nella card di Vista Rapida devono essere lo STESSO
+// numero per lo stesso istante, non due criteri diversi con una nota
+// che ne spiega lo scarto (vietato per principio, non solo per questo
+// caso) - la media mensile usata finora (stockSeriesFromIndex_) e' un
+// concetto diverso da una fotografia di adesso, per costruzione non
+// poteva mai tornare esatta. Sostituita da una vera fotografia
+// istantanea, valutata a un istante preciso per bucket: per un mese
+// gia' concluso, l'istante e' la sua fine; per il mese in corso,
+// l'istante e' 'now' - cosi' l'ultimo punto della serie coincide
+// esattamente con la card, per costruzione, non per coincidenza.
+function stockInstantAt_(jobIndex, atDate, includeRoles) {
+  var total = 0;
+  jobIndex.entries.forEach(function(entry) {
+    var active = null;
+    entry.intervals.forEach(function(interval) {
+      if (interval.start <= atDate) { active = interval; }
+    });
+    if (active && includeRoles.indexOf(active.role) !== -1) {
+      total += entry.points;
+    }
+  });
+  return round_(total);
+}
+
+// Stessa idea di stockInstantAt_, applicata a una serie di bucket
+// {start, end}: per ognuno, l'istante di valutazione e' la sua fine
+// (o 'now', se il bucket non e' ancora concluso - garantisce che
+// l'ultimo bucket, quello in corso, coincida esattamente con la
+// fotografia di adesso).
+function stockInstantSeriesFromIndex_(jobIndex, buckets, now, includeRoles) {
+  return buckets.map(function(bucket) {
+    var checkpoint = new Date(Math.min(bucket.end.getTime() - 1, now.getTime()));
+    return stockInstantAt_(jobIndex, checkpoint, includeRoles);
+  });
+}
+
 // Definizione dei bucket settimanali (usata da S4/S6 - "Lavoro in
 // corso", e dai test) - separata da stockSeriesFromLog_ perche' il
 // bucketing mensile di "Lavoro accettato" (R9.14, monthBuckets_) usa
@@ -1565,14 +1607,14 @@ function checkS4WipCoverage_() {
     }
   });
   instantAcceptedPoints = round_(instantAcceptedPoints);
-  // Informativo (come current_week_average_wip sopra): la MEDIA sul
-  // mese corrente che finisce davvero nel grafico "Andamento del
-  // carico" (monthBuckets_.accepted_points) - puo' differire
-  // legittimamente dalla fotografia di adesso con qualunque churn nel
-  // mese, non e' il criterio di pass/fail.
+  // R10.6 (Marco, 2026-08-28): monthBuckets_.accepted_points non e'
+  // piu' una media mensile - e' una fotografia valutata a un istante
+  // preciso (stockInstantSeriesFromIndex_), 'now' per il mese in corso.
+  // Deve quindi coincidere ESATTAMENTE col valore live qui sopra, non
+  // solo "in modo informativo" come prima di questa correzione.
   var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   var monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  var currentMonthAcceptedAverage = stockSeriesFromIndex_(jobIntervalsIndex, [{ start: monthStart, end: monthEnd }], acceptedRoles).values[0];
+  var currentMonthAcceptedInstant = stockInstantSeriesFromIndex_(jobIntervalsIndex, [{ start: monthStart, end: monthEnd }], now, acceptedRoles)[0];
 
   return {
     executed_at: nowIso_(),
@@ -1616,8 +1658,10 @@ function checkS4WipCoverage_() {
     accepted_work_instant_from_log: instantAcceptedPoints,
     accepted_work_instant_live_panel: points.committed_points,
     accepted_work_instant_difference: round_(instantAcceptedPoints - points.committed_points),
-    // Informativo, non un criterio di pass/fail - vedi commento sopra.
-    accepted_work_current_month_average: currentMonthAcceptedAverage
+    // R10.6: deve coincidere ESATTAMENTE con points.committed_points -
+    // non piu' informativo, e' lo stesso identico calcolo del grafico.
+    accepted_work_current_month_from_chart: currentMonthAcceptedInstant,
+    accepted_work_current_month_difference: round_(currentMonthAcceptedInstant - points.committed_points)
   };
 }
 

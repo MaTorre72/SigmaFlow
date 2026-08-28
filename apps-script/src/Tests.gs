@@ -320,6 +320,7 @@ function runAllTests() {
     testWorkStageClassifiesAllSevenStages,
     testPointsStatisticsSeparatesPipelineFromCommittedWork,
     testMonthBucketsAcceptedPointsReconstructedFromLog,
+    testMonthBucketsAcceptedPointsIsInstantSnapshotNotAverage,
     testCurrentWorkloadKeepsCommittedWorkSeparateFromToInvoice,
     testInitiativeGroupsCountsOnlyObservedReentriesNotHistoryPosition,
     testBuildSystemStateReworkCountsOnlyReentriesWithinWindow,
@@ -2508,12 +2509,12 @@ function testPointsStatisticsSeparatesPipelineFromCommittedWork() {
   assertEquals_(2, points.committed_cards, 'due lavori impegnati');
 }
 
-// R9.14: 'accepted_points' (monthBuckets_, via stockSeriesFromLog_)
-// sostituisce il vecchio 'open_points' cumulato - job in backlog da
-// ben prima dell'inizio del mese, ancora aperto oggi: il mese
-// PRECEDENTE (pienamente trascorso, mai troncato a 'now' come farebbe
-// il mese corrente ancora in corso) deve avere una media ricostruita
-// pari esattamente a size_points, copertura piena per tutto il mese.
+// R9.14/R10.6: 'accepted_points' (monthBuckets_) sostituisce il
+// vecchio 'open_points' cumulato - job in backlog da ben prima
+// dell'inizio del mese, ancora aperto oggi: il mese PRECEDENTE
+// (pienamente trascorso) deve avere una fotografia (a fine mese) pari
+// esattamente a size_points - il job era in backlog per tutta la sua
+// durata, quindi anche a fine mese.
 function testMonthBucketsAcceptedPointsReconstructedFromLog() {
   var now = new Date(2026, 7, 27);
   var columnMap = {};
@@ -2523,7 +2524,27 @@ function testMonthBucketsAcceptedPointsReconstructedFromLog() {
 
   var buckets = monthBuckets_(jobs, now, 2, columnMap); // [luglio (pieno), agosto (parziale, non verificato qui)]
 
-  assertEquals_(9, buckets[0].accepted_points, 'mese pienamente trascorso (luglio), job in backlog da prima del suo inizio -> media ricostruita = size_points intero');
+  assertEquals_(9, buckets[0].accepted_points, 'mese pienamente trascorso (luglio), job in backlog da prima del suo inizio -> fotografia a fine mese = size_points intero');
+}
+
+// R10.6 (Marco, 2026-08-28): "Lavoro accettato" nel grafico deve
+// coincidere ESATTAMENTE con la card "Lavoro accettato (attuale)" di
+// Vista Rapida - non una media sul mese, una fotografia di adesso.
+// Job entrato in backlog solo 2 giorni fa (non da tutto il mese): una
+// MEDIA sul mese darebbe una frazione di size_points, la fotografia
+// di adesso deve dare size_points pieno, perche' il job E' in backlog
+// adesso - questo distingue il comportamento corretto (fotografia) da
+// quello vecchio (media), non solo un numero che torna per coincidenza.
+function testMonthBucketsAcceptedPointsIsInstantSnapshotNotAverage() {
+  var now = new Date(2026, 7, 27);
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var log = [{ id: 'e1', type: 'move', to: 'backlog', ts: testIsoDaysAgo_(now, 2) }];
+  var jobs = [{ job_id: 'JOB-RECENT', size_points: 9, size_class: 'M', activity_log_json: JSON.stringify(log) }];
+
+  var buckets = monthBuckets_(jobs, now, 1, columnMap);
+
+  assertEquals_(9, buckets[0].accepted_points, 'fotografia di adesso, non media sul mese - punti pieni anche se il job e\' entrato solo 2 giorni fa');
 }
 
 // R7: "Lavoro presente e capacita'" - il lavoro impegnato (stadi 1-4) e

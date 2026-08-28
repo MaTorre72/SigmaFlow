@@ -20,9 +20,9 @@
     <article class="gauge-card"><div id="gauge-rework" class="gauge"><span>-</span></div><strong>Rilavorazione</strong></article>
   </div>
   <div class="points-summary">
-    <article><span>Punti accettati</span><strong id="points-committed">-</strong></article>
-    <article><span>Nuovi punti</span><strong id="points-added">-</strong></article>
-    <article><span>Punti completati</span><strong id="points-completed">-</strong></article>
+    <article><span>Punti accettati (adesso)</span><strong id="points-committed">-</strong></article>
+    <article><span>Nuovi punti (ultimi 30 giorni)</span><strong id="points-added">-</strong></article>
+    <article><span>Punti completati (ultimi 30 giorni)</span><strong id="points-completed">-</strong></article>
   </div>
   <article class="chart-panel">
     <div><h2>Andamento del carico</h2><p>Lavoro accettato, nuovi punti e completati</p></div>
@@ -44,11 +44,17 @@
          di confondersi con quel nome - "Nuovi" indica il flusso in
          ingresso nel periodo, distinto dallo stock. -->
     <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Nuovi" e "Completati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
-    <!-- R10.6 (terzo giro di correzioni): i numeri di Vista Rapida
-         possono superare il massimo degli assi qui sotto - non e' un
-         errore di scala, sono calcolati su basi diverse (vedi sotto),
-         non la stessa identica serie. -->
-    <p class="panel-note">I numeri di Vista Rapida sono una fotografia di adesso e gli ultimi 30 giorni; questo grafico mostra invece medie e conteggi per mese solare, ricostruiti dallo storico - per questo i due possono non coincidere esattamente, soprattutto per il mese ancora in corso.</p>
+    <!-- R10.6 (Marco, 2026-08-28): "un fatto, un calcolo" applicato
+         davvero, non spiegato con una nota - "Lavoro accettato" qui e
+         la card "Punti accettati (adesso)" sono ORA lo stesso identico
+         calcolo (stockInstantSeriesFromIndex_, Model.gs): l'ultimo
+         punto di questa linea E' quel numero, per costruzione, non per
+         coincidenza. "Nuovi"/"Completati" restano un totale per mese
+         solare (qui) contro un totale sugli ultimi 30 giorni (Vista
+         Rapida) - due finestre diverse per scelta, dichiarate
+         esplicitamente nell'etichetta di Vista Rapida invece che in
+         una nota separata. -->
+    <p class="panel-note">"Lavoro accettato" qui e in Vista Rapida e' sempre lo stesso numero. "Nuovi" e "Completati" qui sono invece un totale per mese solare - un numero diverso da "Nuovi punti"/"Punti completati" di Vista Rapida, che coprono gli ultimi 30 giorni (finestra diversa, per questo il totale non e' lo stesso).</p>
   </article>
 </section>
 

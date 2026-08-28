@@ -2311,12 +2311,13 @@
       'Fattore di congestione (U)': !stability ? 'Dato non ancora stimabile' : (stability.congestion_factor !== null ? rateValue(stability.congestion_factor) : 'Non calcolabile: il carico supera gia\' la capacita\' disponibile.')
     };
     renderDl('stability-metrics', stabilityDl, outOfScaleClasses_('Utilizzo (rho effettivo)', stability ? stability.rho_effective : null));
-    // R10.4: "Fattore di variabilita'" (V, media tra variabilita' di
-    // arrivo e di lavorazione) NON e' la stessa grandezza di "Cv^2" nel
-    // pannello "Tempi e variabilita'" (solo lavorazione) - due fatti
-    // distinti che si assomigliano, da distinguere esplicitamente
-    // invece di rischiare che sembrino la stessa cosa con due nomi.
-    document.getElementById('stability-variability-note').textContent = '"Fattore di variabilita\' (V)" non e\' lo stesso numero di "Cv²" nel pannello "Tempi e variabilita\'": Cv² e\' solo la variabilita\' dei tempi di lavorazione, V e\' la media tra quella e la variabilita\' di arrivo del lavoro - due fatti distinti, stessa scala BASSA/MEDIA/ALTA.';
+    // R10.4 (testo semplificato dopo il commento di Marco - la prima
+    // versione era troppo tecnica): "Fattore di variabilita'" e "Cv²"
+    // sono due grandezze diverse per calcolo (V include anche la
+    // variabilita' di arrivo del lavoro, non solo quella di
+    // lavorazione) - il dettaglio tecnico resta nei commenti del
+    // codice, in pagina serve solo l'avviso a non confonderli.
+    document.getElementById('stability-variability-note').textContent = 'Questo numero non e\' lo stesso di "Cv²" mostrato piu\' sotto in "Tempi e variabilita\'" - sembrano simili ma sono due misure diverse, anche se lette con la stessa scala BASSA/MEDIA/ALTA.';
 
     // M5, chiesto da Marco (2026-08-20, punto 4): non solo il totale
     // complessivo, anche occorrenze/media/min/max per tipo - la nuova
@@ -3088,7 +3089,10 @@
     if (total === null || total === undefined || !windowDays) {
       return 'Dato non ancora stimabile';
     }
-    return metricValue(Math.round(Number(total) / windowDays * 7 * 100) / 100, suffix);
+    // R9.1, parte residua: e' un tasso (per settimana) come perWeekValue -
+    // 2 decimali fissi, mai variabili (era rimasta fuori dal primo giro,
+    // segnalata da Marco su "Nuovi (periodo)"/"Completati (periodo)").
+    return rateValue(Number(total) / windowDays * 7, suffix);
   }
 
   // Stima i punti/settimana equivalenti di un tasso espresso in

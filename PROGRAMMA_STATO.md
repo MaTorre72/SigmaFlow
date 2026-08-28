@@ -1,6 +1,70 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — R10.6 risolto per davvero (non con una nota), R9.1 completato, nota V/Cv² semplificata (2026-08-28, sessione 17)
+
+Marco ha respinto con forza la nota di R10.6 della sessione precedente
+("i due numeri possono non coincidere esattamente") - **principio
+fondamentale ribadito esplicitamente: mai risolvere un'ambiguita' con
+una nota di testo se si puo' risolvere cambiando il codice**. Corretto
+di conseguenza, non solo riformulato.
+
+**R10.6, risolto con una modifica di calcolo vera**: "Lavoro accettato"
+nel grafico "Andamento del carico" era ricostruito come una MEDIA
+mensile (`stockSeriesFromIndex_`) - per costruzione non poteva mai
+coincidere esattamente con la fotografia istantanea della card "Punti
+accettati" di Vista Rapida. Sostituita con
+`stockInstantSeriesFromIndex_` (nuova, Model.gs): ogni punto della
+serie e' ora valutato a un istante preciso (fine mese per i mesi
+conclusi, `now` per il mese in corso) - l'ultimo punto della serie
+**e' letteralmente lo stesso calcolo** della card, non un numero che
+coincide per coincidenza. Verificato sui dati demo:
+`committed_points` (Vista Rapida) e `timeline[ultimo].accepted_points`
+(grafico) = **372 in entrambi**, stesso identico numero. Aggiunto un
+test (`testMonthBucketsAcceptedPointsIsInstantSnapshotNotAverage`) che
+dimostra la differenza tra il vecchio comportamento (media) e il nuovo
+(fotografia): un job entrato in backlog 2 giorni fa deve contare punti
+pieni adesso, non una frazione mensile.
+
+Per "Nuovi"/"Completati" (flusso, non stock) la stessa unificazione
+totale non era sensata: la card usa una finestra MOBILE di 30 giorni
+(coerente con lambda/mu/rho/capacita', che restano su quella finestra
+per la robustezza statistica gia' stabilita in R5/R6.2 - non toccata),
+il grafico usa il mese solare per costruire una serie storica a piu'
+punti. Marco ha confermato che in questo caso l'alternativa accettabile
+e' **etichettare esplicitamente la finestra nel nome stesso**, non
+spiegarla in una nota a parte: Vista Rapida ora dice "Nuovi punti
+(ultimi 30 giorni)"/"Punti completati (ultimi 30 giorni)" (erano senza
+qualificazione), "Punti accettati" e' diventato "Punti accettati
+(adesso)". La nota sotto il grafico e' stata riscritta per dichiarare
+i due fatti (non piu' "possono non coincidere": ora dice esplicitamente
+che "Lavoro accettato" e' sempre lo stesso numero, mentre "Nuovi"/
+"Completati" coprono finestre diverse per scelta, dichiarate nel nome).
+
+**R9.1, completamento**: trovata e corretta una seconda funzione di
+formattazione mai aggiornata nel primo giro - `perWeekFromWindowTotal_`
+(usata da "Nuovi (periodo)"/"Completati (periodo)" in "Flusso e
+carico") passava ancora da `metricValue` invece che da `rateValue`,
+motivo dei residui "2,8"/"1,89"/"11,9" a una cifra segnalati da Marco.
+Ora tutte le celle di quella riga mostrano 2 decimali fissi (2,80 /
+21,93 / 1,89 / 11,90).
+
+**Nota V/Cv² semplificata**: la spiegazione tecnica introdotta nel
+giro precedente ("V e' la media tra variabilita' di arrivo e di
+lavorazione") e' stata giudicata da Marco troppo tecnica per un
+pannello principale. Riscritta senza il "perche'" tecnico: dice solo
+che i due numeri sono diversi anche se sembrano simili, senza usare i
+termini "variabilita' di arrivo"/"di lavorazione" - il dettaglio tecnico
+resta nei commenti del codice, non in pagina (principio 6, gia' in
+vigore da questa fase).
+
+**Verifica**: 211/211 test Node (uno in piu': nuovo test sulla
+fotografia istantanea), `client.html` senza errori di sintassi, push
+su TEST verificato (16/16 file identici), collaudo visivo su Browser
+pane con verifica diretta della risposta `getMetrics()` (non solo del
+rendering) - confermato `committed_points === timeline[ultimo]
+.accepted_points` byte per byte sui dati demo.
+
 ## Fase R e S — R10.4 (redesign "Margine di stabilita'") + R10.6 (chiarito disallineamento assi/card) (2026-08-28, sessione 16)
 
 Ripreso lo stesso prompt "terzo giro" ricevuto una seconda volta con
