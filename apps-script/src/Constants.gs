@@ -74,6 +74,25 @@ var SIGMAFLOW = {
     wait_authority: 't_ente_d',
     wait_internal: 't_interno_d'
   },
+  // S4 (DESIGN_R_S_addendum_collaudo.md, sez. S4): classifica ogni ruolo
+  // di colonna in una delle tre fasi del lavoro reale - 'backlog' (non
+  // ancora iniziato), 'active' (lavorazione in corso, comprese le
+  // colonne di attesa: il lavoro e' aperto anche se fermo li'), 'done'
+  // (completato/archiviato). Riusa il 'role' gia' esistente (nessun
+  // campo nuovo sulle colonne) - serve solo a ricostruire il WIP reale
+  // dallo storico dei passaggi (activeWipWeeklyFromLog_, Model.gs),
+  // invece di stimarlo come "entrato meno completato" (include il
+  // backlog, non solo il lavoro davvero in corso). 'neutral' (es. una
+  // colonna Note) non e' lavoro tracciato: trattato come 'backlog', non
+  // essendoci un ruolo piu' specifico documentato per questo caso.
+  WIP_COLUMN_CLASS: {
+    backlog: 'backlog',
+    prep: 'active',
+    wip: 'active',
+    stand_by: 'active',
+    done: 'done',
+    neutral: 'backlog'
+  },
   SCENARIOS: {
     optimistic: {
       label: 'Scenario ottimistico',

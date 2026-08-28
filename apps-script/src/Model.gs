@@ -290,7 +290,11 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // si legge sulle medie di fascia (wipBands), mai sulle settimane
   // grezze collegate in ordine cronologico (il WIP osservato oscilla,
   // non e' monotono nel tempo).
-  var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, 26);
+  // S4: wip_medio di ogni settimana e' ora il WIP ATTIVO ricostruito dal
+  // log dei passaggi di colonna (activeWipWeeklyFromLog_), non piu' la
+  // stima cumulata "entrato meno completato" (che includeva il backlog).
+  var activeWipWeekly = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, 26);
+  var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, 26, activeWipWeekly.weekly);
   var wipBands = wipBands_(flowWeeklyBuckets, 20, 3);
 
   // Chiesto da Marco (2026-08-20): mostrare "dove e' possibile" ogni
@@ -379,6 +383,15 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
     delayProfileMetrics: delayProfile,
     flowWeeklyBuckets: flowWeeklyBuckets,
     wipBands: wipBands,
+    // S4: trasparenza sulla copertura del log - job esclusi dal calcolo
+    // del WIP attivo perche' activity_log_json e' vuoto/non interpretabile
+    // (nessun evento 'move' da cui ricostruire la timeline di colonna).
+    // Non stimati alla cieca: semplicemente non contribuiscono a nessuna
+    // settimana finche' il loro log non e' completo.
+    wipCoverage: {
+      excluded_jobs: activeWipWeekly.excluded_job_ids.length,
+      excluded_job_ids: activeWipWeekly.excluded_job_ids
+    },
     stabilityMetrics: stability === null ? null : {
       margin: stability.margin,
       congestion_factor: stability.congestion_factor,
@@ -970,32 +983,31 @@ function currentlyBlocked_(jobs, columnMap, now) {
 
 // S2/S3 (corretto in collaudo, addendum): aggrega la storia a grana
 // settimanale (ultime weeksCount settimane) in tre numeri per settimana
-// - WIP medio in punti (running: entrato meno completato, cumulato -
-// stesso principio di monthBuckets_; include il backlog, non solo il
-// lavoro in colonne attive - semplificazione nota, non uno strumento di
-// audit, vedi S4 per il superamento), throughput osservato (punti
-// completati quella settimana) e tempo di ciclo medio osservato (media
-// di visitServiceTimeDays_ sulle visite chiuse quella settimana).
+// - WIP medio in punti, throughput osservato (punti completati quella
+// settimana) e tempo di ciclo medio osservato (media di
+// visitServiceTimeDays_ sulle visite chiuse quella settimana).
 // Sostituisce la prima versione (wipCycleTimeScatter_/
 // visitActiveInterval_, per-visita, WIP contato come numero grezzo di
 // visite concorrenti) - il WIP va espresso in punti per essere
 // confrontabile tra lavori di taglia diversa.
-function flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, weeksCount) {
+// S4 (DESIGN_R_S_addendum_collaudo.md, sez. S4): wip_medio arriva ora da
+// fuori (activeWipWeeklyRounded, un array parallelo a weeksCount gia'
+// calcolato da activeWipWeeklyFromLog_ - WIP ATTIVO ricostruito dal log
+// dei passaggi di colonna), non piu' dal cumulato "entrato meno
+// completato" (che includeva il tempo passato in backlog). Throughput e
+// tempo di ciclo restano invariati - non c'entrano con questo problema.
+function flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, weeksCount, activeWipWeeklyRounded) {
   var first = new Date(now.getTime() - weeksCount * 7 * 86400000);
   var buckets = [];
   var byKey = {};
   for (var i = 0; i < weeksCount; i++) {
     var date = new Date(first.getTime() + i * 7 * 86400000);
     var key = Utilities.formatDate(date, SIGMAFLOW.TZ, "yyyy-'W'ww");
-    var bucket = { key: key, entered_points: 0, completed_points: 0, ct_samples: [] };
+    var bucket = { key: key, completed_points: 0, ct_samples: [] };
     buckets.push(bucket);
     byKey[key] = bucket;
   }
   jobs.concat(archivedJobs || []).forEach(function(job) {
-    if (job.arrival_ts) {
-      var ek = Utilities.formatDate(new Date(job.arrival_ts), SIGMAFLOW.TZ, "yyyy-'W'ww");
-      if (byKey[ek]) { byKey[ek].entered_points += jobPoints_(job); }
-    }
     if (job.incarico_chiuso_ts) {
       var dk = Utilities.formatDate(new Date(job.incarico_chiuso_ts), SIGMAFLOW.TZ, "yyyy-'W'ww");
       if (byKey[dk]) { byKey[dk].completed_points += jobPoints_(job); }
@@ -1010,18 +1022,96 @@ function flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, wee
     if (ct > 0) { byKey[key].ct_samples.push(ct); }
   });
 
-  var running = 0;
-  return buckets.map(function(b) {
-    running += b.entered_points - b.completed_points;
+  return buckets.map(function(b, index) {
     var ctAvg = b.ct_samples.length ? round_(b.ct_samples.reduce(function(s, v) { return s + v; }, 0) / b.ct_samples.length) : null;
     return {
       key: b.key,
-      wip_medio: round_(Math.max(0, running)),
+      wip_medio: activeWipWeeklyRounded[index],
       throughput_punti_settimana: round_(b.completed_points),
       ct_medio_giorni: ctAvg,
       n_campioni_ct: b.ct_samples.length
     };
   });
+}
+
+// S4: classifica il ruolo di una colonna in una delle tre fasi del
+// lavoro reale (WIP_COLUMN_CLASS, Constants.gs) - fallback 'backlog'
+// per ruoli non mappati (non dovrebbe accadere, i ruoli sono un insieme
+// chiuso, ma un fallback esplicito e' piu' sicuro di un undefined che si
+// propaga in giro).
+function wipColumnClass_(column) {
+  return SIGMAFLOW.WIP_COLUMN_CLASS[column.role] || 'backlog';
+}
+
+// S4: ricostruisce la timeline di colonna di un job dai soli eventi
+// 'move' di activity_log_json - un intervallo per ogni colonna
+// attraversata, dall'ingresso (ts dell'evento) all'ingresso nella
+// colonna successiva (o, per l'ultimo intervallo, incarico_chiuso_ts se
+// il caso e' chiuso, altrimenti 'now' se ancora aperto). Stesso
+// principio di base di computeVisiteFromLog_ (ActivityLog.gs): la
+// sequenza reale viene dai 'to' degli eventi in ordine, mai da 'from'.
+// Restituisce null (non un array vuoto) quando il log non ha nessun
+// evento 'move' interpretabile - segnale esplicito per il chiamante di
+// escludere il job dal calcolo, invece di stimarlo alla cieca.
+function jobColumnIntervalsFromLog_(job, columnMap, now) {
+  var moveLog = parseActivityLog_(job.activity_log_json).filter(function(event) {
+    return event.type === 'move';
+  });
+  if (!moveLog.length) {
+    return null;
+  }
+  var intervals = [];
+  for (var i = 0; i < moveLog.length; i++) {
+    var start = new Date(moveLog[i].ts);
+    var end = (i + 1 < moveLog.length) ? new Date(moveLog[i + 1].ts) : new Date(job.incarico_chiuso_ts || now);
+    var column = columnMap[moveLog[i].to] || { role: 'neutral' };
+    intervals.push({ start: start, end: end, wip_class: wipColumnClass_(column) });
+  }
+  return intervals;
+}
+
+// S4: per ogni settimana delle ultime weeksCount, quanti punti erano
+// realmente in lavorazione (colonne 'active', ne' backlog ne' done) -
+// media pesata sui giorni della settimana passati in una colonna
+// 'active', ricostruita dallo storico di colonna (jobColumnIntervalsFromLog_)
+// invece che stimata come "entrato meno completato" (che include il
+// backlog). Un job senza log interpretabile viene escluso esplicitamente
+// (mai stimato alla cieca) - il chiamante riceve l'elenco per poterlo
+// segnalare.
+function activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount) {
+  var first = new Date(now.getTime() - weeksCount * 7 * 86400000);
+  var weeks = [];
+  for (var i = 0; i < weeksCount; i++) {
+    var start = new Date(first.getTime() + i * 7 * 86400000);
+    var end = new Date(start.getTime() + 7 * 86400000);
+    weeks.push({ start: start, end: end, active_points: 0 });
+  }
+
+  var excludedJobIds = [];
+  jobs.concat(archivedJobs || []).forEach(function(job) {
+    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
+    if (!intervals) {
+      excludedJobIds.push(job.job_id);
+      return;
+    }
+    var points = jobPoints_(job);
+    intervals.forEach(function(interval) {
+      if (interval.wip_class !== 'active') { return; }
+      weeks.forEach(function(week) {
+        var overlapStart = interval.start > week.start ? interval.start : week.start;
+        var overlapEnd = interval.end < week.end ? interval.end : week.end;
+        var overlapDays = (overlapEnd - overlapStart) / 86400000;
+        if (overlapDays > 0) {
+          week.active_points += (overlapDays / 7) * points;
+        }
+      });
+    });
+  });
+
+  return {
+    weekly: weeks.map(function(w) { return round_(w.active_points); }),
+    excluded_job_ids: excludedJobIds
+  };
 }
 
 // S2/S3: raggruppa le settimane di flowWeeklyBuckets_ per fascia di WIP
@@ -1133,4 +1223,63 @@ function round_(value) {
     return null;
   }
   return Math.round(value * 100) / 100;
+}
+
+// S4 (DESIGN_R_S_addendum_collaudo.md, sez. S4): diagnostica di sola
+// lettura, richiesta esplicitamente prima di considerare S4 chiuso -
+// (1) copertura del log (quanti job sono esclusi dal calcolo perche'
+// activity_log_json non ha eventi 'move' interpretabili) e (2) verifica
+// di coerenza tra il WIP attivo ricostruito per la settimana corrente e
+// il totale del pannello per-colonna live (colonne non-backlog,
+// non-done) - stessa fotografia, deve tornare lo stesso numero (a meno
+// di arrotondamento). Nessuna scrittura.
+function checkS4WipCoverage_() {
+  var config = readConfig_();
+  var jobs = loadJobsWithVisitSummary_();
+  var archivedJobs = loadArchivedJobsWithVisitSummary_();
+  var columnMap = {};
+  columnsFromConfig_(config).forEach(function(column) { columnMap[column.id] = column; });
+  var now = new Date();
+  var weeksCount = 26;
+
+  var reconstructed = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount);
+  var currentWeekWip = reconstructed.weekly[reconstructed.weekly.length - 1];
+
+  var livePanelPoints = 0;
+  jobs.forEach(function(job) {
+    var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
+    if (wipColumnClass_(column) === 'active') {
+      livePanelPoints += jobPoints_(job);
+    }
+  });
+
+  return {
+    executed_at: nowIso_(),
+    total_jobs_scanned: jobs.length + archivedJobs.length,
+    excluded_jobs: reconstructed.excluded_job_ids.length,
+    excluded_job_ids: reconstructed.excluded_job_ids,
+    current_week_wip_reconstructed: currentWeekWip,
+    current_week_wip_live_panel: round_(livePanelPoints),
+    difference: round_(currentWeekWip - livePanelPoints)
+  };
+}
+
+// Wrapper eseguibili dall'editor Apps Script (menu Esegui) o via
+// `clasp run` - stesso pattern gia' in uso per le altre diagnostiche di
+// sola lettura del progetto (withEnvironment_ con requiresLock=false,
+// come fa gia' api() per le azioni classificate come lettura).
+function checkS4WipCoverageOnTest() {
+  return withEnvironment_('test', function() {
+    var result = checkS4WipCoverage_();
+    Logger.log(JSON.stringify(result));
+    return result;
+  }, false);
+}
+
+function checkS4WipCoverageSuProd() {
+  return withEnvironment_('prod', function() {
+    var result = checkS4WipCoverage_();
+    Logger.log(JSON.stringify(result));
+    return result;
+  }, false);
 }

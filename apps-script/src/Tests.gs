@@ -324,7 +324,10 @@ function runAllTests() {
     testCurrentlyBlockedListsOnlyWaitingJobsOrderedByElapsedDays,
     testPercentileHelperNearestRank,
     testDelayProfileExposesP80DaysWhenEnoughSamples,
-    testFlowWeeklyBucketsComputesCumulativeWipThroughputAndCycleTime,
+    testFlowWeeklyBucketsCopiesActiveWipAndKeepsThroughputAndCycleTimeUnchanged,
+    testActiveWipWeeklyFromLogTracksBacklogActiveWaitAndClosedIntervals,
+    testActiveWipWeeklyFromLogExcludesJobsWithoutParseableLog,
+    testBuildSystemStateExposesWipCoverageAndUsesReconstructedWip,
     testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending,
     testWipBandsExcludesWeeksWithoutCycleTimeSamples,
     testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands,
@@ -2541,7 +2544,14 @@ function testDelayProfileExposesP80DaysWhenEnoughSamples() {
 // arrivo da 8 pt, nessun completamento (WIP cumulato = 8); settimana 2
 // completa quell'arrivo (8 pt di throughput, WIP torna a 0) e chiude una
 // visita con tempo di ciclo 6 giorni.
-function testFlowWeeklyBucketsComputesCumulativeWipThroughputAndCycleTime() {
+// S4 (DESIGN_R_S_addendum_collaudo.md, sez. S4): wip_medio non e' piu'
+// calcolato internamente da flowWeeklyBuckets_ (il vecchio cumulato
+// "entrato meno completato") - arriva da fuori (activeWipWeeklyFromLog_,
+// gia' calcolato dal chiamante) come array parallelo a weeksCount.
+// Questo test verifica che flowWeeklyBuckets_ (a) copi fedelmente quei
+// valori in wip_medio, senza ricalcolarli, e (b) throughput/tempo di
+// ciclo restino calcolati come prima (invariati da S4).
+function testFlowWeeklyBucketsCopiesActiveWipAndKeepsThroughputAndCycleTimeUnchanged() {
   var now = new Date(2026, 7, 27); // 27/08/2026, giovedi' di una settimana nota
   var weekStart = function(daysAgo) { return testIsoDaysAgo_(now, daysAgo); };
   var jobs = [{
@@ -2559,17 +2569,18 @@ function testFlowWeeklyBucketsComputesCumulativeWipThroughputAndCycleTime() {
     start_ts: weekStart(10),
     consegna_ts: weekStart(4) // stessa settimana della chiusura - tempo di ciclo 6 giorni
   }];
+  var fakeActiveWip = [42, 17]; // valori arbitrari, distinguibili da qualunque calcolo interno
 
-  var buckets = flowWeeklyBuckets_(jobs, [], visite, [], now, 2);
+  var buckets = flowWeeklyBuckets_(jobs, [], visite, [], now, 2, fakeActiveWip);
 
   assertEquals_(2, buckets.length, 'due settimane richieste, due settimane restituite');
   var week1 = buckets[0];
   var week2 = buckets[1];
-  assertEquals_(8, week1.wip_medio, 'settimana 1: 8 punti entrati, nulla completato -> WIP cumulato 8');
+  assertEquals_(42, week1.wip_medio, 'wip_medio settimana 1 = il valore passato da activeWipWeeklyFromLog_, non ricalcolato');
   assertEquals_(0, week1.throughput_punti_settimana, 'settimana 1: nessun completamento');
-  assertEquals_(0, week2.wip_medio, 'settimana 2: 8 punti completati pareggiano gli 8 entrati la settimana prima -> WIP torna a 0');
-  assertEquals_(8, week2.throughput_punti_settimana, 'settimana 2: il completamento vale come throughput');
-  assertEquals_(6, week2.ct_medio_giorni, 'settimana 2: tempo di ciclo della visita chiusa quella settimana (start_ts -> consegna_ts, 6 giorni)');
+  assertEquals_(17, week2.wip_medio, 'wip_medio settimana 2 = il valore passato, non ricalcolato');
+  assertEquals_(8, week2.throughput_punti_settimana, 'settimana 2: il completamento vale ancora come throughput (invariato da S4)');
+  assertEquals_(6, week2.ct_medio_giorni, 'settimana 2: tempo di ciclo invariato da S4 (start_ts -> consegna_ts, 6 giorni)');
   assertEquals_(1, week2.n_campioni_ct, 'un solo campione di tempo di ciclo in settimana 2');
 }
 
@@ -2616,6 +2627,73 @@ function testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands() {
   assertTrue_(Array.isArray(state.flowWeeklyBuckets), 'flowWeeklyBuckets deve essere un array');
   assertEquals_(26, state.flowWeeklyBuckets.length, '26 settimane richieste');
   assertTrue_(Array.isArray(state.wipBands), 'wipBands deve essere un array (anche vuoto)');
+}
+
+// S4 (DESIGN_R_S_addendum_collaudo.md, sez. S4): timeline nota - un job
+// che entra in backlog (non conta), passa ad attivo/wip (conta), torna
+// in attesa/wait_client (conta comunque - "active" include le colonne
+// di attesa), poi si chiude (incarico_chiuso_ts, non conta piu').
+// Finestra di una sola settimana [now-7, now): backlog 2 giorni (day
+// -7 -> -5, escluso), wip 2 giorni (-5 -> -3, incluso), wait_client 2
+// giorni (-3 -> -1, incluso), chiusura a -1 (intervallo 'done' di durata
+// zero). Totale giorni attivi = 4 su 7; size_points=7 per una frazione
+// esatta -> (4/7)*7 = 4 punti medi attivi.
+function testActiveWipWeeklyFromLogTracksBacklogActiveWaitAndClosedIntervals() {
+  var now = new Date(2026, 7, 27);
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var closedAt = testIsoDaysAgo_(now, 1);
+  var log = [
+    { id: 'e1', type: 'move', to: 'backlog', ts: testIsoDaysAgo_(now, 7) },
+    { id: 'e2', type: 'move', to: 'wip', ts: testIsoDaysAgo_(now, 5) },
+    { id: 'e3', type: 'move', to: 'wait_client', ts: testIsoDaysAgo_(now, 3) },
+    { id: 'e4', type: 'move', to: 'done', ts: closedAt }
+  ];
+  var jobs = [{
+    job_id: 'JOB-TIMELINE',
+    size_points: 7,
+    size_class: 'M',
+    incarico_chiuso_ts: closedAt,
+    activity_log_json: JSON.stringify(log)
+  }];
+
+  var result = activeWipWeeklyFromLog_(jobs, [], columnMap, now, 1);
+
+  assertEquals_(0, result.excluded_job_ids.length, 'il job ha un log interpretabile, non deve essere escluso');
+  assertEquals_(4, result.weekly[0], 'wip attivo settimanale = (2g wip + 2g wait_client) / 7 * 7 punti = 4');
+}
+
+// Un job senza eventi 'move' interpretabili (log vuoto o non JSON) deve
+// essere escluso esplicitamente dal calcolo, non stimato alla bene o
+// meglio - il chiamante riceve il suo job_id per poterlo segnalare.
+function testActiveWipWeeklyFromLogExcludesJobsWithoutParseableLog() {
+  var now = new Date();
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var jobs = [
+    { job_id: 'JOB-NO-LOG', size_points: 8, activity_log_json: '' },
+    { job_id: 'JOB-BAD-LOG', size_points: 8, activity_log_json: 'non e\' JSON valido' }
+  ];
+
+  var result = activeWipWeeklyFromLog_(jobs, [], columnMap, now, 2);
+
+  assertEquals_(2, result.excluded_job_ids.length, 'entrambi i job senza log interpretabile devono essere esclusi');
+  assertTrue_(result.excluded_job_ids.indexOf('JOB-NO-LOG') !== -1, 'JOB-NO-LOG deve comparire tra gli esclusi');
+  assertTrue_(result.excluded_job_ids.indexOf('JOB-BAD-LOG') !== -1, 'JOB-BAD-LOG deve comparire tra gli esclusi');
+  assertEquals_(0, result.weekly[0], 'nessun job contribuisce -> WIP attivo 0 in ogni settimana');
+  assertEquals_(0, result.weekly[1], 'nessun job contribuisce -> WIP attivo 0 in ogni settimana');
+}
+
+function testBuildSystemStateExposesWipCoverageAndUsesReconstructedWip() {
+  var now = new Date();
+  var jobs = [{ job_id: 'JOB-NO-LOG-COVERAGE', status: 'wip', arrival_ts: nowIso_(), size_points: 8, activity_log_json: '', visit_number: 1 }];
+
+  var state = buildSystemState_(jobs, [], SIGMAFLOW.DEFAULT_CONFIG, now);
+
+  assertTrue_(Boolean(state.wipCoverage), 'wipCoverage deve essere esposto in systemState');
+  assertEquals_(1, state.wipCoverage.excluded_jobs, 'il job senza log interpretabile deve comparire come escluso');
+  assertTrue_(state.wipCoverage.excluded_job_ids.indexOf('JOB-NO-LOG-COVERAGE') !== -1, 'l\'id del job escluso deve essere riportato');
+  assertEquals_(0, state.flowWeeklyBuckets[state.flowWeeklyBuckets.length - 1].wip_medio, 'un job escluso non contribuisce al WIP ricostruito');
 }
 
 // S3 (DESIGN_R_S.md §3.8): fasce a percentile sulla lista "Fermi ora" -
