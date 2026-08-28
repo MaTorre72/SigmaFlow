@@ -1338,6 +1338,36 @@ function checkS4WipCoverage_() {
   var weeklyAverage = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount);
   var currentWeekAverage = weeklyAverage.weekly[weeklyAverage.weekly.length - 1];
 
+  // S2/S3, correzione aggiuntiva (addendum di collaudo, 2026-08-28):
+  // verifica obbligatoria dopo il fix del throughput (consegna_ts,
+  // non piu' incarico_chiuso_ts) - se i grafici scatter restano vuoti
+  // su TEST live, wipBands.length e un riepilogo di flowWeeklyBuckets
+  // vanno riportati esplicitamente, non dati per scontato come
+  // scarsita' di dati.
+  var visite = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+  var visiteArchivio = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+  var flowWeekly = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, weeksCount, weeklyAverage.weekly);
+  var bands = wipBands_(flowWeekly, 20, 3);
+  var weeksWithThroughput = flowWeekly.filter(function(w) { return w.throughput_punti_settimana > 0; }).length;
+  var weeksWithCycleTimeSample = flowWeekly.filter(function(w) { return w.n_campioni_ct > 0; }).length;
+
+  // R6.6, completamento: "Lavori completati" (flow.completed_initiatives)
+  // e "Passaggi completati" (flow.completed_passages) vengono dallo
+  // stesso insieme 'completed' (consegna_ts nella finestra, nessun
+  // filtro sul tempo di servizio) - il primo e' deduplicato per job_id,
+  // il secondo conta ogni visita. Coincidono solo se nessun job ha piu'
+  // di una visita consegnata nella finestra - non piu' garantiti
+  // uguali per costruzione (pipeline diversa da points.completed_cards,
+  // che usa job.done_ts).
+  var since = new Date(now.getTime() - Number(config.observation_window_days || 30) * 864e5);
+  var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, []);
+  var allVisite = visite.concat(visiteArchivio || []);
+  var completedVisitesInWindow = allVisite.filter(function(v) {
+    return v.consegna_ts && new Date(v.consegna_ts) >= since;
+  });
+  var completedInitiatives = Object.keys(initiativeGroups_(completedVisitesInWindow)).length;
+  var completedPassages = completedVisitesInWindow.length;
+
   return {
     executed_at: nowIso_(),
     total_jobs_scanned: jobs.length + archivedJobs.length,
@@ -1358,7 +1388,19 @@ function checkS4WipCoverage_() {
     // chiusura, archiviazione) - una differenza qui e' attesa con
     // qualunque churn reale, non e' un sintomo di bug.
     current_week_average_wip: currentWeekAverage,
-    current_week_average_vs_live_panel_difference: round_(currentWeekAverage - livePanelPoints)
+    current_week_average_vs_live_panel_difference: round_(currentWeekAverage - livePanelPoints),
+    // S2/S3, correzione aggiuntiva: se wip_bands_length < 3, i grafici
+    // scatter mostrano "Dato non ancora sufficiente" - questi numeri
+    // dicono se e' davvero scarsita' di dati o una discrepanza da
+    // indagare (vedi commento sopra).
+    weeks_with_throughput_gt_0: weeksWithThroughput,
+    weeks_with_cycle_time_sample: weeksWithCycleTimeSample,
+    wip_bands_length: bands.length,
+    // R6.6, completamento: attesa una differenza strutturale (pipeline
+    // diverse), non piu' una coincidenza garantita.
+    completed_initiatives_periodo: completedInitiatives,
+    completed_passages_periodo: completedPassages,
+    completed_cards_periodo_punti: points.completed_cards
   };
 }
 
