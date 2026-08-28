@@ -1,7 +1,7 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
-## Fase R e S — S4: WIP attivo ricostruito dal log (2026-08-28, sessione 10) — codice pronto, in attesa della verifica su dati reali
+## Fase R e S — S4: WIP attivo ricostruito dal log — COMPLETA, verificata su dati reali (2026-08-28, sessione 10)
 
 Da `docs/DESIGN_R_S_addendum_collaudo.md`, sez. S4 (`PROMPT_S4_wip_attivo_log.md`). Stesso branch, prosegue la stessa fase — non una nuova.
 
@@ -36,55 +36,67 @@ passaggi di colonna.
   identico calcolo di prima.
 - **Trasparenza sulla copertura**: `systemState.wipCoverage` (nuovo
   campo: `excluded_jobs`/`excluded_job_ids`) espone ad ogni caricamento
-  della dashboard quanti job sono esclusi dal calcolo — non serve piu'
-  un controllo separato per saperlo, e' sempre visibile nella risposta
-  di `getMetrics()`.
-- **Diagnostica di sola lettura** `checkS4WipCoverage_()` +
-  wrapper `checkS4WipCoverageOnTest()`/`checkS4WipCoverageSuProd()`
-  (stesso pattern gia' in uso nel progetto — `withEnvironment_` con
-  `requiresLock=false`, come `api()` fa gia' per le azioni di lettura):
-  confronta il WIP ricostruito della settimana corrente con il totale
-  live del pannello per-colonna (colonne non-backlog, non-done) —
-  stessa fotografia, deve tornare lo stesso numero.
+  della dashboard quanti job sono esclusi dal calcolo.
+- **Diagnostica di sola lettura** `checkS4WipCoverage_()` + wrapper
+  `checkS4WipCoverageOnTest()`/`checkS4WipCoverageSuProd()` (stesso
+  pattern gia' in uso nel progetto — `withEnvironment_` con
+  `requiresLock=false`).
 
-**197/197 test nell'harness Node** (3 nuovi + 1 aggiornato per il nuovo
+**199/199 test nell'harness Node** (5 nuovi + 1 aggiornato per il nuovo
 contratto di `flowWeeklyBuckets_`, che ora riceve il WIP dall'esterno
 invece di calcolarlo).
 
-**Collaudo eseguito**:
-- Browser pane (server locale, dati demo via `seedTestData`, 60 job):
-  `getMetrics()` senza errori, `wipCoverage.excluded_jobs = 0` (il
-  generatore demo produce sempre un log completo), valori di
-  `wip_medio` piu' bassi e piu' realistici delle settimane recenti
-  rispetto alla vecchia stima cumulata (192-242 pt contro 480-580 pt
-  della sessione precedente sullo stesso tipo di dataset) — coerente
-  con l'attesa (il cumulato sovrastimava includendo il backlog).
-- **Verifica di coerenza eseguita sui dati demo** (harness Node,
-  `checkS4WipCoverage_` chiamata direttamente): `current_week_wip_reconstructed`
-  = `current_week_wip_live_panel` = 242, **differenza 0** — conferma che
-  la logica e' internamente corretta quando il log e' completo.
+**Due bug trovati e corretti durante la verifica su dati reali (TEST),
+non sulla fixture** — la prima versione della diagnostica confrontava
+male due grandezze, non il codice di produzione:
 
-**Non ancora verificato — richiede i dati reali di TEST/PROD, non
-sostituibile dal dataset demo sintetico**: la copertura del log sui
-job REALI piu' vecchi (pre-esistenti all'introduzione di
-`activity_log_json`) e la verifica di coerenza sulla fotografia reale
-del pannello per-colonna. `clasp run` resta bloccato (stesso limite
-documentato in P7/Q — "Unable to run script function...", verificato
-di nuovo con `checkS4WipCoverageOnTest`). **Push su TEST gia' fatto e
-verificato (16/16 identici)** — le funzioni sono gia' disponibili
-nell'editor Apps Script di TEST.
+1. **Archivio**: `activeWipWeeklyFromLog_` include correttamente
+   l'archivio per ogni settimana (N6: le metriche storiche su finestra
+   includono sempre l'archivio) — ma il pannello per-colonna live
+   mostra solo i job ancora aperti sulla board. Un job chiuso e
+   archiviato di recente gonfiava il confronto contro un pannello che
+   strutturalmente non puo' includerlo. Fix: la diagnostica confronta
+   ora popolazioni omogenee (commit `4778893`).
+2. **Media settimanale vs istantanea**: anche escludendo l'archivio, un
+   job entrato/uscito da una colonna `active` DURANTE la settimana
+   corrente (rientro, avvio lavorazione, chiusura) rende la media sui 7
+   giorni diversa dalla fotografia di adesso — per costruzione, non per
+   un errore. La vera verifica di correttezza e' "istante contro
+   istante" (ultimo intervallo ricostruito dal log vs `job.status`,
+   stesso istante): quella deve essere sempre 0, la media-vs-live no
+   (commit `731d7c1`).
 
-**Prossimo passo, richiesto a Marco**: dall'editor Apps Script di TEST,
-eseguire `checkS4WipCoverageOnTest` (menu Esegui → Log di esecuzione) e
-incollare il risultato JSON qui in chat. Se `difference` non e' 0 (a
-meno di arrotondamento) o `excluded_jobs` e' alto, **non chiudere S4** —
-va capito il motivo prima (classificazione colonne, log incompleto sui
-job piu' vecchi, bug nella ricostruzione). Se il risultato torna pulito,
-opzionalmente ripetere con `checkS4WipCoverageSuProd` su PROD (sola
-lettura, nessuna scrittura, sicuro da eseguire).
+Durante l'indagine, Marco ha segnalato un job cestinato
+(`JOB-20260810-PWQD`) chiedendosi come potesse comparire nelle medie —
+**verificato che non puo'**: `activeWipWeeklyFromLog_` riceve solo
+`jobs` (foglio `jobs`) e `archivedJobs` (foglio `jobs_archivio`), mai
+`jobs_cestino` — `cestinaJob_` rimuove la riga da `jobs`, non la
+duplica. Invariante gia' testato (`testGetMetricsNeverReadsCestino`),
+non toccato da S4. Il job segnalato (fermo in TODO dall'10/08 al 25/08,
+poi cestinato) non era la causa del gap.
 
-Nessuna PR aperta, nessun merge su `main` — branch
-`feat/fase-r-s-metriche-2026-08-27`, invariato.
+**Verifica di coerenza — ESEGUITA SUI DATI REALI DI TEST**
+(`checkS4WipCoverageOnTest`, foglio `1CNoFPeoQKQ2LBmnaldp1Id3_CRtfviep4I4xkKPujtk`,
+copia di PROD), risultato finale dopo i due fix:
+```
+{"total_jobs_scanned":54,"excluded_jobs":0,"excluded_job_ids":[],
+ "instant_wip_from_log":213,"instant_wip_live_panel":213,"instant_difference":0,
+ "current_week_average_wip":216.51,"current_week_average_vs_live_panel_difference":3.51}
+```
+- **Copertura del log: 54/54 job scansionati, 0 esclusi** — nessun job,
+  nemmeno tra i piu' vecchi, manca di eventi `move` interpretabili.
+- **Verifica di coerenza (istante contro istante): differenza 0** — la
+  ricostruzione concorda esattamente con `job.status` su dati reali.
+- Il residuo di 3,51 sulla media settimanale e' quello atteso (churn
+  reale durante la settimana in corso su TEST) — non un difetto, gia'
+  spiegato e non bloccante secondo il criterio di accettazione del
+  documento (che chiede coerenza "a meno di arrotondamento" sulla
+  fotografia, non sulla media).
+
+**Fase R/S — programma completo (R1-R6, S1-S4).** Push su TEST
+verificato (16/16 identici) ad ogni commit. Nessuna PR aperta, nessun
+merge su `main` — branch `feat/fase-r-s-metriche-2026-08-27` pronto
+per la review di Marco.
 
 ---
 
