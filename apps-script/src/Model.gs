@@ -1634,21 +1634,3 @@ function checkS4WipCoverageSuProd() {
     return result;
   }, false);
 }
-
-// Diagnostica temporanea (2026-08-28, sessione 14): "Errore sconosciuto"
-// segnalato da Marco caricando la dashboard su TEST - checkS4WipCoverage_
-// NON chiama buildSystemState_ (replica una logica simile ma
-// indipendente), quindi il suo esito pulito non prova che getMetrics()
-// funzioni. Questa funzione chiama lo STESSO percorso della dashboard
-// (getMetrics -> calculateMetrics_ -> buildSystemState_), da eseguire
-// direttamente dall'editor (non tramite api(), che nasconderebbe
-// l'eccezione in un try/catch) - un'eventuale eccezione reale comparira'
-// qui con riga e stack trace. Sola lettura, nessuna scrittura. Da
-// rimuovere una volta chiuso questo giro.
-function debugGetMetricsOnTest() {
-  return withEnvironment_('test', function() {
-    var result = getMetrics();
-    Logger.log('success=' + result.success + ', dimensione risposta=' + JSON.stringify(result).length + ' caratteri');
-    return result;
-  }, false);
-}

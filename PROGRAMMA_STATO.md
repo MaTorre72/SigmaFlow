@@ -1,26 +1,62 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
-## Fase R e S — "Errore sconosciuto" su TEST dopo il giro precedente (2026-08-28, sessione 14)
+## Fase R e S — "Errore sconosciuto" su TEST dopo il giro precedente: risolto e confermato (2026-08-28, sessione 14)
 
 Marco ha segnalato un crash della sessione precedente seguito da
-**"Errore sconosciuto"** aprendo la dashboard su TEST con dati reali —
-non riproducibile qui (nessun accesso a TEST reale, nessuno stack
-trace disponibile: il client mostra solo un messaggio generico quando
-`fail_(err.message)` riceve un messaggio vuoto/assente).
+**"Errore sconosciuto"** aprendo la dashboard su TEST con dati reali.
 
-**Causa piu' probabile individuata rileggendo il codice**: il giro
-precedente (R9.14) aveva introdotto un **raddoppio reale di lavoro** ad
-ogni caricamento della dashboard — `buildSystemState_` ricostruiva gli
-intervalli di colonna dal log (`jobColumnIntervalsFromLog_`, parsing di
-`activity_log_json` per ogni job) **due volte indipendenti**: una per
-"Lavoro in corso" (`activeWipWeeklyFromLog_`, S4/S6, 26 settimane) e una
-per "Lavoro accettato" (nuovo in R9.14, `monthBuckets_`, 6 mesi) — su
-dati reali di produzione (a differenza dei dati demo usati per il
-collaudo visivo di questa sessione) questo puo' avvicinarsi a un limite
-di tempo di esecuzione. **Non e' confermato con certezza** (serve il
-log delle Esecuzioni nell'editor Apps Script per la vera causa) ma e'
-un problema reale comunque presente, quindi corretto a prescindere.
+**Percorso diagnostico** (nessuno stack trace disponibile all'inizio —
+il client mostra solo un messaggio generico quando `fail_(err.message)`
+riceve un messaggio vuoto/assente):
+1. Console del browser pulita (nessuna eccezione JS lato client) anche
+   dopo hard refresh — escluso un bug di cache e un crash puramente
+   client-side non gestito.
+2. Pannello Esecuzioni dell'editor Apps Script: tutte le esecuzioni
+   `api` completate regolarmente (2-4s), nessun errore — escluso un
+   timeout o un'eccezione a livello di piattaforma.
+3. `checkS4WipCoverageOnTest()` (non wrappata in try/catch) eseguita
+   direttamente dall'editor: **nessun errore**, tutti i numeri tornano
+   (`instant_difference: 0`, `accepted_work_instant_difference: 0`) —
+   ma questa funzione non chiama `buildSystemState_`, replica una
+   logica simile in modo indipendente: il suo esito pulito non
+   dimostrava che `getMetrics()` (il percorso vero della dashboard)
+   funzionasse.
+4. Aggiunta una funzione diagnostica temporanea che chiamava
+   `getMetrics()` direttamente (bypassando il try/catch di `api()`):
+   **nessun errore** nemmeno qui.
+5. **Causa reale trovata rileggendo il codice**: `monthBuckets_`
+   (R9.14) portava due oggetti `Date` reali (`start`/`end`) in ogni
+   bucket di `points.timeline` — aggiunti nel giro precedente solo
+   come input interno a `stockSeriesFromIndex_`, mai letti dal client,
+   ma comunque presenti nella risposta che attraversa il confine di
+   serializzazione di **`google.script.run`** (diverso da una chiamata
+   diretta o da `JSON.stringify` — ne' l'esecuzione diretta dall'editor
+   ne' `checkS4WipCoverage_` attraversano quel confine, per questo
+   entrambe le verifiche precedenti risultavano pulite pur avendo il
+   difetto). Rimossi prima del `return` in `monthBuckets_`.
+
+**Confermato da Marco**: dopo il fix e un hard refresh sulla vera web
+app di TEST, l'errore non si ripresenta piu'.
+
+**Lezione per le prossime sessioni**: ne' il repro-server locale (usa
+un semplice shim HTTP+JSON, non il vero `google.script.run`) ne'
+un'esecuzione diretta dall'editor attraversano lo stesso confine di
+serializzazione della web app reale — un valore che "funziona"
+in entrambi questi collaudi puo' comunque rompersi sulla web app vera.
+Evitare di restituire tipi non necessari (Date, in particolare) negli
+oggetti destinati al client, anche quando servono solo come appoggio
+interno a un calcolo.
+
+**Corretto nello stesso passaggio, come effetto collaterale positivo**:
+il giro precedente (R9.14) aveva introdotto anche un **raddoppio reale
+di lavoro** ad ogni caricamento della dashboard — gli intervalli di
+colonna dal log (`jobColumnIntervalsFromLog_`, parsing di
+`activity_log_json` per ogni job) venivano ricostruiti **due volte
+indipendenti**: una per "Lavoro in corso" (`activeWipWeeklyFromLog_`,
+S4/S6, 26 settimane) e una per "Lavoro accettato" (R9.14,
+`monthBuckets_`, 6 mesi). Non era la causa di questo crash specifico,
+ma un problema reale comunque presente — corretto a prescindere.
 
 **Correzione applicata**:
 - Nuova `buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now)`:
@@ -54,15 +90,14 @@ un problema reale comunque presente, quindi corretto a prescindere.
   cosi' un futuro crash mostri un dettaglio reale invece di solo
   "Errore sconosciuto".
 
-**Verifica**: 211/211 test Node (nessuna regressione dal refactor),
-`getMetrics` richiamato end-to-end via `/tmp/sf-scratch/repro-server.js`
-con dati demo (60+60 job) — risposta `success:true`, `accepted_points`
-ricostruito correttamente, nessun errore in console. **Non verificato
-su TEST reale** (non disponibile in questa sessione) — chiedere a Marco
-di ricaricare la dashboard su TEST e, se l'errore permane, controllare
-il pannello **Esecuzioni** dell'editor Apps Script per il vero
-messaggio/stack trace (ora piu' informativo anche lato client, dopo
-l'indurimento di `api()`).
+**Verifica**: 211/211 test Node, push su TEST verificato,
+**confermato da Marco su TEST reale** dopo hard refresh — dashboard
+funzionante. Funzione diagnostica temporanea (`debugGetMetricsOnTest`)
+rimossa a chiusura, non serve piu'. Resta anche l'indurimento
+diagnostico di `api()` (Kanban.gs): recupera un messaggio d'errore
+utilizzabile anche quando un'eccezione futura non ha `.message`
+valorizzato, per non perdere ogni informazione dietro un generico
+"Errore sconosciuto".
 
 ---
 
