@@ -1242,8 +1242,21 @@ function checkS4WipCoverage_() {
   var now = new Date();
   var weeksCount = 26;
 
-  var reconstructed = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount);
-  var currentWeekWip = reconstructed.weekly[reconstructed.weekly.length - 1];
+  // La produzione (flowWeeklyBuckets_) include SEMPRE l'archivio nel WIP
+  // ricostruito, per ogni settimana (N6: le metriche storiche su
+  // finestra includono l'archivio) - corretto, non cambiato da questa
+  // diagnostica. Ma il pannello per-colonna "live" mostra per
+  // costruzione SOLO i job ancora sulla board: un job chiuso e
+  // archiviato pochi giorni fa contribuisce comunque ai suoi giorni
+  // "attivi" della settimana corrente nella ricostruzione (corretto, e'
+  // successo davvero), ma non puo' comparire in nessun pannello live
+  // (non e' piu' un job aperto). Per un confronto "stessa fotografia"
+  // la verifica usa quindi la ricostruzione sui SOLI job aperti - un
+  // secondo calcolo, solo per questo controllo, distinto da quello
+  // esposto in systemState.flowWeeklyBuckets.
+  var reconstructedIncludingArchive = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount);
+  var reconstructedOpenOnly = activeWipWeeklyFromLog_(jobs, [], columnMap, now, weeksCount);
+  var currentWeekWip = reconstructedOpenOnly.weekly[reconstructedOpenOnly.weekly.length - 1];
 
   var livePanelPoints = 0;
   jobs.forEach(function(job) {
@@ -1256,11 +1269,15 @@ function checkS4WipCoverage_() {
   return {
     executed_at: nowIso_(),
     total_jobs_scanned: jobs.length + archivedJobs.length,
-    excluded_jobs: reconstructed.excluded_job_ids.length,
-    excluded_job_ids: reconstructed.excluded_job_ids,
+    excluded_jobs: reconstructedIncludingArchive.excluded_job_ids.length,
+    excluded_job_ids: reconstructedIncludingArchive.excluded_job_ids,
     current_week_wip_reconstructed: currentWeekWip,
     current_week_wip_live_panel: round_(livePanelPoints),
-    difference: round_(currentWeekWip - livePanelPoints)
+    difference: round_(currentWeekWip - livePanelPoints),
+    // Diagnostico: quanto dell'eventuale differenza sopra viene da job
+    // chiusi e archiviati durante la settimana corrente (attesa una
+    // differenza qui, non un bug - vedi commento sopra).
+    current_week_wip_reconstructed_with_archive: reconstructedIncludingArchive.weekly[reconstructedIncludingArchive.weekly.length - 1]
   };
 }
 

@@ -328,6 +328,7 @@ function runAllTests() {
     testActiveWipWeeklyFromLogTracksBacklogActiveWaitAndClosedIntervals,
     testActiveWipWeeklyFromLogExcludesJobsWithoutParseableLog,
     testBuildSystemStateExposesWipCoverageAndUsesReconstructedWip,
+    testActiveWipWeeklyFromLogArchivedJobsInflateCurrentWeekButNotLivePanel,
     testWipBandsDiscardsBandsBelowMinSamplesAndOrdersByWipAscending,
     testWipBandsExcludesWeeksWithoutCycleTimeSamples,
     testBuildSystemStateExposesFlowWeeklyBucketsAndWipBands,
@@ -2694,6 +2695,55 @@ function testBuildSystemStateExposesWipCoverageAndUsesReconstructedWip() {
   assertEquals_(1, state.wipCoverage.excluded_jobs, 'il job senza log interpretabile deve comparire come escluso');
   assertTrue_(state.wipCoverage.excluded_job_ids.indexOf('JOB-NO-LOG-COVERAGE') !== -1, 'l\'id del job escluso deve essere riportato');
   assertEquals_(0, state.flowWeeklyBuckets[state.flowWeeklyBuckets.length - 1].wip_medio, 'un job escluso non contribuisce al WIP ricostruito');
+}
+
+// S4, bug trovato durante la verifica di coerenza su dati reali
+// (checkS4WipCoverageOnTest, 2026-08-28: differenza 3,52 punti su un
+// totale di ~213 - troppo piccola per un errore di classificazione,
+// troppo grande per l'arrotondamento). Causa: activeWipWeeklyFromLog_
+// include correttamente l'archivio (N6: le metriche storiche su
+// finestra includono sempre l'archivio) - ma un job chiuso e archiviato
+// pochi giorni fa contribuisce ancora ai suoi giorni "attivi" della
+// settimana corrente, pur non potendo comparire in nessun pannello live
+// (non e' piu' un job aperto). Non e' un bug della ricostruzione: e' un
+// confronto "population mismatch" nella diagnostica stessa
+// (checkS4WipCoverage_, corretto per confrontare solo job aperti contro
+// il pannello live). Questo test blocca la regressione sulla causa
+// reale: con l'archivio, il WIP ricostruito e' piu' alto; senza, torna
+// identico al pannello live.
+function testActiveWipWeeklyFromLogArchivedJobsInflateCurrentWeekButNotLivePanel() {
+  var now = new Date();
+  var columnMap = {};
+  columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
+  var stillActiveJob = {
+    job_id: 'JOB-STILL-ACTIVE',
+    status: 'wip',
+    size_points: 8,
+    activity_log_json: JSON.stringify([{ type: 'move', to: 'wip', ts: testIsoDaysAgo_(now, 30) }]),
+    incarico_chiuso_ts: ''
+  };
+  var recentlyArchivedJob = {
+    job_id: 'JOB-RECENTLY-ARCHIVED',
+    status: 'done',
+    size_points: 13,
+    activity_log_json: JSON.stringify([
+      { type: 'move', to: 'wip', ts: testIsoDaysAgo_(now, 30) },
+      { type: 'move', to: 'done', ts: testIsoDaysAgo_(now, 2) }
+    ]),
+    incarico_chiuso_ts: testIsoDaysAgo_(now, 2)
+  };
+  var jobsOnBoard = [stillActiveJob]; // il job archiviato non e' piu' su 'jobs'
+  var archivedJobs = [recentlyArchivedJob];
+
+  var withArchive = activeWipWeeklyFromLog_(jobsOnBoard, archivedJobs, columnMap, now, 1);
+  var openOnly = activeWipWeeklyFromLog_(jobsOnBoard, [], columnMap, now, 1);
+  var livePanelPoints = jobsOnBoard.reduce(function(sum, job) {
+    var column = columnMap[normalizeStatus_(job.status)] || { role: 'neutral' };
+    return wipColumnClass_(column) === 'active' ? sum + jobPoints_(job) : sum;
+  }, 0);
+
+  assertTrue_(withArchive.weekly[0] > openOnly.weekly[0], 'con l\'archivio il WIP ricostruito della settimana corrente deve essere piu\' alto (il job archiviato ha contribuito giorni attivi reali)');
+  assertEquals_(livePanelPoints, openOnly.weekly[0], 'senza archivio (soli job aperti) il ricostruito deve tornare identico al pannello live - stessa popolazione');
 }
 
 // S3 (DESIGN_R_S.md §3.8): fasce a percentile sulla lista "Fermi ora" -
