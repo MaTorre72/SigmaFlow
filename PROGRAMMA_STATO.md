@@ -1,6 +1,20 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — CHIUSA: PR #17 mergiata su main, deploy fatto da Marco (2026-08-28)
+
+Fase R e S (governo delle metriche dashboard, R1-R10 + S1-S6) completa
+e chiusa. PR #17 (`feat/fase-r-s-metriche-2026-08-27` -> `main`)
+mergiata da Marco (merge commit `8710f58`), deploy su TEST verificato
+funzionante dopo un problema di cache del browser (non di codice - il
+sorgente su TEST era gia' corretto, confermato con `clasp pull`
+isolato). Nessun'altra azione in sospeso su questa fase.
+
+Per lo storico completo di ogni voce (R1-R10, S1-S6), vedere le voci
+di sessione sotto e `docs/DESIGN_R_S.md`/`docs/DESIGN_R_S_addendum_collaudo.md`.
+
+---
+
 ## Fase R e S — R10.6 risolto per davvero (non con una nota), R9.1 completato, nota V/Cv² semplificata (2026-08-28, sessione 17)
 
 Marco ha respinto con forza la nota di R10.6 della sessione precedente
