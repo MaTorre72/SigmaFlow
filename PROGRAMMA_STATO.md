@@ -1,6 +1,71 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — "Errore sconosciuto" su TEST dopo il giro precedente (2026-08-28, sessione 14)
+
+Marco ha segnalato un crash della sessione precedente seguito da
+**"Errore sconosciuto"** aprendo la dashboard su TEST con dati reali —
+non riproducibile qui (nessun accesso a TEST reale, nessuno stack
+trace disponibile: il client mostra solo un messaggio generico quando
+`fail_(err.message)` riceve un messaggio vuoto/assente).
+
+**Causa piu' probabile individuata rileggendo il codice**: il giro
+precedente (R9.14) aveva introdotto un **raddoppio reale di lavoro** ad
+ogni caricamento della dashboard — `buildSystemState_` ricostruiva gli
+intervalli di colonna dal log (`jobColumnIntervalsFromLog_`, parsing di
+`activity_log_json` per ogni job) **due volte indipendenti**: una per
+"Lavoro in corso" (`activeWipWeeklyFromLog_`, S4/S6, 26 settimane) e una
+per "Lavoro accettato" (nuovo in R9.14, `monthBuckets_`, 6 mesi) — su
+dati reali di produzione (a differenza dei dati demo usati per il
+collaudo visivo di questa sessione) questo puo' avvicinarsi a un limite
+di tempo di esecuzione. **Non e' confermato con certezza** (serve il
+log delle Esecuzioni nell'editor Apps Script per la vera causa) ma e'
+un problema reale comunque presente, quindi corretto a prescindere.
+
+**Correzione applicata**:
+- Nuova `buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now)`:
+  un solo parsing per job, con un flag `archived` per voce (necessario
+  perche' alcuni usi — il confronto istante-contro-istante col
+  pannello live — devono restare sulla sola board attiva, mai
+  sull'archivio, mentre le serie storiche lo includono sempre, N6).
+- `stockSeriesFromLog_` scomposta in `stockSeriesFromIndex_` (il motore,
+  opera su un indice gia' pronto) + un wrapper retrocompatibile che
+  costruisce l'indice al volo (stessa firma di prima, test esistenti
+  invariati).
+- `activeWipWeeklyFromLog_`/`monthBuckets_`/`pointsStatistics_` accettano
+  ora un parametro finale facoltativo `jobIndex` — se il chiamante lo
+  fornisce, evitano di ricostruire l'indice da zero.
+- `buildSystemState_` e `checkS4WipCoverage_` costruiscono l'indice
+  **una sola volta** e lo passano a entrambe le ricostruzioni (settimanale
+  e mensile) — il parsing del log torna a essere fatto una volta sola
+  per caricamento, non due.
+- **Bug reale trovato e corretto durante il refactor** (non ancora
+  arrivato su TEST, catturato qui): `stockSeriesFromIndex_` referenziava
+  una variabile `points` non piu' in scope dopo l'estrazione da
+  `stockSeriesFromLog_` — avrebbe lanciato `ReferenceError: points is
+  not defined` alla prima chiamata reale. Non è la causa dell'errore
+  segnalato da Marco (introdotto durante QUESTA correzione, mai
+  pushato), ma dimostra che il codice del giro precedente non era mai
+  stato eseguito end-to-end su un motore realistico prima d'ora — solo
+  sintatticamente controllato e testato su fixture piccole.
+- **Indurimento diagnostico**: `api()` (Kanban.gs) ora recupera un
+  messaggio d'errore utilizzabile anche quando l'eccezione non ha un
+  `.message` valorizzato (`err.message || String(err) || fallback`),
+  cosi' un futuro crash mostri un dettaglio reale invece di solo
+  "Errore sconosciuto".
+
+**Verifica**: 211/211 test Node (nessuna regressione dal refactor),
+`getMetrics` richiamato end-to-end via `/tmp/sf-scratch/repro-server.js`
+con dati demo (60+60 job) — risposta `success:true`, `accepted_points`
+ricostruito correttamente, nessun errore in console. **Non verificato
+su TEST reale** (non disponibile in questa sessione) — chiedere a Marco
+di ricaricare la dashboard su TEST e, se l'errore permane, controllare
+il pannello **Esecuzioni** dell'editor Apps Script per il vero
+messaggio/stack trace (ora piu' informativo anche lato client, dopo
+l'indurimento di `api()`).
+
+---
+
 ## Fase R e S — quarto giro: Parte 1 (R7 correzione/R5/R6.6/S2-S3/S5/R8/R9.1-13, riverificati) + Parte 2 (terminologia "Lavoro accettato", S6, R9.14-16) (2026-08-28, sessione 13)
 
 Eseguito il prompt "Fase R/S, secondo giro di collaudo (R7/R8/S5/S6/R9 +

@@ -53,7 +53,13 @@ function api(action, payload) {
       return response;
     }, requiresLock);
   } catch (err) {
-    return fail_(err.message);
+    // Difesa (2026-08-28, dopo un crash reale su TEST mostrato come
+    // "Errore sconosciuto" senza dettaglio utile): un'eccezione senza
+    // 'message' valorizzato (o senza 'message' del tutto, se non e' un
+    // vero Error) faceva perdere ogni informazione diagnostica - qui si
+    // prova a recuperarne una comunque, invece di lasciare che il
+    // fallback lato client mostri solo "Errore sconosciuto".
+    return fail_((err && (err.message || String(err))) || 'Errore sconosciuto (nessun dettaglio disponibile dal server)');
   }
 }
 

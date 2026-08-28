@@ -262,7 +262,12 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // non solo un'aggregazione su periodo.
   var delayProfile = delayProfile_(allVisite);
   var workload = currentWorkload_(jobs, columnMap);
-  var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs));
+  // R9.14, ottimizzazione: un solo parsing di activity_log_json per
+  // job, condiviso da "Lavoro accettato" (points.timeline, sotto) e
+  // "Lavoro in corso" (activeWipWeekly, piu' avanti) - vedi commento su
+  // buildJobIntervalsIndex_ (Model.gs) per il perche'.
+  var jobIntervalsIndex = buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now);
+  var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrderFromConfig_(config, jobs), jobIntervalsIndex);
   // R5: trend mensile dell'attesa (su tutto allVisite, finestra fissa a 6
   // mesi come "Carico mensile" - non windowDays) e stato attuale dei job
   // fermi ora (su jobs attivi, nessun tetto di finestra).
@@ -302,7 +307,7 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
   // S5: finestra configurabile (default 26), non piu' un letterale
   // ripetuto in tre punti.
   var wipTrendWeeks = Number(config.wip_trend_weeks || 26);
-  var activeWipWeekly = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, wipTrendWeeks);
+  var activeWipWeekly = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, wipTrendWeeks, jobIntervalsIndex);
   var flowWeeklyBuckets = flowWeeklyBuckets_(jobs, archivedJobs, visite, visiteArchivio, now, wipTrendWeeks, activeWipWeekly.weekly);
   // S6 (sostituisce wipBands_): media mobile a numero fisso di campioni
   // invece di fasce a larghezza fissa, piu' i due fit teorici (curva
@@ -441,7 +446,7 @@ function assigneeOrderFromConfig_(config, jobs) {
 // invece le metriche storiche su finestra temporale: completati, aggiunti,
 // "Andamento del carico"/"Carico mensile" (monthBuckets_) e "per colonna"
 // (pointsByColumn_, gia' non filtrata a solo openJobs prima di N6).
-function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrder) {
+function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOrder, jobIndex) {
   var allJobs = jobs.concat(archivedJobs || []);
   // R7: "Aperti (ora)" mescolava Pipeline commerciale (stadio 0,
   // preventivi non ancora acquisiti) con Lavoro impegnato (stadi 1-4) -
@@ -458,7 +463,7 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
   var added = allJobs.filter(function(job) {
     return job.arrival_ts && new Date(job.arrival_ts) >= since;
   });
-  var months = monthBuckets_(allJobs, now, 6, columnMap);
+  var months = monthBuckets_(allJobs, now, 6, columnMap, jobIndex);
 
   return {
     pipeline_points: sumJobPoints_(pipelineJobs),
@@ -493,11 +498,14 @@ function pointsStatistics_(jobs, archivedJobs, columnMap, since, now, assigneeOr
 // nome, sopra (Vista Rapida) e sotto (questo grafico/tabella).
 // 'columnMap' e' facoltativo (retrocompatibilita' coi chiamanti che non
 // hanno bisogno di 'accepted_points', es. i test che verificano solo
-// entered/completed) - senza, i bucket restano a 0. 'jobs' qui e' gia'
-// l'unione jobs+archivedJobs decisa dal chiamante (pointsStatistics_) -
-// passato cosi' com'e' a stockSeriesFromLog_, mai un secondo array di
-// archiviati altrimenti li conterebbe due volte.
-function monthBuckets_(jobs, now, count, columnMap) {
+// entered/completed) - senza, i bucket restano a 0. 'jobIndex'
+// (facoltativo, da buildJobIntervalsIndex_) evita di riparsare il log
+// una seconda volta quando il chiamante l'ha gia' costruito per
+// "Lavoro in corso" (S4) - senza, lo ricostruisce da 'jobs'+columnMap
+// (che qui e' gia' l'unione jobs+archivedJobs decisa dal chiamante,
+// pointsStatistics_ - passato senza un secondo array di archiviati,
+// altrimenti li conterebbe due volte).
+function monthBuckets_(jobs, now, count, columnMap, jobIndex) {
   var first = new Date(now.getFullYear(), now.getMonth() - count + 1, 1);
   var buckets = [];
   var byKey = {};
@@ -524,9 +532,10 @@ function monthBuckets_(jobs, now, count, columnMap) {
     }
   });
 
-  if (columnMap) {
-    var accepted = stockSeriesFromLog_(jobs, [], columnMap, now, buckets, ['backlog', 'prep', 'wip', 'stand_by']);
-    buckets.forEach(function(bucket, index) { bucket.accepted_points = accepted.values[index]; });
+  if (jobIndex || columnMap) {
+    var index = jobIndex || buildJobIntervalsIndex_(jobs, [], columnMap, now);
+    var accepted = stockSeriesFromIndex_(index, buckets, ['backlog', 'prep', 'wip', 'stand_by']);
+    buckets.forEach(function(bucket, bucketIndex) { bucket.accepted_points = accepted.values[bucketIndex]; });
   }
   buckets.forEach(function(bucket) {
     bucket.net_points = bucket.entered_points - bucket.completed_points;
@@ -1157,26 +1166,55 @@ function jobColumnIntervalsFromLog_(job, columnMap, now) {
   return intervals;
 }
 
+// R9.14, ottimizzazione (2026-08-28, dopo un crash reale segnalato da
+// Marco su TEST - "Errore sconosciuto" caricando la dashboard): prima
+// di questa modifica, ogni dashboard load ricostruiva gli intervalli di
+// colonna dal log DUE VOLTE per ogni job - una volta per "Lavoro in
+// corso" (S4/S6, 26 settimane) e una volta per "Lavoro accettato"
+// (R9.14, monthBuckets_, 6 mesi) - stesso parsing di
+// activity_log_json, stessa ricostruzione, sprecata due volte per ogni
+// caricamento. Non e' confermato che questo fosse la causa del crash
+// (nessuno stack trace disponibile, solo il messaggio generico lato
+// client), ma e' un raddoppio di lavoro reale introdotto in questo
+// giro, quindi va comunque eliminato: la ricostruzione per-job ora si
+// fa una volta sola (buildJobIntervalsIndex_), condivisa tra tutte le
+// popolazioni (role) che servono.
+function buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now) {
+  var entries = [];
+  var excludedJobIds = [];
+  // 'archived' per voce: necessario perche' non tutti gli usi condividono
+  // la stessa popolazione - le serie storiche (settimanali/mensili)
+  // includono sempre l'archivio (N6), ma un confronto "istante contro
+  // istante" con un pannello live che legge solo 'jobs' (board attiva)
+  // deve escludere l'archivio, altrimenti il confronto non e' piu'
+  // apples-to-apples (vedi checkS4WipCoverage_).
+  jobs.forEach(function(job) {
+    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
+    if (!intervals) { excludedJobIds.push(job.job_id); return; }
+    entries.push({ points: jobPoints_(job), intervals: intervals, archived: false });
+  });
+  (archivedJobs || []).forEach(function(job) {
+    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
+    if (!intervals) { excludedJobIds.push(job.job_id); return; }
+    entries.push({ points: jobPoints_(job), intervals: intervals, archived: true });
+  });
+  return { entries: entries, excluded_job_ids: excludedJobIds };
+}
+
 // R9.14: motore unico di ricostruzione "quanti punti erano in un dato
 // insieme di colonne (per role), settimana/mese per settimana/mese" -
 // generalizza activeWipWeeklyFromLog_ (S4, filtro fisso su 'active')
 // sull'insieme di 'role' da includere, cosi' la stessa logica per-job
 // serve sia "Lavoro in corso" (prep/wip/stand_by) sia "Lavoro accettato"
-// (backlog/prep/wip/stand_by) senza duplicare la ricostruzione degli
-// intervalli. 'buckets' e' un array di { start, end } di qualunque
-// durata (settimana o mese) - il peso e' proporzionale ai giorni di
+// (backlog/prep/wip/stand_by), riusando lo stesso indice precalcolato
+// (jobIndex, da buildJobIntervalsIndex_) invece di riparsare il log.
+// 'buckets' e' un array di { start, end } di qualunque durata
+// (settimana o mese) - il peso e' proporzionale ai giorni di
 // sovrapposizione sulla durata del singolo bucket, non fissato a 7.
-function stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, buckets, includeRoles) {
+function stockSeriesFromIndex_(jobIndex, buckets, includeRoles) {
   var series = buckets.map(function(b) { return { start: b.start, end: b.end, points: 0 }; });
-  var excludedJobIds = [];
-  jobs.concat(archivedJobs || []).forEach(function(job) {
-    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
-    if (!intervals) {
-      excludedJobIds.push(job.job_id);
-      return;
-    }
-    var points = jobPoints_(job);
-    intervals.forEach(function(interval) {
+  jobIndex.entries.forEach(function(entry) {
+    entry.intervals.forEach(function(interval) {
       if (includeRoles.indexOf(interval.role) === -1) { return; }
       series.forEach(function(bucket) {
         var overlapStart = interval.start > bucket.start ? interval.start : bucket.start;
@@ -1184,15 +1222,24 @@ function stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, buckets, includ
         var overlapDays = (overlapEnd - overlapStart) / 86400000;
         var bucketDays = (bucket.end - bucket.start) / 86400000;
         if (overlapDays > 0 && bucketDays > 0) {
-          bucket.points += (overlapDays / bucketDays) * points;
+          bucket.points += (overlapDays / bucketDays) * entry.points;
         }
       });
     });
   });
   return {
     values: series.map(function(b) { return round_(b.points); }),
-    excluded_job_ids: excludedJobIds
+    excluded_job_ids: jobIndex.excluded_job_ids
   };
+}
+
+// Retrocompatibile: costruisce l'indice al volo e delega a
+// stockSeriesFromIndex_ - usata dai chiamanti che non hanno gia' un
+// indice pronto (test, usi isolati). I chiamanti "caldi" (buildSystemState_)
+// costruiscono l'indice UNA volta e passano jobIndex direttamente alle
+// due funzioni sopra, per non ripetere il parsing del log.
+function stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, buckets, includeRoles) {
+  return stockSeriesFromIndex_(buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now), buckets, includeRoles);
 }
 
 // Definizione dei bucket settimanali (usata da S4/S6 - "Lavoro in
@@ -1211,11 +1258,16 @@ function weeklyBucketDefs_(now, weeksCount) {
 
 // S4, generalizzata in R9.14 (addendum di collaudo): resta con questo
 // nome e questa firma (usata da S4/S6, grafici diagnostici) - delega
-// pero' allo stesso motore di stockSeriesFromLog_ usato anche per
+// pero' allo stesso motore di stockSeriesFromIndex_ usato anche per
 // "Lavoro accettato" (R9.14, monthBuckets_), invece di ricostruire gli
-// intervalli una seconda volta con un filtro copiato.
-function activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount) {
-  var result = stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, weeklyBucketDefs_(now, weeksCount), ['prep', 'wip', 'stand_by']);
+// intervalli una seconda volta con un filtro copiato. 'jobIndex'
+// (facoltativo, da buildJobIntervalsIndex_) evita di riparsare il log
+// quando il chiamante (buildSystemState_) l'ha gia' costruito per un
+// altro uso - senza, lo costruisce al volo (retrocompatibile con i
+// chiamanti/test esistenti).
+function activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount, jobIndex) {
+  var index = jobIndex || buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now);
+  var result = stockSeriesFromIndex_(index, weeklyBucketDefs_(now, weeksCount), ['prep', 'wip', 'stand_by']);
   return { weekly: result.values, excluded_job_ids: result.excluded_job_ids };
 }
 
@@ -1416,6 +1468,12 @@ function checkS4WipCoverage_() {
   });
   livePanelPoints = round_(livePanelPoints);
 
+  // R9.14, ottimizzazione: un solo parsing di activity_log_json per
+  // job (buildJobIntervalsIndex_), condiviso da tutte le verifiche
+  // sotto invece di riparsare il log per ognuna - questa diagnostica
+  // arrivava a farlo 4-5 volte per esecuzione.
+  var jobIntervalsIndex = buildJobIntervalsIndex_(jobs, archivedJobs, columnMap, now);
+
   // Verifica che conta davvero: "in che colonna e' questo job ADESSO,
   // secondo l'ultimo intervallo ricostruito dal log" deve dare la
   // stessa risposta di job.status (il campo che il pannello live legge
@@ -1424,12 +1482,11 @@ function checkS4WipCoverage_() {
   // qui la fotografia e' letteralmente la stessa istante per istante,
   // nessuna media di mezzo.
   var instantWipPoints = 0;
-  jobs.forEach(function(job) {
-    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
-    if (!intervals) { return; } // gia' contato in excluded_job_ids
-    var lastInterval = intervals[intervals.length - 1];
+  jobIntervalsIndex.entries.forEach(function(entry) {
+    if (entry.archived) { return; } // il pannello live legge solo la board attiva
+    var lastInterval = entry.intervals[entry.intervals.length - 1];
     if (lastInterval.wip_class === 'active') {
-      instantWipPoints += jobPoints_(job);
+      instantWipPoints += entry.points;
     }
   });
   instantWipPoints = round_(instantWipPoints);
@@ -1437,7 +1494,7 @@ function checkS4WipCoverage_() {
   // Il valore che finisce davvero in systemState.flowWeeklyBuckets (la
   // MEDIA sui 7 giorni della settimana corrente, non un'istantanea) -
   // include sempre l'archivio (N6), come in produzione.
-  var weeklyAverage = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount);
+  var weeklyAverage = activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount, jobIntervalsIndex);
   var currentWeekAverage = weeklyAverage.weekly[weeklyAverage.weekly.length - 1];
 
   // S2/S3, correzione aggiuntiva (addendum di collaudo, 2026-08-28):
@@ -1467,7 +1524,7 @@ function checkS4WipCoverage_() {
   // uguali per costruzione (pipeline diversa da points.completed_cards,
   // che usa job.done_ts).
   var since = new Date(now.getTime() - Number(config.observation_window_days || 30) * 864e5);
-  var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, []);
+  var points = pointsStatistics_(jobs, archivedJobs, columnMap, since, now, [], jobIntervalsIndex);
   var allVisite = visite.concat(visiteArchivio || []);
   var completedVisitesInWindow = allVisite.filter(function(v) {
     return v.consegna_ts && new Date(v.consegna_ts) >= since;
@@ -1486,12 +1543,11 @@ function checkS4WipCoverage_() {
   // live (points.committed_points, stessa popolazione via workStage_).
   var acceptedRoles = ['backlog', 'prep', 'wip', 'stand_by'];
   var instantAcceptedPoints = 0;
-  jobs.forEach(function(job) {
-    var intervals = jobColumnIntervalsFromLog_(job, columnMap, now);
-    if (!intervals) { return; } // gia' contato in excluded_job_ids
-    var lastInterval = intervals[intervals.length - 1];
+  jobIntervalsIndex.entries.forEach(function(entry) {
+    if (entry.archived) { return; } // il pannello live legge solo la board attiva
+    var lastInterval = entry.intervals[entry.intervals.length - 1];
     if (acceptedRoles.indexOf(lastInterval.role) !== -1) {
-      instantAcceptedPoints += jobPoints_(job);
+      instantAcceptedPoints += entry.points;
     }
   });
   instantAcceptedPoints = round_(instantAcceptedPoints);
@@ -1502,7 +1558,7 @@ function checkS4WipCoverage_() {
   // mese, non e' il criterio di pass/fail.
   var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   var monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  var currentMonthAcceptedAverage = stockSeriesFromLog_(jobs, archivedJobs, columnMap, now, [{ start: monthStart, end: monthEnd }], acceptedRoles).values[0];
+  var currentMonthAcceptedAverage = stockSeriesFromIndex_(jobIntervalsIndex, [{ start: monthStart, end: monthEnd }], acceptedRoles).values[0];
 
   return {
     executed_at: nowIso_(),
