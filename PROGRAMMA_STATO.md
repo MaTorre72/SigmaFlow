@@ -115,11 +115,37 @@ l'aggregazione per settimana nei test.
 **194/194 test nell'harness Node** (192 prima di questa sessione + 2
 nuovi netti: R5 +3/-0 sostituzioni di 2 esistenti aggiornate,
 `flowWeeklyBuckets_`/`wipBands_` +4 a fronte di -2 test S2 rimossi
-insieme alle funzioni che testavano). Push su TEST verificato: 16/16
-file identici (`push-and-verify.sh`).
+insieme alle funzioni che testavano).
 
-**Prossimo passo**: in attesa di indicazioni di Marco per **S4** (WIP
-attivo ricostruito dal log — lavoro vero, non ancora iniziato). Nessuna
+**Collaudo Browser pane** (server locale di riproduzione, dati demo via
+`seedTestData`, rimosso a fine sessione): dashboard scorsa per intero,
+nessun errore in console. Confermati visivamente tutti i punti sopra —
+"Capacita' disponibile stimata (team, 4 persone)", "Lavori completati
+(periodo)"/"Passaggi completati (periodo)" affiancati (5 vs 9 sui dati
+demo), pannello "Rilavorazione" con "Carico, nel suo contesto" sempre a
+tre valori, "Rilavorazioni per causa — 2/1/1" con quote 75%/25%
+verificate a mano, Quadro avanzato con tutte le etichette "per
+passaggio"/E[K] riscritta, "Profilo della rilavorazione", tabella
+attese con riga di riepilogo (vuota perche' il dataset demo non
+popola `t_*_d`, comportamento gia' noto da prima di questa sessione,
+non un difetto). Grafici "Throughput vs WIP"/"Tempo di ciclo vs WIP":
+`wipBands` risulta vuoto sul dataset demo (WIP quasi sempre in un range
+stretto 480-580 pt su 26 settimane, nessuna fascia raggiunge le 3
+settimane minime) — entrambi mostrano correttamente "Dato non ancora
+sufficiente", comportamento atteso su questo dataset, verificato non
+essere un errore silenzioso.
+
+**Bloccante, non risolto da questa sessione**: `push-and-verify.sh`
+fallisce di nuovo con `invalid_grant`/`invalid_rapt` — il token OAuth
+di `clasp` (gia' risolto una volta in questa fase con `npx clasp
+login`) e' scaduto un'altra volta. Stesso limite di prima, richiede un
+nuovo re-login interattivo di Marco. **Push su TEST e verifica
+`clasp pull` isolata restano da fare** non appena il login e' rinnovato.
+
+**Prossimo passo**: 1) Marco esegue `npx clasp login`, poi si riprende
+per completare push-and-verify; 2) in attesa di indicazioni di Marco
+per **S4** (WIP attivo ricostruito dal log — lavoro vero, non ancora
+iniziato). Nessuna
 PR aperta, nessun merge su `main`.
 
 ---
