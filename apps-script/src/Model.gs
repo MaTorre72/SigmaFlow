@@ -537,8 +537,16 @@ function monthBuckets_(jobs, now, count, columnMap, jobIndex) {
     var accepted = stockSeriesFromIndex_(index, buckets, ['backlog', 'prep', 'wip', 'stand_by']);
     buckets.forEach(function(bucket, bucketIndex) { bucket.accepted_points = accepted.values[bucketIndex]; });
   }
+  // 'start'/'end' servivano solo come input a stockSeriesFromIndex_ qui
+  // sopra - mai letti dal client (drawPointsTimeline/renderMonthlyLoad
+  // usano solo key/label/i campi _points). Tolti prima di restituire:
+  // sono oggetti Date reali, e google.script.run ha una serializzazione
+  // diversa da una chiamata diretta - nessun motivo di far attraversare
+  // quel confine a un valore che non serve dall'altra parte.
   buckets.forEach(function(bucket) {
     bucket.net_points = bucket.entered_points - bucket.completed_points;
+    delete bucket.start;
+    delete bucket.end;
   });
   return buckets;
 }
@@ -1623,6 +1631,24 @@ function checkS4WipCoverageSuProd() {
   return withEnvironment_('prod', function() {
     var result = checkS4WipCoverage_();
     Logger.log(JSON.stringify(result));
+    return result;
+  }, false);
+}
+
+// Diagnostica temporanea (2026-08-28, sessione 14): "Errore sconosciuto"
+// segnalato da Marco caricando la dashboard su TEST - checkS4WipCoverage_
+// NON chiama buildSystemState_ (replica una logica simile ma
+// indipendente), quindi il suo esito pulito non prova che getMetrics()
+// funzioni. Questa funzione chiama lo STESSO percorso della dashboard
+// (getMetrics -> calculateMetrics_ -> buildSystemState_), da eseguire
+// direttamente dall'editor (non tramite api(), che nasconderebbe
+// l'eccezione in un try/catch) - un'eventuale eccezione reale comparira'
+// qui con riga e stack trace. Sola lettura, nessuna scrittura. Da
+// rimuovere una volta chiuso questo giro.
+function debugGetMetricsOnTest() {
+  return withEnvironment_('test', function() {
+    var result = getMetrics();
+    Logger.log('success=' + result.success + ', dimensione risposta=' + JSON.stringify(result).length + ' caratteri');
     return result;
   }, false);
 }
