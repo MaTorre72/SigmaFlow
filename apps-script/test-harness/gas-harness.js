@@ -13,6 +13,22 @@ const SRC_DIR = path.join(__dirname, '..', 'src');
 
 function pad(n, len) { return String(n).padStart(len || 2, '0'); }
 
+// S2/S3 (corretto in collaudo, addendum): numero di settimana ISO 8601
+// (lunedi'-domenica, la settimana che contiene il primo giovedi'
+// dell'anno e' la settimana 1) - serve solo a raggruppare in modo
+// consistente le date a 7 giorni di distanza esatta generate da
+// flowWeeklyBuckets_/wipBands_ nello stesso bucket, non a riprodurre
+// esattamente il comportamento locale-dipendente del vero
+// Utilities.formatDate di Apps Script.
+function isoWeekInfo_(date) {
+  var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  var dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  var weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return { year: d.getUTCFullYear(), week: weekNum };
+}
+
 function formatDate(date, tz, pattern) {
   // Implementazione semplificata: ignora la vera conversione di timezone
   // (sufficiente per verificare la logica, non la resa visuale esatta).
@@ -23,6 +39,10 @@ function formatDate(date, tz, pattern) {
   if (pattern === 'yyyy-MM-dd') { return y + '-' + pad(mo) + '-' + pad(d); }
   if (pattern === 'yyyy-MM') { return y + '-' + pad(mo); }
   if (pattern === 'MM/yyyy') { return pad(mo) + '/' + y; }
+  if (pattern === "yyyy-'W'ww") {
+    var info = isoWeekInfo_(date);
+    return info.year + '-W' + pad(info.week);
+  }
   // default: "yyyy-MM-dd'T'HH:mm:ssXXX"
   return y + '-' + pad(mo) + '-' + pad(d) + 'T' + pad(h) + ':' + pad(mi) + ':' + pad(s) + '+02:00';
 }

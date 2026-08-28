@@ -953,6 +953,7 @@
 
   .quick-card,
   .gauge-card,
+  .load-card,
   .points-summary article,
   .chart-panel {
     background: var(--surface);
@@ -963,12 +964,31 @@
 
   .quick-card,
   .gauge-card,
+  .load-card,
   .points-summary article {
     align-content: center;
     display: grid;
     gap: 8px;
     min-height: 128px;
     text-align: center;
+  }
+
+  /* R9.5/R9.6: numero grande + colore di direzione, sostituisce i
+     gauge ad arco per grandezze che possono superare il 100% o essere
+     negative (carico effettivo/capacita' disponibile). */
+  .load-value {
+    font-size: 32px;
+    font-weight: 700;
+  }
+
+  .load-stable { color: var(--ok); }
+  .load-attention { color: var(--warn); }
+  .load-critical { color: var(--danger); }
+  .load-unknown { color: var(--muted); font-size: 16px; font-weight: 400; }
+
+  .load-detail-link {
+    color: var(--muted);
+    font-size: 11px;
   }
 
   .quick-card span,
@@ -1188,11 +1208,49 @@
     font-size: 12px;
   }
 
+  /* R9.9: stile distinto per le sezioni non ancora attive (Scenari
+     futuri) - tratteggiato/grigio, non confondibile con dati reali. */
+  .scenario-item-inactive {
+    background: repeating-linear-gradient(45deg, #f6f8fa, #f6f8fa 10px, #eef1f4 10px, #eef1f4 20px);
+    border-style: dashed;
+  }
+
+  .scenario-item-inactive span {
+    font-style: italic;
+  }
+
   dl {
     display: grid;
     gap: 8px 16px;
     grid-template-columns: 1fr auto;
     margin: 0;
+  }
+
+  /* R10.5 (terzo giro di correzioni, 2026-08-28): due <dl> consecutivi
+     nello stesso pannello (es. "Rilavorazione": system-load-metrics +
+     system-rework-metrics) restavano attaccati - il gap della grid vale
+     solo DENTRO un <dl>, margin:0 non lascia spazio tra due <dl> sibling
+     successivi. Stessa spaziatura verticale del gap interno (8px). */
+  dl + dl {
+    margin-top: 8px;
+  }
+
+  /* R9.8: sottototali indentati/raggruppati visivamente sotto la riga
+     padre (es. le tre attese per tipo sotto "Lavoro in attesa"). */
+  dt.dl-subitem {
+    padding-left: 20px;
+    font-size: 13px;
+  }
+
+  dd.dl-subitem {
+    font-size: 13px;
+    font-weight: 400;
+  }
+
+  /* R9.13: enfasi per valori fuori dalla scala 0-100% (es. rho > 1). */
+  dd.value-out-of-scale {
+    color: var(--danger);
+    font-weight: 800;
   }
 
   dt {
@@ -1235,6 +1293,21 @@
   .state-critical,
   .state-unstable {
     background: var(--danger);
+  }
+
+  /* S3 (DESIGN_R_S.md §3.8): fasce a percentile sulla lista "Fermi ora" -
+     applicate solo quando lo storico ha abbastanza campioni (righe senza
+     classe restano non colorate, comportamento identico a prima di S3). */
+  .blocked-band-green {
+    background: #e7f6ed;
+  }
+
+  .blocked-band-yellow {
+    background: #fff1cc;
+  }
+
+  .blocked-band-red {
+    background: #fdeceb;
   }
 
   .rho-track {

@@ -1006,6 +1006,9 @@
   function updateLivePriorityBadge() {
     var impact = Number(document.getElementById('modal-impact').value || 0);
     var manageability = Number(document.getElementById('modal-manageability').value || 0);
+    // ATTENZIONE: duplica la formula di calcPriorityScore() in Utils.gs
+    // (server) solo per l'anteprima dal vivo, prima del salvataggio -
+    // se la formula server cambia, allineare anche qui.
     var score = impact && manageability ? Math.round(Math.sqrt(impact * manageability) * 100) / 100 : 0;
     var automaticPriority = suggestPriorityClassClient(score);
     var priority = document.getElementById('modal-priority-class').value || automaticPriority;
@@ -1201,18 +1204,19 @@
     });
   }
 
+  // R8.2 (addendum di collaudo): "Percorso della card" serve per un
+  // colpo d'occhio, non per precisione al minuto - solo giorni, al
+  // massimo una cifra decimale (non piu' giorni+ore, es. "52g 9h").
   function formatDurationLabel_(ms) {
-    var totalMinutes = Math.round(ms / 60000);
-    var days = Math.floor(totalMinutes / 1440);
-    var hours = Math.floor((totalMinutes % 1440) / 60);
-    var minutes = totalMinutes % 60;
-    if (days > 0) {
-      return days + 'g' + (hours > 0 ? ' ' + hours + 'h' : '');
+    var days = ms / 86400000;
+    if (days >= 1) {
+      return (Math.round(days * 10) / 10) + 'g';
     }
-    if (hours > 0) {
-      return hours + 'h' + (minutes > 0 ? ' ' + minutes + 'm' : '');
+    var hours = ms / 3600000;
+    if (hours >= 1) {
+      return (Math.round(hours * 10) / 10) + 'h';
     }
-    return minutes + 'm';
+    return Math.round(ms / 60000) + 'm';
   }
 
   var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
@@ -2071,19 +2075,28 @@
     var statusEl = document.getElementById('general-status');
     statusEl.className = 'state-badge state-' + (status.code || 'unknown');
     statusEl.textContent = status.label || 'DATI INSUFFICIENTI';
-    document.getElementById('general-load').textContent = 'Carico effettivo: ' + nullablePercent(system.capacityMetrics.effective_load, true);
     document.getElementById('general-message').textContent = status.message || '';
     document.getElementById('quick-system-status').textContent = status.label || 'DATI INSUFFICIENTI';
     document.getElementById('quick-system-status').className = 'quick-state state-' + (status.code || 'unknown');
 
+    // R9.7: la soglia della fascia attuale, non tutte e tre insieme.
     var quality = system.dataQuality || {};
     var qualityEl = document.getElementById('data-quality-status');
     qualityEl.className = 'quality-badge quality-' + (quality.level || 'low');
     qualityEl.textContent = quality.label || 'BASSA';
     document.getElementById('data-quality-message').textContent = quality.message || '';
-    document.getElementById('data-quality-sample').textContent = 'Iniziative osservate: ' + valueOrDash(quality.observed_initiatives) + ' - lavori completati utili: ' + valueOrDash(quality.completed_samples);
+    var qualityThresholds = { low: 'sotto 10', medium: '10-30', good: 'oltre 30' };
+    var qualityThreshold = qualityThresholds[quality.level] || qualityThresholds.low;
+    document.getElementById('data-quality-sample').textContent = valueOrDash(quality.observed_initiatives) + ' lavori osservati (soglia ' + (quality.label || 'BASSA') + ': ' + qualityThreshold + '), ' + valueOrDash(quality.completed_samples) + ' completati utili.';
     document.getElementById('quick-data-quality').textContent = quality.label || 'BASSA';
     document.getElementById('quick-data-quality').className = 'quick-quality quality-' + (quality.level || 'low');
+
+    // R9.5/R9.6 (addendum di collaudo): "Carico effettivo"/"Capacita'
+    // disponibile" non sono piu' due gauge ad arco (potevano superare
+    // il 100% o essere negativi) ma un solo numero di sovraccarico in
+    // Vista rapida - il dettaglio (quota di capacita', margine, ecc.)
+    // resta nel pannello "Rilavorazione"/"Margine di stabilita'".
+    renderLoadIndicator_('quick-load-value', system.capacityMetrics.effective_load);
 
     var flow = system.flowMetrics || {};
     var points = system.pointsMetrics || {};
@@ -2097,16 +2110,28 @@
     // doppione con un numero leggermente diverso (era successo con
     // n_jobs_observed/new_initiatives_observed, corretto lo stesso
     // giorno).
-    document.getElementById('flow-open-cards').textContent = valueOrDash(points.open_cards);
-    document.getElementById('flow-open-points').textContent = metricValue(points.open_points, ' pt');
+    // R7: "Aperti (ora)" mescolava pipeline commerciale (stadio 0) e
+    // lavoro impegnato (stadi 1-4) - due righe distinte, mai sommate.
+    document.getElementById('flow-pipeline-cards').textContent = valueOrDash(points.pipeline_cards);
+    document.getElementById('flow-pipeline-points').textContent = metricValue(points.pipeline_points, ' pt');
+    document.getElementById('flow-committed-cards').textContent = valueOrDash(points.committed_cards);
+    document.getElementById('flow-committed-points').textContent = metricValue(points.committed_points, ' pt');
     document.getElementById('flow-added-cards').textContent = valueOrDash(points.added_cards);
     document.getElementById('flow-added-points').textContent = metricValue(points.added_points, ' pt');
-    document.getElementById('flow-added-rate').textContent = perWeekValue(flow.new_initiatives_per_day, '/settimana');
-    document.getElementById('flow-added-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.added_points, flow.window_days);
-    document.getElementById('flow-completed-cards').textContent = valueOrDash(points.completed_cards);
+    // R9.2: l'header di colonna dichiara gia' l'unita' ("Lavori/settimana"/
+    // "Punti/settimana") - il valore di cella non la ripete.
+    document.getElementById('flow-added-rate').textContent = perWeekFromWindowTotal_(points.added_cards, flow.window_days, '');
+    document.getElementById('flow-added-points-rate').textContent = perWeekFromWindowTotal_(points.added_points, flow.window_days, '');
+    // R6.6, completamento (addendum di collaudo): "Lavori completati"
+    // deve leggere flow.completed_initiatives (stessa popolazione -
+    // job distinti sulle visite con visitServiceTimeDays_ > 0 - di
+    // flow.completed_passages), non piu' points.completed_cards
+    // (pipeline diversa, via job.done_ts, nessun filtro sulla durata).
+    // I due numeri non sono piu' garantiti coincidere per costruzione.
+    document.getElementById('flow-completed-cards').textContent = valueOrDash(flow.completed_initiatives);
     document.getElementById('flow-completed-points').textContent = metricValue(points.completed_points, ' pt');
-    document.getElementById('flow-completed-rate').textContent = perWeekValue(flow.completed_per_day, '/settimana');
-    document.getElementById('flow-completed-points-rate').textContent = pointsPerWeekFromWindowTotal_(points.completed_points, flow.window_days);
+    document.getElementById('flow-completed-rate').textContent = perWeekValue(flow.completed_per_day, '');
+    document.getElementById('flow-completed-points-rate').textContent = perWeekFromWindowTotal_(points.completed_points, flow.window_days, '');
     document.getElementById('flow-window-days').textContent = valueOrDash(flow.window_days);
 
     // Chiesto da Marco (2026-08-20): "passaggi" non e' un termine
@@ -2117,75 +2142,182 @@
     // avg_points_per_initiative, dimensione media dei casi arrivati
     // nel periodo) quando possibile.
     var avgPoints = flow.avg_points_per_initiative;
-    renderDl('flow-extra-metrics', {
-      'Capacita\' disponibile stimata': perWeekValue(flow.estimated_capacity_per_day, ' visite/settimana') + estimatedPointsSuffix_(flow.estimated_capacity_per_day, avgPoints),
-      'Differenza tra entrate e uscite (iniziative/settimana)': perWeekValue(flow.entry_exit_difference, '/settimana')
-    });
+    // R6.2 (addendum di collaudo): etichetta con team_size esplicito -
+    // verificato (PROGRAMMA_STATO.md) che non c'e' nessun disallineamento
+    // reale tra questa capacita' e mu*team_size, solo un artefatto di
+    // arrotondamento a 2 decimali sui tassi giornalieri prima della
+    // conversione settimanale - nessuna formula cambiata.
+    var flowExtraDl = {};
+    flowExtraDl['Capacita\' disponibile stimata (team, ' + valueOrDash(flow.team_size) + ' persone)'] = perWeekValue(flow.estimated_capacity_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(flow.estimated_capacity_per_day, avgPoints);
+    flowExtraDl['Differenza tra entrate e uscite (lavori/settimana)'] = perWeekValue(flow.entry_exit_difference, '/settimana');
+    // R6.6, completamento: entrambe le occorrenze di "Lavori completati"
+    // leggono flow.completed_initiatives, non points.completed_cards
+    // (pipeline sbagliata - vedi sopra).
+    flowExtraDl['Lavori completati (periodo)'] = valueOrDash(flow.completed_initiatives);
+    flowExtraDl['Passaggi completati (periodo)'] = valueOrDash(flow.completed_passages);
+    renderDl('flow-extra-metrics', flowExtraDl);
 
     var rework = system.reworkMetrics || {};
-    renderDl('system-rework-metrics', {
-      'Iniziative con almeno un rientro': nullablePercent(rework.initiatives_with_rework, true),
-      'Rientri medi quando il lavoro rientra': estimableValue(rework.average_reentries_when_reworked),
-      'Visite medie per iniziativa': metricValue(rework.average_passages_per_initiative),
-      'Visite totali alla settimana': perWeekValue(rework.total_passages_per_day, ' visite/settimana') + estimatedPointsSuffix_(rework.total_passages_per_day, avgPoints),
-      'Carico aggiuntivo dei rientri (alla settimana)': perWeekValue(rework.additional_passages_from_rework, ' visite/settimana') + estimatedPointsSuffix_(rework.additional_passages_from_rework, avgPoints)
-    });
+    // R4 (DESIGN_R_S.md §3.4): scomposizione dei rientri per causa
+    // (rework_cause) - quota controllabile (cliente + interno, leva:
+    // gating) vs non controllabile (enti).
+    var byCause = rework.by_cause || {};
+    // R6.3 (addendum di collaudo): il carico va sempre mostrato nel suo
+    // contesto - lavoro nuovo e rilavorazione fianco a fianco piu' il
+    // totale, mai la rilavorazione isolata.
+    renderDl('system-load-metrics', {
+      'Carico da lavoro nuovo (a settimana)': perWeekValue(flow.new_work_per_day, ' passaggi/settimana'),
+      'Carico da rilavorazione (a settimana)': perWeekValue(rework.additional_passages_from_rework, ' passaggi/settimana'),
+      'Carico totale (a settimana)': perWeekValue(rework.total_passages_per_day, ' passaggi/settimana'),
+      'Quota di capacita\' occupata dal carico totale': nullablePercent(system.capacityMetrics.effective_load, true)
+    }, outOfScaleClasses_('Quota di capacita\' occupata dal carico totale', system.capacityMetrics.effective_load));
+    // R9.6: "Passaggi totali alla settimana"/"Carico aggiuntivo dalla
+    // rilavorazione" rimossi da qui - stesso identico numero gia'
+    // mostrato sopra in system-load-metrics ("Carico totale"/"Carico
+    // da rilavorazione"), verificato essere lo stesso calcolo
+    // (rework.total_passages_per_day/additional_passages_from_rework).
+    // R9.8: le rilavorazioni per causa hanno ora un'etichetta propria
+    // ciascuna, non una terna posizionale "X / Y / Z".
+    var reworkDl = {
+      'Lavori che hanno richiesto una rilavorazione': nullablePercent(rework.initiatives_with_rework, true),
+      'Rilavorazioni medie quando capitano': rateValue(rework.average_reentries_when_reworked),
+      'Passaggi medi per lavoro': rateValue(rework.average_passages_per_initiative)
+    };
+    if (byCause.total) {
+      reworkDl['Rilavorazioni da cliente'] = valueOrDash(byCause.client);
+      reworkDl['Rilavorazioni da enti'] = valueOrDash(byCause.authority);
+      reworkDl['Rilavorazioni da decisione interna'] = valueOrDash(byCause.internal);
+      reworkDl['Quota controllabile (cliente + interno, leva: gating)'] = nullablePercent(byCause.controllable_share, true);
+      reworkDl['Quota di rilavorazioni da enti (non controllabile direttamente)'] = nullablePercent(byCause.external_share, true);
+    } else {
+      reworkDl['Rilavorazioni per causa'] = 'Dato non ancora stimabile';
+    }
+    renderDl('system-rework-metrics', reworkDl);
 
     var time = system.timeMetrics || {};
-    renderDl('time-metrics', {
+    var timeDl = {
       'Tempo medio di lavorazione': estimableValue(time.average_service_days, ' giorni'),
-      'Variabilita dei tempi': time.variability_level || 'Dato non ancora stimabile',
+      // R9.7: il numero (Cv^2) che determina l'etichetta categorica va
+      // mostrato nello stesso pannello, non solo nel Quadro avanzato.
+      // R10.4 (terzo giro di correzioni): soglie esplicite in pagina
+      // (non solo nel codice) - confermate da Marco (dispensa FSC),
+      // stesse di variabilityInterpretation_ (Model.gs).
+      'Variabilita dei tempi': (time.variability_level || 'Dato non ancora stimabile') + (time.variability !== null && time.variability !== undefined ? ' (Cv² = ' + rateValue(time.variability) + ' - soglie: BASSA sotto 0,75, MEDIA 0,75-1,33, ALTA oltre 1,33)' : ''),
       'Tempo alto osservato': estimableValue(time.high_observed_days, ' giorni'),
-      'Tempo prudenziale consigliato': estimableValue(time.prudent_service_days, ' giorni'),
-      'Attesa stimata': estimableValue(time.estimated_wait_days, ' giorni'),
-      'Tempo totale stimato': estimableValue(time.estimated_total_days, ' giorni')
-    });
+      'Tempo prudenziale consigliato': estimableValue(time.prudent_service_days, ' giorni')
+    };
+    // R9.10 (esteso oltre M/M/1 e M/G/1, stesso principio): quando
+    // entrambe le stime dipendono dalla stessa coda instabile, una riga
+    // sola spiega il perche' invece di due "Dato non ancora stimabile"
+    // affiancate senza contesto.
+    if (time.estimated_wait_days === null && time.estimated_total_days === null) {
+      timeDl['Attesa e tempo totale stimati'] = 'Dato non ancora stimabile (sistema instabile o dati insufficienti)';
+    } else {
+      timeDl['Attesa stimata'] = estimableValue(time.estimated_wait_days, ' giorni');
+      timeDl['Tempo totale stimato'] = estimableValue(time.estimated_total_days, ' giorni');
+    }
+    renderDl('time-metrics', timeDl);
     document.getElementById('time-message').textContent = (time.variability_message || '') + ' ' + (time.waiting_message || '');
 
     // Chiesto da Marco (2026-08-20, punto 3): anche il lavoro presente
     // sempre in punti oltre che in card - workloadMetrics ora porta
     // anche i campi _points (Model.gs, currentWorkload_).
+    // R7: "Lavoro presente" (stadi 1-5, mescolava lavoro impegnato e da
+    // fatturare) - spaccato in due dl distinti, mai sommati nella
+    // stessa card (to-invoice-metrics sotto).
     var workload = system.workloadMetrics || {};
     function cardsAndPoints_(count, points) {
       return valueOrDash(count) + ' (' + metricValue(points, ' pt') + ')';
     }
+    // R9.8: le tre righe di attesa per tipo sono componenti di "Lavoro
+    // in attesa (totale)" - etichetta rientrata (classe CSS) per
+    // segnalarle come sottototale, non otto voci indipendenti sullo
+    // stesso piano.
+    // R7, correzione aggiuntiva (2026-08-28): questa riga mostra il solo
+    // stadio 3 (isolato) - si chiama "Lavorazione", non "Lavoro in
+    // corso" (quel nome resta riservato all'aggregato stadi 2-4, usato
+    // nel grafico diagnostico sotto - altrimenti si ricrea la stessa
+    // ambiguita' che R7 doveva risolvere).
     renderDl('workload-metrics', {
       'Lavoro pronto': cardsAndPoints_(workload.ready, workload.ready_points),
       'In preparazione': cardsAndPoints_(workload.preparing, workload.preparing_points),
-      'Lavoro in corso': cardsAndPoints_(workload.in_progress, workload.in_progress_points),
-      'Concluso, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points),
+      'Lavorazione': cardsAndPoints_(workload.in_progress, workload.in_progress_points),
       'Lavoro in attesa (totale)': cardsAndPoints_(workload.blocked, workload.blocked_points),
       'In attesa di cliente': cardsAndPoints_(workload.waiting_client, workload.waiting_client_points),
       'In attesa di enti': cardsAndPoints_(workload.waiting_authority, workload.waiting_authority_points),
       'Fermi per decisione interna': cardsAndPoints_(workload.waiting_internal, workload.waiting_internal_points)
+    }, {
+      'In attesa di cliente': 'dl-subitem',
+      'In attesa di enti': 'dl-subitem',
+      'Fermi per decisione interna': 'dl-subitem'
+    });
+    renderDl('to-invoice-metrics', {
+      'Concluso, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points)
     });
 
     var capacity = system.capacityMetrics || {};
     // Chiesto da Marco (2026-08-20): tolta la riga "Capacita teorica
     // giornaliera" quando non configurata (theoretical_capacity_per_day
-    // in config) - non aggiungeva informazione, solo rumore. "passaggi"
-    // rinominato "visite" (termine ambiguo, segnalato da Marco), con
-    // l'equivalente stimato in punti quando calcolabile.
+    // in config) - non aggiungeva informazione, solo rumore.
+    // R6.1 (addendum di collaudo): "visite" -> "passaggi" nel glossario
+    // ufficiale del cruscotto.
     var capacityDl = {
-      'Capacita\' effettiva alla settimana': perWeekValue(capacity.effective_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.effective_per_day, avgPoints)
+      'Capacita\' effettiva alla settimana': perWeekValue(capacity.effective_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.effective_per_day, avgPoints)
     };
     if (capacity.theoretical_per_day !== null) {
-      capacityDl['Capacita\' teorica alla settimana'] = perWeekValue(capacity.theoretical_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.theoretical_per_day, avgPoints);
+      capacityDl['Capacita\' teorica alla settimana'] = perWeekValue(capacity.theoretical_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.theoretical_per_day, avgPoints);
     }
-    capacityDl['Assorbita dai nuovi lavori (alla settimana)'] = perWeekValue(capacity.absorbed_by_new_work, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_new_work, avgPoints);
-    capacityDl['Assorbita dai rientri (alla settimana)'] = perWeekValue(capacity.absorbed_by_rework, ' visite/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_rework, avgPoints);
-    capacityDl['Margine residuo (alla settimana)'] = perWeekValue(capacity.residual_per_day, ' visite/settimana') + estimatedPointsSuffix_(capacity.residual_per_day, avgPoints);
-    capacityDl['Margine disponibile'] = nullablePercent(capacity.available_share, true);
-    renderDl('capacity-metrics', capacityDl);
+    capacityDl['Assorbita dai nuovi lavori (alla settimana)'] = perWeekValue(capacity.absorbed_by_new_work, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_new_work, avgPoints);
+    capacityDl['Assorbita dalla rilavorazione (alla settimana)'] = perWeekValue(capacity.absorbed_by_rework, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.absorbed_by_rework, avgPoints);
+    capacityDl['Margine residuo (alla settimana)'] = perWeekValue(capacity.residual_per_day, ' passaggi/settimana') + estimatedPointsSuffix_(capacity.residual_per_day, avgPoints);
+    // R9.6: "Margine disponibile" (= 1 - carico effettivo) rimosso da
+    // qui - stesso fatto gia' mostrato in Vista rapida e come "Quota di
+    // capacita' occupata dal carico totale" nel pannello Rilavorazione.
+    renderDl('capacity-metrics', capacityDl, outOfScaleClasses_('Margine residuo (alla settimana)', capacity.residual_per_day));
 
+    // R9.6: "Margine rispetto alla saturazione" (= 1 - carico effettivo,
+    // stesso numero di "Quota di capacita' occupata dal carico totale"
+    // nel pannello Rilavorazione e del numero di Vista rapida) rimosso
+    // da qui - resta solo un rimando testuale (vedi anche la nota di
+    // pannello in dashboard.html).
+    // R10.4 (terzo giro di correzioni, redesign): tre righe che prima
+    // erano tutte sullo stesso piano (un placeholder che sembrava un
+    // dato mancante, un numero nudo senza scala, lo "Stato" - l'unica
+    // riga davvero immediata - in fondo) sono riordinate: Stato in
+    // cima con badge, poi Utilizzo (il numero che chi legge senza
+    // background tecnico puo' interpretare da solo), poi Fattore di
+    // variabilita' con la stessa scala BASSA/MEDIA/ALTA di Cv^2, infine
+    // Fattore di congestione come dettaglio tecnico secondario.
     var stability = system.stabilityMetrics || null;
     var stabilityStateLabels = { stable: 'STABILE', stressed: 'SOTTO PRESSIONE', critical: 'CRITICO', unstable: 'INSTABILE' };
-    renderDl('stability-metrics', {
-      'Margine rispetto alla saturazione': stability ? nullablePercent(stability.margin, true) : 'Dato non ancora stimabile',
-      'Fattore di congestione': stability && stability.congestion_factor !== null ? metricValue(stability.congestion_factor) : 'Dato non ancora stimabile',
-      'Fattore di variabilita\'': stability ? metricValue(stability.variability_factor) : 'Dato non ancora stimabile',
-      'Stato': stability ? (stabilityStateLabels[stability.system_state] || stability.system_state) : 'Dato non ancora stimabile'
-    });
+    var stabilityStateMessages = {
+      stable: 'Il sistema ha margine operativo.',
+      stressed: 'Il margine si sta riducendo - da tenere d\'occhio.',
+      critical: 'Il sistema e\' vicino alla saturazione.',
+      unstable: 'Il carico supera la capacita\' disponibile: il lavoro tende ad accumularsi invece di essere smaltito.'
+    };
+    var stabilityStateEl = document.getElementById('stability-state');
+    var stabilityCode = stability ? stability.system_state : null;
+    stabilityStateEl.className = 'state-badge state-' + (stabilityCode || 'unknown');
+    stabilityStateEl.textContent = stability ? (stabilityStateLabels[stabilityCode] || stabilityCode) : 'Dato non ancora stimabile';
+    document.getElementById('stability-state-message').textContent = stability ? (stabilityStateMessages[stabilityCode] || '') : 'Servono piu\' dati per stimare il margine di stabilita\'.';
+
+    var stabilityDl = {
+      'Utilizzo (rho effettivo)': stability ? nullablePercent(stability.rho_effective, true) : 'Dato non ancora stimabile',
+      'Fattore di variabilita\' (V)': stability ? (rateValue(stability.variability_factor) + (stability.variability_level ? ' (' + stability.variability_level + ')' : '')) : 'Dato non ancora stimabile',
+      // R10.4: U = rho/(1-rho) non e' definito in modo sensato quando
+      // rho >= 100% (cresce senza limite) - il testo spiega la causa
+      // reale invece di un generico placeholder da "dato mancante".
+      'Fattore di congestione (U)': !stability ? 'Dato non ancora stimabile' : (stability.congestion_factor !== null ? rateValue(stability.congestion_factor) : 'Non calcolabile: il carico supera gia\' la capacita\' disponibile.')
+    };
+    renderDl('stability-metrics', stabilityDl, outOfScaleClasses_('Utilizzo (rho effettivo)', stability ? stability.rho_effective : null));
+    // R10.4 (testo semplificato dopo il commento di Marco - la prima
+    // versione era troppo tecnica): "Fattore di variabilita'" e "Cv²"
+    // sono due grandezze diverse per calcolo (V include anche la
+    // variabilita' di arrivo del lavoro, non solo quella di
+    // lavorazione) - il dettaglio tecnico resta nei commenti del
+    // codice, in pagina serve solo l'avviso a non confonderli.
+    document.getElementById('stability-variability-note').textContent = 'Questo numero non e\' lo stesso di "Cv²" mostrato piu\' sotto in "Tempi e variabilita\'" - sembrano simili ma sono due misure diverse, anche se lette con la stessa scala BASSA/MEDIA/ALTA.';
 
     // M5, chiesto da Marco (2026-08-20, punto 4): non solo il totale
     // complessivo, anche occorrenze/media/min/max per tipo - la nuova
@@ -2194,7 +2326,9 @@
     renderWaitStatsRow_('wait-client', waitTime.client);
     renderWaitStatsRow_('wait-authority', waitTime.authority);
     renderWaitStatsRow_('wait-internal', waitTime.internal);
-    document.getElementById('wait-total-days').textContent = metricValue(waitTime.total_days, ' g');
+    renderWaitStatsRow_('wait-summary', waitTime.summary);
+
+    renderCurrentlyBlocked_(system.currentlyBlocked || [], system.cycleTimeBands || null);
 
     var latentBacklog = system.latentBacklogMetrics || {};
     renderDl('latent-backlog-metrics', {
@@ -2204,10 +2338,15 @@
 
     renderDelayProfile(system.delayProfileMetrics || {});
     renderAdvancedMetrics(metrics);
+    var flowWeeklyBuckets = system.flowWeeklyBuckets || [];
+    document.getElementById('wip-trend-weeks-note').textContent = flowWeeklyBuckets.length ? (flowWeeklyBuckets.length + ' settimane') : 'dato non ancora disponibile';
+    drawWipBandsCharts_(flowWeeklyBuckets, system.wipMovingAverage || [], system.cycleTimeFit || null, system.throughputFit || null);
 
     renderScenarios(system.scenarioReadiness || {});
-    renderGauge('gauge-load', system.capacityMetrics.effective_load, 1, true);
-    renderGauge('gauge-capacity', system.capacityMetrics.available_share, 1, false);
+    // R9.5: gauge-load/gauge-capacity rimossi (potevano superare il
+    // 100% o essere negativi) - sostituiti dal numero di Vista rapida
+    // (renderLoadIndicator_, sopra). gauge-rework resta: e' genuinamente
+    // 0-100%, un arco lo rappresenta correttamente.
     renderGauge('gauge-rework', system.reworkMetrics.initiatives_with_rework, 0.5, true);
     renderPointsMetrics(system.pointsMetrics || {});
   }
@@ -2229,6 +2368,23 @@
     label.textContent = Math.round(Number(value) * 100) + '%';
   }
 
+  // R9.5 (addendum di collaudo): sostituisce i gauge ad arco per
+  // grandezze che possono superare il 100% o essere negative (carico
+  // effettivo puo' arrivare oltre il 100% quando il sistema e'
+  // sovraccarico - un arco non lo rappresenta, si blocca visivamente al
+  // massimo). Numero grande + colore di direzione, nessuna scala fissa.
+  function renderLoadIndicator_(id, value) {
+    var el = document.getElementById(id);
+    if (value === null || value === undefined || value === '') {
+      el.textContent = 'Dato non stimabile';
+      el.className = 'load-value load-unknown';
+      return;
+    }
+    var pct = Math.round(Number(value) * 100);
+    el.textContent = pct + '%';
+    el.className = 'load-value ' + (pct < 70 ? 'load-stable' : pct < 100 ? 'load-attention' : 'load-critical');
+  }
+
   // M9 (DESIGN_dashboard.md, §4.2): 'metrics' e' l'oggetto completo
   // restituito da getMetrics - a differenza di tutto il resto di
   // renderMetrics, che legge solo metrics.systemState, qui si leggono i
@@ -2236,46 +2392,77 @@
   // calcolati da calculateMetrics_ ma mai renderizzati prima di M9
   // (verificato in M3).
   function renderAdvancedMetrics(metrics) {
-    renderDl('advanced-base-metrics', {
-      // M9, fix del 2026-08-20 (segnalato da Marco: due numeri quasi
-      // uguali ma diversi in due pannelli diversi, "Nuove iniziative
-      // osservate" in Flusso del lavoro conta CASI unici, questo conta
-      // VISITE - un caso con 2 rientri nella finestra ne aggiunge 3 qui
-      // ma 1 solo li'. Etichetta corretta per non sembrare un doppione
-      // con un numero sbagliato.
-      'Visite osservate nel periodo (con rientri)': valueOrDash(metrics.n_jobs_observed),
-      'Tasso di arrivo (lambda)': perWeekValue(metrics.lambda, ' visite/settimana'),
-      'Tasso di servizio (mu)': perWeekValue(metrics.mu, ' visite/settimana/operatore'),
-      'Utilizzo (rho)': nullablePercent(metrics.rho, true),
-      'Tempo medio di servizio (E[S])': estimableValue(metrics.E_S, ' giorni'),
-      'Variabilita\' del servizio (Cv^2)': estimableValue(metrics.Cs2),
-      'Tempo medio prima visita (E[S0])': estimableValue(metrics.E_S0, ' giorni'),
-      'Tempo medio visita di rework (E[S1])': estimableValue(metrics.E_S1, ' giorni')
-    });
+    // R6.4 (addendum di collaudo): stessa idea del pannello principale,
+    // ricalcolata per singolo passaggio invece che per lavoro -
+    // popolazione/unita' dichiarate in ogni etichetta, non piu' lasciate
+    // indovinare.
+    // R9.13: enfasi tipografica per i valori fuori dalla scala 0-100%
+    // (rho puo' superare 1 quando il sistema e' sovraccarico) - stesso
+    // principio di R9.5 ma per il testo, non per i gauge.
+    var rhoLabel = 'Utilizzo (rho)';
+    var advancedBaseDl = {
+      'Passaggi osservati nel periodo': valueOrDash(metrics.n_jobs_observed),
+      'Tasso di arrivo (lambda)': perWeekValue(metrics.lambda, ' passaggi/settimana'),
+      'Tasso di servizio per persona (mu)': perWeekValue(metrics.mu, ' passaggi/settimana/operatore')
+    };
+    advancedBaseDl[rhoLabel] = nullablePercent(metrics.rho, true);
+    advancedBaseDl['Tempo medio per passaggio (E[S])'] = estimableValue(metrics.E_S, ' giorni');
+    advancedBaseDl['Variabilita\' del servizio (Cv^2)'] = rateValue(metrics.Cs2);
+    advancedBaseDl['Tempo medio primo passaggio (E[S0])'] = estimableValue(metrics.E_S0, ' giorni');
+    advancedBaseDl['Tempo medio passaggio di rilavorazione (E[S1])'] = estimableValue(metrics.E_S1, ' giorni');
+    renderDl('advanced-base-metrics', advancedBaseDl, outOfScaleClasses_(rhoLabel, metrics.rho));
 
-    var mm1 = metrics.MM1 || {};
-    renderDl('advanced-mm1-metrics', {
-      'Attesa in coda (Wq)': estimableValue(mm1.Wq, ' giorni'),
-      'Tempo totale nel sistema (W)': estimableValue(mm1.W, ' giorni'),
-      'Visite in coda (Lq)': estimableValue(mm1.Lq),
-      'Visite nel sistema (L)': estimableValue(mm1.L)
-    });
+    // R9.10: se tutti i campi sono "Dato non ancora stimabile", una riga
+    // sola invece di 4 ripetute.
+    renderQueueMetrics_('advanced-mm1-metrics', metrics.MM1 || {});
+    renderQueueMetrics_('advanced-mg1-metrics', metrics.MG1 || {});
 
-    var mg1 = metrics.MG1 || {};
-    renderDl('advanced-mg1-metrics', {
-      'Attesa in coda (Wq)': estimableValue(mg1.Wq, ' giorni'),
-      'Tempo totale nel sistema (W)': estimableValue(mg1.W, ' giorni'),
-      'Visite in coda (Lq)': estimableValue(mg1.Lq),
-      'Visite nel sistema (L)': estimableValue(mg1.L)
-    });
-
+    // R3 (DESIGN_R_S.md §3.3)/R6.4 (addendum): questo blocco e' tutto
+    // calcolato PER PASSAGGIO (reworkMetrics_, Model.gs), non per lavoro
+    // come il pannello principale "Rilavorazione" (reworkShare di
+    // buildSystemState_) - le etichette lo dicono esplicitamente per non
+    // farle sembrare la stessa grandezza con un numero diverso. E[K] e'
+    // stato riscritto da zero (la versione precedente era contraddittoria:
+    // "per iniziativa" e "per visita" nella stessa frase).
+    var rhoEffLabel = 'Utilizzo effettivo, con rilavorazioni (rho effettivo)';
     var rework = metrics.rework || {};
-    renderDl('advanced-rework-metrics', {
-      'Quota di visite di rework (p1)': nullablePercent(rework.p1, true),
-      'Rientri medi quando c\'e\' rework (r)': estimableValue(rework.r),
-      'Numero atteso di visite per iniziativa (E[K])': estimableValue(rework.E_K),
-      'Tasso di arrivo effettivo (lambda_effective)': perWeekValue(rework.lambda_effective, ' visite/settimana'),
-      'Utilizzo effettivo (rho_effective)': nullablePercent(rework.rho_effective, true)
+    var reworkAdvDl = {
+      'Quota di passaggi rilavorati (p1)': nullablePercent(rework.p1, true),
+      'Rilavorazioni medie per passaggio (r)': rateValue(rework.r),
+      'Passaggi attesi per lavoro (E[K])': rateValue(rework.E_K),
+      'Tasso di arrivo effettivo, con rilavorazioni (lambda effettivo)': perWeekValue(rework.lambda_effective, ' passaggi/settimana')
+    };
+    reworkAdvDl[rhoEffLabel] = nullablePercent(rework.rho_effective, true);
+    renderDl('advanced-rework-metrics', reworkAdvDl, outOfScaleClasses_(rhoEffLabel, rework.rho_effective));
+  }
+
+  // R9.13: restituisce { label: 'value-out-of-scale' } quando value e'
+  // fuori dall'intervallo 0-1 (rho puo' superare 1 o, in casi degeneri,
+  // essere negativo) - da passare come terzo parametro a renderDl.
+  function outOfScaleClasses_(label, value) {
+    if (value === null || value === undefined) { return null; }
+    if (Number(value) > 1 || Number(value) < 0) {
+      var classes = {};
+      classes[label] = 'value-out-of-scale';
+      return classes;
+    }
+    return null;
+  }
+
+  // R9.10: Coda M/M/1 e M/G/1 quando il sistema e' instabile (rho >= 1)
+  // mostrano 4 righe tutte "Dato non ancora stimabile" - una riga sola
+  // col messaggio e' piu' leggibile di 4 ripetute.
+  function renderQueueMetrics_(id, queue) {
+    var allNull = queue.Wq === null && queue.W === null && queue.Lq === null && queue.L === null;
+    if (allNull) {
+      renderDl(id, { 'Coda': 'Dato non ancora stimabile (sistema instabile o dati insufficienti)' });
+      return;
+    }
+    renderDl(id, {
+      'Attesa in coda (Wq)': estimableValue(queue.Wq, ' giorni'),
+      'Tempo totale nel sistema (W)': estimableValue(queue.W, ' giorni'),
+      'Passaggi in coda (Lq)': estimableValue(queue.Lq),
+      'Passaggi nel sistema (L)': estimableValue(queue.L)
     });
   }
 
@@ -2295,10 +2482,226 @@
     document.getElementById(prefix + '-max').textContent = estimableValue(stats.max_days, ' g');
   }
 
+  // R5 (DESIGN_R_S.md §3.5): lista "Fermi ora" - job attualmente bloccati
+  // in una colonna di attesa, gia' ordinati per giorni decrescenti dal
+  // server (currentlyBlocked_, Model.gs). S3 (§3.8): se il server ha
+  // calcolato le fasce a percentile (campioni storici sufficienti), ogni
+  // riga porta anche 'band' ('green'/'yellow'/'red') - se assente,
+  // nessun colore (comportamento identico a prima di S3).
+  var WAIT_FIELD_LABELS_ = { t_cliente_d: 'Cliente', t_ente_d: 'Enti', t_interno_d: 'Interno' };
+  // R6.6 (addendum di collaudo): limitata alle 5 righe piu' urgenti
+  // (l'array arriva gia' ordinato per elapsed_days decrescente dal
+  // server, currentlyBlocked_ in Model.gs).
+  var CURRENTLY_BLOCKED_LIMIT_ = 5;
+  // Parte 1, nuovo (terzo giro di correzioni, 2026-08-28): il colore di
+  // riga (verde/giallo/rosso, da cycleTimeBands - Model.gs) non aveva
+  // nessuna legenda vicina alla tabella che ne dichiarasse il criterio.
+  // Le soglie sono dati reali (percentili storici del tempo di ciclo),
+  // non un numero fisso - mostrate qui per intero invece di inventare
+  // una soglia in giorni nel testo statico.
+  function renderCurrentlyBlockedLegend_(cycleTimeBands) {
+    var legend = document.getElementById('currently-blocked-legend');
+    if (!legend) { return; }
+    if (!cycleTimeBands) {
+      legend.hidden = true;
+      return;
+    }
+    legend.hidden = false;
+    legend.textContent = 'Colore in base al confronto con lo storico dei tempi di ciclo: verde fino a ' + metricValue(cycleTimeBands.p50, ' g') + ' (mediana), giallo fino a ' + metricValue(cycleTimeBands.p85, ' g') + ' (85° percentile), rosso oltre.';
+  }
+
+  function renderCurrentlyBlocked_(items, cycleTimeBands) {
+    var body = document.getElementById('currently-blocked-body');
+    var empty = document.getElementById('currently-blocked-empty');
+    var table = document.getElementById('currently-blocked-table');
+    renderCurrentlyBlockedLegend_(cycleTimeBands);
+    body.innerHTML = '';
+    if (!items.length) {
+      table.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    table.hidden = false;
+    empty.hidden = true;
+    items.slice(0, CURRENTLY_BLOCKED_LIMIT_).forEach(function(item) {
+      var tr = document.createElement('tr');
+      if (item.band) { tr.className = 'blocked-band-' + item.band; }
+      // R9.1: unico punto della pagina che scriveva un numero per
+      // concatenazione diretta invece di passare da metricValue - per
+      // questo mostrava il punto invece della virgola.
+      [item.title || item.job_id, item.client, WAIT_FIELD_LABELS_[item.wait_type] || item.wait_type, metricValue(item.elapsed_days, ' g')].forEach(function(value) {
+        var td = document.createElement('td');
+        td.textContent = valueOrDash(value);
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  }
+
+  // S6 (addendum di collaudo, sostituisce le fasce a larghezza fissa
+  // S2/S3): due grafici a dispersione - "Throughput vs Lavoro in corso"
+  // e "Tempo di ciclo vs Lavoro in corso", stesso asse X (Lavoro in
+  // corso medio settimanale, in punti). Tre livelli: punti chiari =
+  // singole settimane di flowWeeklyBuckets (nessuna linea le collega: il
+  // WIP osservato oscilla, non e' monotono nel tempo); linea continua =
+  // media mobile a numero fisso di campioni, ordinata per WIP crescente
+  // (wipMovingAverage_ - MAI in ordine temporale); linea tratteggiata
+  // (solo sopra soglia minima di campioni) = fit teorico, fittato sui
+  // PUNTI GREZZI (mai sulla media mobile - vedi Model.gs). Nessuna media
+  // mobile -> messaggio invece del grafico.
+  var MIN_MOVING_AVERAGE_POINTS_ = 1;
+  function drawWipScatter_(canvasId, emptyId, weeklyBuckets, movingAverage, fitCurve, yField, yLabel) {
+    var canvas = document.getElementById(canvasId);
+    var empty = document.getElementById(emptyId);
+    var bandField = yField === 'throughput_punti_settimana' ? 'throughput_medio' : 'ct_medio';
+    var rawPoints = weeklyBuckets.filter(function(b) { return b[yField] !== null && !isNaN(b[yField]); });
+    var maClean = movingAverage.filter(function(b) { return !isNaN(b.wip_medio) && !isNaN(b[bandField]); });
+    if (maClean.length < MIN_MOVING_AVERAGE_POINTS_) {
+      canvas.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    canvas.hidden = false;
+    empty.hidden = true;
+    var width = Math.max(420, canvas.parentElement.clientWidth - 32);
+    var height = 200;
+    var ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(ratio, ratio);
+    ctx.clearRect(0, 0, width, height);
+    var pad = { left: 50, right: 16, top: 12, bottom: 46 };
+    var plotWidth = width - pad.left - pad.right;
+    var plotHeight = height - pad.top - pad.bottom;
+    var maxWipRaw = Math.max.apply(null, rawPoints.map(function(b) { return b.wip_medio; }).concat(maClean.map(function(b) { return b.wip_medio; })).concat([1]));
+    var maxYRaw = Math.max.apply(null, rawPoints.map(function(b) { return b[yField]; }).concat(maClean.map(function(b) { return b[bandField]; })).concat([1]));
+    // Difesa: se per qualche motivo un valore non numerico arriva fin qui,
+    // il grafico degrada a "dato non sufficiente" invece di mostrare NaN sugli assi.
+    if (isNaN(maxWipRaw) || isNaN(maxYRaw)) {
+      canvas.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    var maxWip = maxWipRaw;
+    var maxY = maxYRaw;
+    ctx.font = '11px Arial';
+    ctx.strokeStyle = '#d8dee8';
+    ctx.fillStyle = '#627184';
+    // R9.3: tacche numeriche su entrambi gli assi (stesso pattern di
+    // drawPointsTimeline/drawWaitTimeTrend_) - tolta la tacca vera, la
+    // freccia testuale "->" diventa ridondante.
+    ctx.textAlign = 'right';
+    for (var gy = 0; gy <= 4; gy++) {
+      var yPix = pad.top + plotHeight * gy / 4;
+      ctx.beginPath(); ctx.moveTo(pad.left, yPix); ctx.lineTo(width - pad.right, yPix); ctx.stroke();
+      ctx.fillText(String(Math.round(maxY * (1 - gy / 4))), pad.left - 6, yPix + 4);
+    }
+    ctx.textAlign = 'left';
+    for (var gx = 0; gx <= 4; gx++) {
+      var xPix = pad.left + plotWidth * gx / 4;
+      ctx.fillText(String(Math.round(maxWip * gx / 4)), xPix - 8, height - pad.bottom + 14);
+    }
+    ctx.beginPath(); ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, height - pad.bottom); ctx.lineTo(width - pad.right, height - pad.bottom); ctx.stroke();
+    ctx.fillText('Lavoro in corso (pt)', pad.left, height - 8);
+    // Titolo asse Y ruotato: a sinistra delle tacche numeriche (che finiscono
+    // a pad.left-6), mai sovrapposto - vedi bocciatura collaudo su grafico
+    // illeggibile per sovrapposizione testo/numeri.
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.translate(10, pad.top + plotHeight);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(yLabel, 0, 0);
+    ctx.restore();
+
+    // Punti chiari: le settimane grezze, senza linea.
+    ctx.fillStyle = '#c3cddb';
+    rawPoints.forEach(function(b) {
+      var x = pad.left + plotWidth * (b.wip_medio / maxWip);
+      var y = height - pad.bottom - plotHeight * (b[yField] / maxY);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Linea tratteggiata: fit teorico, solo se disponibile (soglia
+    // minima di campioni verificata lato server) - fittato sui punti
+    // grezzi, mai sulla media mobile. Disegnata PRIMA della media mobile
+    // cosi' la linea continua (il dato osservato) resta sopra.
+    if (fitCurve) {
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = '#9CA9BC';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      var STEPS_ = 40;
+      var started = false;
+      for (var s = 0; s <= STEPS_; s++) {
+        var wx = maxWip * s / STEPS_;
+        var vy = fitCurve(wx);
+        if (vy === null || isNaN(vy) || vy < 0 || vy > maxY * 1.5) { started = false; continue; }
+        var x2 = pad.left + plotWidth * (wx / maxWip);
+        var y2 = height - pad.bottom - plotHeight * (Math.min(vy, maxY) / maxY);
+        if (!started) { ctx.moveTo(x2, y2); started = true; } else { ctx.lineTo(x2, y2); }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Linea continua: media mobile (wipMovingAverage_, gia' ordinata per
+    // WIP crescente) - MAI in ordine temporale, e' li' che si legge la
+    // tendenza reale osservata.
+    ctx.strokeStyle = '#2F6B9A';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    maClean.forEach(function(b, index) {
+      var x = pad.left + plotWidth * (b.wip_medio / maxWip);
+      var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
+      if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+    });
+    ctx.stroke();
+    ctx.fillStyle = '#2F6B9A';
+    maClean.forEach(function(b) {
+      var x = pad.left + plotWidth * (b.wip_medio / maxWip);
+      var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  // S6: nota obbligatoria sotto ogni grafico, col numero REALE di
+  // settimane usate per il fit - mai una costante nel testo.
+  function wipFitNoteText_(fit) {
+    if (!fit) {
+      return 'La curva tratteggiata non e\' ancora mostrata: servono almeno 10 settimane con un tempo di ciclo osservato per calcolarla in modo non degenere.';
+    }
+    return 'La linea tratteggiata mostra la forma attesa dalla teoria delle code, calcolata su ' + fit.n_samples + ' settimane - con questo storico il valore preciso del "ginocchio" non e\' ancora affidabile, solo l\'andamento generale.';
+  }
+
+  function drawWipBandsCharts_(weeklyBuckets, movingAverage, cycleTimeFit, throughputFit) {
+    var throughputCurve = throughputFit ? function(w) {
+      return w <= 0 ? 0 : (throughputFit.t_max * w) / (throughputFit.k + w);
+    } : null;
+    var cycleCurve = cycleTimeFit ? function(w) {
+      var denom = cycleTimeFit.w0 - w;
+      return denom <= 0 ? null : cycleTimeFit.a / denom;
+    } : null;
+    drawWipScatter_('wip-throughput-scatter-chart', 'wip-throughput-scatter-empty', weeklyBuckets, movingAverage, throughputCurve, 'throughput_punti_settimana', 'Throughput (pt/settimana)');
+    document.getElementById('wip-throughput-fit-note').textContent = wipFitNoteText_(throughputFit);
+    drawWipScatter_('wip-cycle-scatter-chart', 'wip-cycle-scatter-empty', weeklyBuckets, movingAverage, cycleCurve, 'ct_medio_giorni', 'Tempo di ciclo (g)');
+    document.getElementById('wip-cycle-fit-note').textContent = wipFitNoteText_(cycleTimeFit);
+  }
+
   function renderDelayProfile(profile) {
+    // R6.5 (addendum di collaudo): "Profilo di rientro" -> "Profilo della
+    // rilavorazione" (vedi anche il titolo del pannello in dashboard.html).
     renderDl('delay-profile-metrics', {
-      'Rientri osservati (campione)': valueOrDash(profile.sample_size),
-      'Rientri medi per consegna (alpha)': estimableValue(profile.alpha)
+      'Rilavorazioni osservate (campione)': valueOrDash(profile.sample_size),
+      'Quota di passaggi rilavorati (alpha)': rateValue(profile.alpha),
+      '80° percentile del tempo prima della rilavorazione': estimableValue(profile.p80_days, ' giorni')
     });
     drawDelayHistogram_(profile.kernel, profile.bin_days || 7);
   }
@@ -2309,7 +2712,7 @@
     if (!kernel) {
       canvas.hidden = true;
       empty.hidden = false;
-      empty.textContent = 'Dato non ancora stimabile (servono almeno 5 rientri osservati)';
+      empty.textContent = 'Dato non ancora stimabile (servono almeno 5 rilavorazioni osservate)';
       return;
     }
     canvas.hidden = false;
@@ -2363,7 +2766,7 @@
   }
 
   function renderPointsMetrics(points) {
-    document.getElementById('points-open').textContent = metricValue(points.open_points, ' pt');
+    document.getElementById('points-committed').textContent = metricValue(points.committed_points, ' pt');
     document.getElementById('points-added').textContent = metricValue(points.added_points, ' pt');
     document.getElementById('points-completed').textContent = metricValue(points.completed_points, ' pt');
     renderBreakdown('points-by-size', points.by_size || [], false);
@@ -2378,7 +2781,11 @@
     root.innerHTML = '';
     rows.forEach(function(row) {
       var tr = document.createElement('tr');
-      [row.label, row.entered_cards, row.completed_cards, row.entered_points, row.completed_points, row.net_points, row.open_points].forEach(function(value) {
+      // R10.3: "Lavoro accettato" e' una media (non un intero come le
+      // altre colonne di questa tabella) - unico punto rimasto a
+      // mostrare il punto invece della virgola (stesso bug di R9.1,
+      // riapparso qui perche' non passava da metricValue).
+      [row.label, row.entered_cards, row.completed_cards, row.entered_points, row.completed_points, row.net_points, metricValue(row.accepted_points)].forEach(function(value) {
         var td = document.createElement('td');
         td.textContent = valueOrDash(value);
         tr.appendChild(td);
@@ -2411,17 +2818,26 @@
       var dt = document.createElement('dt');
       dt.textContent = label;
       var dd = document.createElement('dd');
-      dd.textContent = valueOrDash(item.points) + ' pt - ' + valueOrDash(item.cards) + ' card';
+      // R9.11 (glossario R6): "card" -> "lavori" - non riguarda la
+      // board vera (li' resta il nome dell'oggetto UI).
+      dd.textContent = valueOrDash(item.points) + ' pt - ' + valueOrDash(item.cards) + ' lavori';
       root.appendChild(dt);
       root.appendChild(dd);
     });
   }
 
+  // R9.16: "Lavoro accettato" (stock - una fotografia di un istante) e
+  // "Aggiunti"/"Completati" (flussi - un conteggio per mese) sono
+  // grandezze diverse per natura, con ordini di grandezza tipicamente
+  // diversi - sullo stesso asse/scala lo stock (piu' alto, piu' stabile)
+  // schiaccia visivamente i flussi (piu' piccoli, piu' variabili) contro
+  // lo zero. Due assi verticali indipendenti, ciascuno scelto sulla
+  // variabilita' reale della propria serie - mai forzati a combaciare.
   function drawPointsTimeline(rows) {
     var canvas = document.getElementById('points-timeline-chart');
     var empty = document.getElementById('points-chart-empty');
     var hasData = rows.some(function(row) {
-      return Number(row.entered_points || 0) > 0 || Number(row.completed_points || 0) > 0 || Number(row.open_points || 0) > 0;
+      return Number(row.entered_points || 0) > 0 || Number(row.completed_points || 0) > 0 || Number(row.accepted_points || 0) > 0;
     });
     if (!rows.length || !hasData) {
       canvas.hidden = true;
@@ -2439,32 +2855,62 @@
     canvas.style.height = height + 'px';
     var ctx = canvas.getContext('2d');
     ctx.scale(ratio, ratio);
-    var pad = { left: 42, right: 18, top: 18, bottom: 34 };
-    var max = Math.max.apply(null, rows.map(function(row) { return Math.max(row.entered_points, row.completed_points, row.open_points); }).concat([1]));
+    var pad = { left: 48, right: 48, top: 18, bottom: 34 };
+    // Asse sinistro: lo stock ("Lavoro accettato"). Asse destro: i
+    // flussi ("Aggiunti"/"Completati") - range indipendenti.
+    var maxStock = Math.max.apply(null, rows.map(function(row) { return Number(row.accepted_points || 0); }).concat([1]));
+    var maxFlow = Math.max.apply(null, rows.map(function(row) { return Math.max(Number(row.entered_points || 0), Number(row.completed_points || 0)); }).concat([1]));
     ctx.font = '12px Arial';
     ctx.strokeStyle = '#d8dee8';
-    ctx.fillStyle = '#627184';
+    ctx.fillStyle = '#B7791F';
+    ctx.textAlign = 'right';
     for (var g = 0; g <= 4; g++) {
       var gy = pad.top + (height - pad.top - pad.bottom) * g / 4;
       ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(width - pad.right, gy); ctx.stroke();
-      ctx.fillText(String(Math.round(max * (1 - g / 4))), 4, gy + 4);
+      ctx.fillText(String(Math.round(maxStock * (1 - g / 4))), pad.left - 6, gy + 4);
     }
-    var colors = { entered_points: '#2F6B9A', completed_points: '#238636', open_points: '#B7791F' };
+    ctx.fillStyle = '#2F6B9A';
+    ctx.textAlign = 'left';
+    for (var g2 = 0; g2 <= 4; g2++) {
+      var gy2 = pad.top + (height - pad.top - pad.bottom) * g2 / 4;
+      ctx.fillText(String(Math.round(maxFlow * (1 - g2 / 4))), width - pad.right + 6, gy2 + 4);
+    }
+    // Principio 7 (addendum): ogni asse dichiara la propria unita', mai
+    // lasciata solo al titolo/didascalia.
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#B7791F';
+    ctx.fillText('pt', pad.left - 6, pad.top - 6);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#2F6B9A';
+    ctx.fillText('pt/mese', width - pad.right + 6, pad.top - 6);
+    var colors = { entered_points: '#2F6B9A', completed_points: '#238636', accepted_points: '#B7791F' };
+    var axisMax = { entered_points: maxFlow, completed_points: maxFlow, accepted_points: maxStock };
     Object.keys(colors).forEach(function(field) {
       ctx.beginPath();
       ctx.strokeStyle = colors[field];
-      ctx.lineWidth = field === 'open_points' ? 3 : 2;
+      ctx.lineWidth = field === 'accepted_points' ? 3 : 2;
       rows.forEach(function(row, index) {
         var x = pad.left + (width - pad.left - pad.right) * index / Math.max(1, rows.length - 1);
-        var y = height - pad.bottom - (height - pad.top - pad.bottom) * Number(row[field] || 0) / max;
+        var y = height - pad.bottom - (height - pad.top - pad.bottom) * Number(row[field] || 0) / axisMax[field];
         if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
-        if (field === 'open_points') { ctx.fillStyle = '#627184'; ctx.fillText(row.label, x - 18, height - 12); }
+        if (field === 'accepted_points') {
+          // R9.4: stessa correzione di drawWaitTimeTrend_ - l'etichetta
+          // dell'ultimo mese non deve uscire dal bordo destro.
+          ctx.fillStyle = '#627184';
+          var labelWidth = ctx.measureText(row.label).width;
+          var textX = Math.min(x - 18, width - pad.right - labelWidth);
+          ctx.fillText(row.label, textX, height - 12);
+        }
       });
       ctx.stroke();
     });
   }
 
-  function renderDl(id, values) {
+  // R9.8/R9.13: 'classesByLabel' opzionale (label -> nome classe CSS) -
+  // per raggruppare visivamente dei sottototali (indentazione) o dare
+  // enfasi a valori fuori scala, senza cambiare la forma dei dati che
+  // arrivano dal server.
+  function renderDl(id, values, classesByLabel) {
     var root = document.getElementById(id);
     root.innerHTML = '';
     Object.keys(values).forEach(function(label) {
@@ -2472,6 +2918,11 @@
       var dd = document.createElement('dd');
       dt.textContent = label;
       dd.textContent = valueOrDash(values[label]);
+      var cls = classesByLabel && classesByLabel[label];
+      if (cls) {
+        dt.className = cls;
+        dd.className = cls;
+      }
       root.appendChild(dt);
       root.appendChild(dd);
     });
@@ -2482,9 +2933,11 @@
     root.innerHTML = '';
     var scenarios = readiness.scenarios || {};
     Object.keys(scenarios).forEach(function(key) {
+      // R9.9: stile distinto (tratteggiato/grigio) da una card di dati
+      // reali - queste non sono ancora attive.
       var item = document.createElement('div');
-      item.className = 'scenario-item';
-      item.innerHTML = '<strong>' + escapeHtml(scenarios[key].label || key) + '</strong><span>Predisposto</span>';
+      item.className = 'scenario-item scenario-item-inactive';
+      item.innerHTML = '<strong>' + escapeHtml(scenarios[key].label || key) + '</strong><span>Non ancora attivo</span>';
       root.appendChild(item);
     });
     document.getElementById('scenario-message').textContent = readiness.message || 'La simulazione futura non e ancora attiva.';
@@ -2594,6 +3047,23 @@
     return String(value).replace('.', ',') + (suffix || '');
   }
 
+  // R9.1, parte residua (terzo giro di correzioni, 2026-08-28): le
+  // grandezze "tasso/rapporto" (passaggi/settimana, rilavorazioni medie
+  // per lavoro/passaggio, ecc.) mostravano un numero di cifre decimali
+  // diverso a seconda che l'ultima cifra fosse zero o meno (es. "2,1"
+  // accanto a "16,18" nella stessa riga) - round_() arrotonda sempre a
+  // al massimo 2 decimali, ma non li completa con zeri finali.
+  // rateValue forza sempre 2 cifre decimali per questa famiglia di
+  // grandezza - percentuali (nullablePercent) restano intere, tempi in
+  // giorni (estimableValue) restano a cifre variabili, quantita' intere
+  // (metricValue puro) restano intere: solo tassi/rapporti passano da qui.
+  function rateValue(value, suffix) {
+    if (value === null || value === undefined || value === '') {
+      return 'Dato non ancora stimabile';
+    }
+    return Number(value).toFixed(2).replace('.', ',') + (suffix || '');
+  }
+
   // Chiesto da Marco (2026-08-20): i tassi "al giorno" sono spesso
   // frazioni difficili da leggere a colpo d'occhio (es. "0,42/giorno") -
   // convertiti in "alla settimana" (x7) ovunque nella dashboard, dato
@@ -2604,18 +3074,25 @@
     if (value === null || value === undefined || value === '') {
       return 'Dato non ancora stimabile';
     }
-    return metricValue(Math.round(Number(value) * 700) / 100, suffix);
+    // R9.1, parte residua: e' sempre un tasso (per settimana) - 2 cifre
+    // decimali fisse, mai variabili in base all'ultima cifra arrotondata.
+    return rateValue(Number(value) * 7, suffix);
   }
 
   // Chiesto da Marco (2026-08-20, punto 3: "molto piu' aggressivo" nel
   // dare sempre anche i punti oltre alle iniziative): 'total' e' gia'
   // un totale sull'intera finestra (windowDays) - qui solo la
   // conversione a un tasso settimanale, nessun nuovo dato dal server.
-  function pointsPerWeekFromWindowTotal_(total, windowDays) {
+  // R2 (DESIGN_R_S.md §3.2): generalizzata per accettare il suffisso -
+  // riusata anche per la riga "Aggiunte" (card/settimana), non solo pt.
+  function perWeekFromWindowTotal_(total, windowDays, suffix) {
     if (total === null || total === undefined || !windowDays) {
       return 'Dato non ancora stimabile';
     }
-    return metricValue(Math.round(Number(total) / windowDays * 7 * 100) / 100, ' pt/settimana');
+    // R9.1, parte residua: e' un tasso (per settimana) come perWeekValue -
+    // 2 decimali fissi, mai variabili (era rimasta fuori dal primo giro,
+    // segnalata da Marco su "Nuovi (periodo)"/"Completati (periodo)").
+    return rateValue(Number(total) / windowDays * 7, suffix);
   }
 
   // Stima i punti/settimana equivalenti di un tasso espresso in

@@ -6,20 +6,55 @@
   <div class="quick-grid">
     <article class="quick-card"><span>Stato del sistema</span><strong id="quick-system-status">-</strong></article>
     <article class="quick-card"><span>Affidabilita' della lettura</span><strong id="quick-data-quality">-</strong></article>
-    <article class="gauge-card"><div id="gauge-load" class="gauge"><span>-</span></div><strong>Carico effettivo</strong></article>
-    <article class="gauge-card"><div id="gauge-capacity" class="gauge"><span>-</span></div><strong>Capacita' disponibile</strong></article>
-    <article class="gauge-card"><div id="gauge-rework" class="gauge"><span>-</span></div><strong>Rientri e rilavorazioni</strong></article>
+    <!-- R9.5/R9.6: sostituisce i due gauge ad arco "Carico effettivo"/
+         "Capacita' disponibile" (potevano superare il 100% o essere
+         negativi, un arco non li rappresenta) con un solo numero di
+         sovraccarico - complemento matematico l'uno dell'altro, quindi
+         gia' un solo fatto. Il dettaglio (margine, quota di capacita',
+         ecc.) vive nel pannello "Rilavorazione" sotto. -->
+    <article class="load-card">
+      <span>Carico rispetto alla capacita'</span>
+      <strong id="quick-load-value" class="load-value">-</strong>
+      <span class="load-detail-link">vedi "Rilavorazione" per il dettaglio</span>
+    </article>
+    <article class="gauge-card"><div id="gauge-rework" class="gauge"><span>-</span></div><strong>Rilavorazione</strong></article>
   </div>
   <div class="points-summary">
-    <article><span>Punti aperti</span><strong id="points-open">-</strong></article>
-    <article><span>Punti aggiunti</span><strong id="points-added">-</strong></article>
-    <article><span>Punti completati</span><strong id="points-completed">-</strong></article>
+    <article><span>Punti accettati (adesso)</span><strong id="points-committed">-</strong></article>
+    <article><span>Nuovi punti (ultimi 30 giorni)</span><strong id="points-added">-</strong></article>
+    <article><span>Punti completati (ultimi 30 giorni)</span><strong id="points-completed">-</strong></article>
   </div>
   <article class="chart-panel">
-    <div><h2>Andamento del carico</h2><p>Punti entrati, completati e ancora aperti</p></div>
+    <div><h2>Andamento del carico</h2><p>Lavoro accettato, nuovi punti e completati</p></div>
     <canvas id="points-timeline-chart" height="240" aria-label="Andamento punti nel tempo"></canvas>
-    <div class="chart-legend"><span class="legend-entered">Punti entrati</span><span class="legend-completed">Punti completati</span><span class="legend-open">Punti aperti</span></div>
+    <div class="chart-legend">
+      <span class="legend-open">Lavoro accettato - asse sinistro</span>
+      <span class="legend-entered">Nuovi - asse destro</span>
+      <span class="legend-completed">Completati - asse destro</span>
+    </div>
     <div id="points-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
+    <!-- R9.16/R10.2: didascalia in linguaggio semplice - "Lavoro
+         accettato" e' una fotografia (quanti punti c'erano in carico in
+         quel momento), "Nuovi"/"Completati" sono un conteggio per
+         periodo (quanti punti sono entrati o usciti in quel mese) - per
+         questo hanno un asse verticale indipendente, sulla stessa scala
+         i flussi sarebbero schiacciati contro lo zero dallo stock.
+         "Nuovi" (non piu' "Aggiunti", R10.2): "aggiunto" non comunicava
+         il significato di "lavoro accettato" (R7, stadi 1-4) e rischiava
+         di confondersi con quel nome - "Nuovi" indica il flusso in
+         ingresso nel periodo, distinto dallo stock. -->
+    <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Nuovi" e "Completati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
+    <!-- R10.6 (Marco, 2026-08-28): "un fatto, un calcolo" applicato
+         davvero, non spiegato con una nota - "Lavoro accettato" qui e
+         la card "Punti accettati (adesso)" sono ORA lo stesso identico
+         calcolo (stockInstantSeriesFromIndex_, Model.gs): l'ultimo
+         punto di questa linea E' quel numero, per costruzione, non per
+         coincidenza. "Nuovi"/"Completati" restano un totale per mese
+         solare (qui) contro un totale sugli ultimi 30 giorni (Vista
+         Rapida) - due finestre diverse per scelta, dichiarate
+         esplicitamente nell'etichetta di Vista Rapida invece che in
+         una nota separata. -->
+    <p class="panel-note">"Lavoro accettato" qui e in Vista Rapida e' sempre lo stesso numero. "Nuovi" e "Completati" qui sono invece un totale per mese solare - un numero diverso da "Nuovi punti"/"Punti completati" di Vista Rapida, che coprono gli ultimi 30 giorni (finestra diversa, per questo il totale non e' lo stesso).</p>
   </article>
 </section>
 
@@ -30,7 +65,6 @@
     <h2>Stato del sistema</h2>
     <div class="status-summary">
       <div id="general-status" class="state-badge">-</div>
-      <strong id="general-load">Carico effettivo: -</strong>
     </div>
     <p id="general-message" class="panel-message"></p>
 
@@ -40,52 +74,73 @@
     <p id="data-quality-message" class="panel-message"></p>
     <p id="data-quality-sample" class="secondary-text"></p>
 
-    <h3>Margine di stabilita' <span class="panel-chapter">Cap. 15</span></h3>
+    <h3>Margine di stabilita'</h3>
+    <!-- R10.4 (terzo giro di correzioni, redesign): Stato in cima (era
+         in fondo alla dl, l'unica riga gia' immediata per chi legge
+         senza background tecnico), badge + spiegazione in linguaggio
+         semplice, stesso stile del badge "Stato del sistema" sopra. -->
+    <div class="status-summary">
+      <div id="stability-state" class="state-badge">-</div>
+    </div>
+    <p id="stability-state-message" class="panel-message"></p>
     <dl id="stability-metrics"></dl>
-    <p class="panel-note">Quanto siamo lontani dal punto in cui il carico supera la capacita' disponibile.</p>
+    <p class="panel-note" id="stability-variability-note"></p>
+    <p class="panel-note">Quanto margine resta rispetto alla capacita' disponibile - puo' essere gia' negativo, se il carico l'ha gia' superata. Il numero e' nel pannello "Rilavorazione".</p>
   </article>
 
   <article class="panel wide">
     <h2>Flusso e carico</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th></th><th>Iniziative</th><th>Punti</th><th>Iniziative/settimana</th><th>Punti/settimana</th></tr></thead>
+      <thead><tr><th></th><th>Lavori</th><th>Punti</th><th>Lavori/settimana</th><th>Punti/settimana</th></tr></thead>
       <tbody>
-        <tr><th>Aperte (ora)</th><td id="flow-open-cards">-</td><td id="flow-open-points">-</td><td>-</td><td>-</td></tr>
-        <tr><th>Aggiunte (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td><td id="flow-added-points-rate">-</td></tr>
-        <tr><th>Completate (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
+        <tr><th>Pipeline commerciale (preventivi)</th><td id="flow-pipeline-cards">-</td><td id="flow-pipeline-points">-</td><td>-</td><td>-</td></tr>
+        <tr><th>Lavoro accettato (attuale)</th><td id="flow-committed-cards">-</td><td id="flow-committed-points">-</td><td>-</td><td>-</td></tr>
+        <tr><th>Nuovi (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td><td id="flow-added-points-rate">-</td></tr>
+        <tr><th>Completati (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
       </tbody>
     </table></div>
-    <p class="panel-note">Nuove iniziative e visite totali sono misure diverse: i rientri aumentano il carico reale. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
+    <p class="panel-note">I passaggi settimanali includono anche le rilavorazioni, non solo il lavoro nuovo. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
 
     <h3>Capacita' e bilancio (stimati)</h3>
     <dl id="flow-extra-metrics"></dl>
   </article>
 
   <article class="panel wide">
-    <h2>Rientri e rework <span class="panel-chapter">Cap. 6, 11, 13</span></h2>
+    <h2>Rilavorazione</h2>
+    <h3>Carico, nel suo contesto</h3>
+    <dl id="system-load-metrics"></dl>
     <dl id="system-rework-metrics"></dl>
-    <p class="panel-note">Le visite totali alla settimana rappresentano il lavoro reale richiesto al gruppo (comprese le rilavorazioni).</p>
+    <p class="panel-note">I passaggi totali alla settimana sono il lavoro reale richiesto al gruppo, rilavorazioni comprese.</p>
 
     <h3>Dove si blocca il lavoro</h3>
-    <p class="panel-note">Totali e medie sul periodo osservato, per tipo di blocco - una card ancora ferma ora conta comunque, con l'attesa maturata finora.</p>
+    <p class="panel-note">Totali e medie delle attese gia' concluse, per tipo. I lavori fermi in questo momento sono nella lista sotto.</p>
     <div class="table-scroll"><table class="monthly-load-table">
       <thead><tr><th></th><th>Totale (giorni)</th><th>Occorrenze</th><th>Media (giorni)</th><th>Min</th><th>Max</th></tr></thead>
       <tbody>
         <tr><th>Attesa cliente</th><td id="wait-client-total">-</td><td id="wait-client-occurrences">-</td><td id="wait-client-average">-</td><td id="wait-client-min">-</td><td id="wait-client-max">-</td></tr>
         <tr><th>Attesa enti</th><td id="wait-authority-total">-</td><td id="wait-authority-occurrences">-</td><td id="wait-authority-average">-</td><td id="wait-authority-min">-</td><td id="wait-authority-max">-</td></tr>
         <tr><th>Decisione interna</th><td id="wait-internal-total">-</td><td id="wait-internal-occurrences">-</td><td id="wait-internal-average">-</td><td id="wait-internal-min">-</td><td id="wait-internal-max">-</td></tr>
-        <tr><th>Totale</th><td id="wait-total-days">-</td><td colspan="4"></td></tr>
+        <tr><th>Tutte le attese</th><td id="wait-summary-total">-</td><td id="wait-summary-occurrences">-</td><td id="wait-summary-average">-</td><td id="wait-summary-min">-</td><td id="wait-summary-max">-</td></tr>
       </tbody>
     </table></div>
 
-    <h3>Esposizione futura a rientri</h3>
+    <h3>Fermi in questo momento</h3>
+    <p class="panel-note">I 5 lavori fermi da piu' tempo, in questo momento.</p>
+    <div class="table-scroll"><table class="monthly-load-table" id="currently-blocked-table">
+      <thead><tr><th>Lavoro</th><th>Cliente</th><th>Tipo attesa</th><th>Giorni</th></tr></thead>
+      <tbody id="currently-blocked-body"></tbody>
+    </table></div>
+    <div id="currently-blocked-empty" class="chart-empty" hidden>Nessun lavoro attualmente fermo in attesa</div>
+    <p id="currently-blocked-legend" class="panel-note" hidden></p>
+
+    <h3>Esposizione futura a rilavorazione</h3>
     <dl id="latent-backlog-metrics"></dl>
 
-    <h3>Profilo di rientro</h3>
+    <h3>Profilo della rilavorazione</h3>
     <dl id="delay-profile-metrics"></dl>
-    <canvas id="delay-profile-chart" height="200" aria-label="Istogramma dei tempi di attesa prima del rientro"></canvas>
+    <canvas id="delay-profile-chart" height="200" aria-label="Istogramma dei tempi di attesa prima della rilavorazione"></canvas>
     <div id="delay-profile-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
-    <p class="panel-note">Quanto tempo passa in media tra un rientro e l'altro, e con che probabilita' (tempo di attesa reale prima del rientro).</p>
+    <p class="panel-note">Quanto tempo passa in media prima che un lavoro venga rilavorato, calcolato su tutto lo storico disponibile. Le percentuali possono non sommare esattamente a 100% per arrotondamento.</p>
   </article>
 
   <article class="panel">
@@ -95,12 +150,17 @@
   </article>
 
   <article class="panel">
-    <h2>Lavoro presente e capacita'</h2>
-    <h3>Lavoro presente (ora)</h3>
+    <!-- R7: "Lavoro accettato" (stadi 1-4, team tecnico) e "Da
+         fatturare" (stadio 5, amministrazione) - due dl distinti, mai
+         sommati in una sola card. -->
+    <h2>Lavoro accettato e capacita'</h2>
+    <h3>Lavoro accettato (attuale)</h3>
     <dl id="workload-metrics"></dl>
+    <h3>Da fatturare (attuale)</h3>
+    <dl id="to-invoice-metrics"></dl>
     <h3>Capacita' (stimata, alla settimana)</h3>
     <dl id="capacity-metrics"></dl>
-    <p class="panel-note">La capacita' va confrontata con nuovi lavori e rientri, non solo con i nuovi ingressi.</p>
+    <p class="panel-note">La capacita' va confrontata con lavoro nuovo e rilavorazioni insieme. "Margine residuo" e' lo stesso sovraccarico mostrato sopra come percentuale (pannello "Rilavorazione"), qui in passaggi/settimana.</p>
   </article>
 
   <article class="panel wide">
@@ -118,9 +178,15 @@
   <article class="panel wide">
     <h2>Carico mensile</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th>Mese</th><th>Card entrate</th><th>Card completate</th><th>Punti entrati</th><th>Punti completati</th><th>Saldo punti</th><th>Punti aperti</th></tr></thead>
+      <thead><tr><th>Mese</th><th>Nuovi lavori</th><th>Lavori completati</th><th>Nuovi punti</th><th>Punti completati</th><th>Saldo punti</th><th>Lavoro accettato</th></tr></thead>
       <tbody id="monthly-load-body"></tbody>
     </table></div>
+    <!-- R9.14/R10.3: "Lavoro accettato" qui e' la stessa ricostruzione
+         dal log del grafico "Andamento del carico" sopra (media del
+         mese, stadi 1-4) - non piu' un saldo cumulato approssimato,
+         nessuna nota di differenza necessaria; stesso motore
+         (stockSeriesFromIndex_) di quel grafico. -->
+    <p class="panel-note">"Nuovi lavori"/"Nuovi punti" sono quanti lavori/punti sono entrati in quel mese (un conteggio per periodo). "Lavoro accettato" e' invece una media: quanti punti c'erano in carico durante quel mese (stadi 1-4, ricostruita dallo storico delle colonne) - non un totale del mese ne' un saldo cumulato, per questo non e' un numero intero.</p>
   </article>
 
   <article class="panel wide scenarios-panel">
@@ -130,16 +196,27 @@
   </article>
 
   <details class="panel wide advanced-details">
-    <summary>Quadro avanzato (teoria delle code) <span class="panel-chapter">Cap. 3-9</span></summary>
-    <p class="panel-note">Letture di dettaglio gia' calcolate sugli stessi dati, non necessarie per la gestione corrente. I pannelli sopra (margine di stabilita', dove si blocca il lavoro, esposizione futura, profilo di rientro) coprono gia' i Cap. 11-15 — qui il resto della dispensa (Cap. 3-9: code, variabilita', rework di base).</p>
+    <summary>Quadro avanzato (teoria delle code)</summary>
+    <p class="panel-note">Letture di dettaglio per chi vuole approfondire, non necessarie per la gestione quotidiana.</p>
+    <p class="panel-note">Gli stessi concetti del pannello "Rilavorazione", calcolati per singolo passaggio invece che per lavoro.</p>
     <h3>Grandezze di base</h3>
     <dl id="advanced-base-metrics"></dl>
     <h3>Coda M/M/1 (ipotesi semplificata)</h3>
     <dl id="advanced-mm1-metrics"></dl>
     <h3>Coda M/G/1 (corretta per la variabilita' reale)</h3>
     <dl id="advanced-mg1-metrics"></dl>
-    <h3>Rework (Cap. 6)</h3>
+    <h3>Rilavorazione</h3>
     <dl id="advanced-rework-metrics"></dl>
+    <h3>Throughput e tempo di ciclo vs Lavoro in corso (diagnostico)</h3>
+    <p class="panel-note">Confronta il lavoro in corso con la velocita' di consegna e il tempo di ciclo, settimana per settimana (ultime <span id="wip-trend-weeks-note">-</span>). I punti chiari sono le singole settimane. La linea scura e' la media mobile: e' li' che si legge la tendenza reale.</p>
+    <h4>Throughput vs Lavoro in corso</h4>
+    <canvas id="wip-throughput-scatter-chart" height="200" aria-label="Dispersione throughput settimanale rispetto al lavoro in corso medio"></canvas>
+    <div id="wip-throughput-scatter-empty" class="chart-empty" hidden>Dato non ancora sufficiente</div>
+    <p class="panel-note" id="wip-throughput-fit-note"></p>
+    <h4>Tempo di ciclo vs Lavoro in corso</h4>
+    <canvas id="wip-cycle-scatter-chart" height="200" aria-label="Dispersione tempo di ciclo settimanale rispetto al lavoro in corso medio"></canvas>
+    <div id="wip-cycle-scatter-empty" class="chart-empty" hidden>Dato non ancora sufficiente</div>
+    <p class="panel-note" id="wip-cycle-fit-note"></p>
   </details>
 </section>
 </details>
