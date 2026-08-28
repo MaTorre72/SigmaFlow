@@ -2079,14 +2079,15 @@
     document.getElementById('quick-system-status').textContent = status.label || 'DATI INSUFFICIENTI';
     document.getElementById('quick-system-status').className = 'quick-state state-' + (status.code || 'unknown');
 
-    // R9.7: la soglia che determina l'etichetta categorica va mostrata
-    // insieme al numero, non solo il risultato finale.
+    // R9.7: la soglia della fascia attuale, non tutte e tre insieme.
     var quality = system.dataQuality || {};
     var qualityEl = document.getElementById('data-quality-status');
     qualityEl.className = 'quality-badge quality-' + (quality.level || 'low');
     qualityEl.textContent = quality.label || 'BASSA';
     document.getElementById('data-quality-message').textContent = quality.message || '';
-    document.getElementById('data-quality-sample').textContent = 'Lavori osservati: ' + valueOrDash(quality.observed_initiatives) + ' - lavori completati utili: ' + valueOrDash(quality.completed_samples) + ' (soglie: BASSA sotto 10, MEDIA 10-30, BUONA oltre 30 lavori osservati)';
+    var qualityThresholds = { low: 'sotto 10', medium: '10-30', good: 'oltre 30' };
+    var qualityThreshold = qualityThresholds[quality.level] || qualityThresholds.low;
+    document.getElementById('data-quality-sample').textContent = valueOrDash(quality.observed_initiatives) + ' lavori osservati (soglia ' + (quality.label || 'BASSA') + ': ' + qualityThreshold + '), ' + valueOrDash(quality.completed_samples) + ' completati utili.';
     document.getElementById('quick-data-quality').textContent = quality.label || 'BASSA';
     document.getElementById('quick-data-quality').className = 'quick-quality quality-' + (quality.level || 'low');
 
@@ -2353,8 +2354,8 @@
     // principio di R9.5 ma per il testo, non per i gauge.
     var rhoLabel = 'Utilizzo (rho)';
     var advancedBaseDl = {
-      'Passaggi osservati nel periodo (comprese le rilavorazioni)': valueOrDash(metrics.n_jobs_observed),
-      'Tasso di arrivo dei passaggi (lambda)': perWeekValue(metrics.lambda, ' passaggi/settimana'),
+      'Passaggi osservati nel periodo': valueOrDash(metrics.n_jobs_observed),
+      'Tasso di arrivo (lambda)': perWeekValue(metrics.lambda, ' passaggi/settimana'),
       'Tasso di servizio per persona (mu)': perWeekValue(metrics.mu, ' passaggi/settimana/operatore')
     };
     advancedBaseDl[rhoLabel] = nullablePercent(metrics.rho, true);
@@ -2376,13 +2377,13 @@
     // farle sembrare la stessa grandezza con un numero diverso. E[K] e'
     // stato riscritto da zero (la versione precedente era contraddittoria:
     // "per iniziativa" e "per visita" nella stessa frase).
-    var rhoEffLabel = 'Utilizzo effettivo della capacita\', comprese le rilavorazioni (rho effettivo)';
+    var rhoEffLabel = 'Utilizzo effettivo, con rilavorazioni (rho effettivo)';
     var rework = metrics.rework || {};
     var reworkAdvDl = {
-      'Quota di passaggi di rilavorazione - per passaggio, non per lavoro (p1)': nullablePercent(rework.p1, true),
-      'Rilavorazioni medie per passaggio di rilavorazione (r)': estimableValue(rework.r),
-      'Passaggi attesi per lavoro - calcolo per passaggio, vedi \'Passaggi medi per lavoro\' nel pannello principale per lo stesso concetto sulla finestra corrente (E[K])': estimableValue(rework.E_K),
-      'Tasso di arrivo effettivo dei passaggi, comprese le rilavorazioni (lambda effettivo)': perWeekValue(rework.lambda_effective, ' passaggi/settimana')
+      'Quota di passaggi rilavorati (p1)': nullablePercent(rework.p1, true),
+      'Rilavorazioni medie per passaggio (r)': estimableValue(rework.r),
+      'Passaggi attesi per lavoro (E[K])': estimableValue(rework.E_K),
+      'Tasso di arrivo effettivo, con rilavorazioni (lambda effettivo)': perWeekValue(rework.lambda_effective, ' passaggi/settimana')
     };
     reworkAdvDl[rhoEffLabel] = nullablePercent(rework.rho_effective, true);
     renderDl('advanced-rework-metrics', reworkAdvDl, outOfScaleClasses_(rhoEffLabel, rework.rho_effective));
@@ -2633,7 +2634,7 @@
     // rilavorazione" (vedi anche il titolo del pannello in dashboard.html).
     renderDl('delay-profile-metrics', {
       'Rilavorazioni osservate (campione)': valueOrDash(profile.sample_size),
-      'Quota di passaggi che sono rilavorazione, su tutto lo storico disponibile (alpha)': estimableValue(profile.alpha),
+      'Quota di passaggi rilavorati (alpha)': estimableValue(profile.alpha),
       '80° percentile del tempo prima della rilavorazione': estimableValue(profile.p80_days, ' giorni')
     });
     drawDelayHistogram_(profile.kernel, profile.bin_days || 7);

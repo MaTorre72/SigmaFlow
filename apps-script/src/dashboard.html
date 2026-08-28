@@ -50,7 +50,7 @@
 
     <h3>Margine di stabilita'</h3>
     <dl id="stability-metrics"></dl>
-    <p class="panel-note">Quanto siamo lontani dal punto in cui il carico supera la capacita' disponibile - il numero (quota di capacita' occupata) e' nel pannello "Rilavorazione".</p>
+    <p class="panel-note">Quanto margine resta prima che il carico superi la capacita' disponibile. Il numero e' nel pannello "Rilavorazione".</p>
   </article>
 
   <article class="panel wide">
@@ -64,7 +64,7 @@
         <tr><th>Completati (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
       </tbody>
     </table></div>
-    <p class="panel-note">Nella riga "Aggiunti/Completati": lavoro nuovo e passaggi totali sono misure diverse, la rilavorazione aumenta il carico reale. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
+    <p class="panel-note">I passaggi settimanali includono anche le rilavorazioni, non solo il lavoro nuovo. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
 
     <h3>Capacita' e bilancio (stimati)</h3>
     <dl id="flow-extra-metrics"></dl>
@@ -75,10 +75,10 @@
     <h3>Carico, nel suo contesto</h3>
     <dl id="system-load-metrics"></dl>
     <dl id="system-rework-metrics"></dl>
-    <p class="panel-note">I passaggi totali alla settimana rappresentano il lavoro reale richiesto al gruppo (compresa la rilavorazione).</p>
+    <p class="panel-note">I passaggi totali alla settimana sono il lavoro reale richiesto al gruppo, rilavorazioni comprese.</p>
 
     <h3>Dove si blocca il lavoro</h3>
-    <p class="panel-note">Totali e medie su tutte le attese gia' concluse nello storico disponibile, per tipo di blocco - lo stato dei lavori ancora fermi ora e' nella lista "Fermi ora" sotto.</p>
+    <p class="panel-note">Totali e medie delle attese gia' concluse, per tipo. I lavori fermi in questo momento sono nella lista sotto.</p>
     <div class="table-scroll"><table class="monthly-load-table">
       <thead><tr><th></th><th>Totale (giorni)</th><th>Occorrenze</th><th>Media (giorni)</th><th>Min</th><th>Max</th></tr></thead>
       <tbody>
@@ -90,7 +90,7 @@
     </table></div>
 
     <h3>Fermi ora</h3>
-    <p class="panel-note">I 5 lavori piu' a lungo fermi in una colonna di attesa in questo momento - a differenza della tabella sopra (solo attese gia' concluse nel periodo), qui non c'e' finestra: e' lo stato adesso.</p>
+    <p class="panel-note">I 5 lavori fermi da piu' tempo, in questo momento.</p>
     <div class="table-scroll"><table class="monthly-load-table" id="currently-blocked-table">
       <thead><tr><th>Lavoro</th><th>Cliente</th><th>Tipo attesa</th><th>Giorni</th></tr></thead>
       <tbody id="currently-blocked-body"></tbody>
@@ -109,8 +109,7 @@
     <dl id="delay-profile-metrics"></dl>
     <canvas id="delay-profile-chart" height="200" aria-label="Istogramma dei tempi di attesa prima della rilavorazione"></canvas>
     <div id="delay-profile-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
-    <p class="panel-note">Quanto tempo passa in media tra una rilavorazione e l'altra, e con che probabilita' (tempo di attesa reale prima della rilavorazione). Le percentuali delle barre possono non sommare esattamente a 100% per arrotondamento.</p>
-    <p class="panel-note">Calcolato su tutto lo storico disponibile, non sulla finestra di osservazione — alimenta anche l'istogramma sopra. Stessa idea di "Lavori che hanno richiesto una rilavorazione" nel pannello principale, con popolazione e unita' diverse (per passaggio, storico intero anziche' finestra).</p>
+    <p class="panel-note">Quanto tempo passa in media prima che un lavoro venga rilavorato, calcolato su tutto lo storico disponibile. Le percentuali possono non sommare esattamente a 100% per arrotondamento.</p>
   </article>
 
   <article class="panel">
@@ -130,7 +129,7 @@
     <dl id="to-invoice-metrics"></dl>
     <h3>Capacita' (stimata, alla settimana)</h3>
     <dl id="capacity-metrics"></dl>
-    <p class="panel-note">La capacita' va confrontata con nuovo lavoro e rilavorazione, non solo con i nuovi ingressi.</p>
+    <p class="panel-note">La capacita' va confrontata con lavoro nuovo e rilavorazioni insieme.</p>
   </article>
 
   <article class="panel wide">
@@ -151,7 +150,7 @@
       <thead><tr><th>Mese</th><th>Lavori entrati</th><th>Lavori completati</th><th>Punti entrati</th><th>Punti completati</th><th>Saldo punti</th><th>Punti aperti</th></tr></thead>
       <tbody id="monthly-load-body"></tbody>
     </table></div>
-    <p class="panel-note">"Punti aperti" nel primo mese mostrato e' il saldo iniziale ereditato dallo storico precedente, non tutto lavoro entrato in quel mese.</p>
+    <p class="panel-note">Nel primo mese, "Punti aperti" e' il saldo ereditato dai mesi precedenti.</p>
   </article>
 
   <article class="panel wide scenarios-panel">
@@ -162,8 +161,8 @@
 
   <details class="panel wide advanced-details">
     <summary>Quadro avanzato (teoria delle code)</summary>
-    <p class="panel-note">Letture di dettaglio gia' calcolate sugli stessi dati, non necessarie per la gestione corrente - i pannelli sopra (margine di stabilita', dove si blocca il lavoro, esposizione futura, profilo della rilavorazione) coprono gia' le letture piu' operative; qui il resto delle grandezze di teoria delle code (code, variabilita', rilavorazione di base).</p>
-    <p class="panel-note">Le stesse idee del pannello "Rilavorazione", ricalcolate per singolo passaggio invece che per lavoro — un dettaglio tecnico piu' fine, non un numero alternativo.</p>
+    <p class="panel-note">Letture di dettaglio per chi vuole approfondire, non necessarie per la gestione quotidiana.</p>
+    <p class="panel-note">Gli stessi concetti del pannello "Rilavorazione", calcolati per singolo passaggio invece che per lavoro.</p>
     <h3>Grandezze di base</h3>
     <dl id="advanced-base-metrics"></dl>
     <h3>Coda M/M/1 (ipotesi semplificata)</h3>
@@ -173,7 +172,7 @@
     <h3>Rilavorazione</h3>
     <dl id="advanced-rework-metrics"></dl>
     <h3>Throughput e tempo di ciclo vs Lavoro in corso (diagnostico)</h3>
-    <p class="panel-note">Strumento diagnostico per la futura calibrazione della finestra di osservazione. Lavoro in corso (stadi Preparazione+Lavorazione+Attesa) in punti, non in passaggi, per essere confrontabile tra lavori di taglia diversa - aggregato a settimane sulle ultime settimane disponibili (<span id="wip-trend-weeks-note">-</span>). I punti chiari sono le singole settimane (nessuna linea le collega - il lavoro in corso osservato oscilla, non e' monotono nel tempo); i punti scuri sono le medie per fascia (collegate da una linea, in ordine crescente - la tendenza reale si legge li', non sulle settimane grezze).</p>
+    <p class="panel-note">Confronta il lavoro in corso con la velocita' di consegna e il tempo di ciclo, settimana per settimana (ultime <span id="wip-trend-weeks-note">-</span>). I punti chiari sono le singole settimane. I punti scuri, uniti da una linea, sono le medie per fascia: e' li' che si legge la tendenza reale.</p>
     <h4>Throughput vs Lavoro in corso</h4>
     <canvas id="wip-throughput-scatter-chart" height="200" aria-label="Dispersione throughput settimanale rispetto al lavoro in corso medio"></canvas>
     <div id="wip-throughput-scatter-empty" class="chart-empty" hidden>Dato non ancora sufficiente</div>
