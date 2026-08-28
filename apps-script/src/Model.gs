@@ -419,6 +419,12 @@ function buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchiv
       margin: stability.margin,
       congestion_factor: stability.congestion_factor,
       variability_factor: stability.variability_factor,
+      // R10.4: rho_effective/variability_level aggiunti in questo giro -
+      // dimenticati qui alla prima stesura (stability veniva ricostruito
+      // campo per campo invece di essere passato cosi' com'e', quindi i
+      // due nuovi campi restavano fuori senza errori, solo undefined).
+      variability_level: stability.variability_level,
+      rho_effective: stability.rho_effective,
       system_state: stability.system_state
     },
     scenarioReadiness: {
@@ -759,17 +765,29 @@ function systemStatus_(load, dataQuality) {
 // R10.4 (terzo giro di correzioni, 2026-08-28): soglie confermate da
 // Marco (dispensa FSC) - sostituiscono le precedenti 0,5/1 (indicative,
 // mai confermate da una fonte esplicita).
+// R10.4: soglie estratte in funzione propria - riusate anche da
+// stabilityMetrics_ per "Fattore di variabilita'" (Margine di
+// stabilita'), un solo criterio BASSA/MEDIA/ALTA per entrambi i numeri
+// della stessa famiglia (Cv^2 qui, V di Kingman li'), non due scale
+// diverse per due grandezze che si assomigliano.
+function variabilityLevel_(value) {
+  if (value === null || value === undefined) { return null; }
+  if (value < 0.75) { return 'BASSA'; }
+  if (value <= 1.33) { return 'MEDIA'; }
+  return 'ALTA';
+}
+
 function variabilityInterpretation_(value) {
-  if (value === null) {
+  var level = variabilityLevel_(value);
+  if (level === null) {
     return { level: null, message: 'Dato non ancora stimabile.' };
   }
-  if (value < 0.75) {
-    return { level: 'BASSA', message: 'I tempi sono abbastanza regolari.' };
-  }
-  if (value <= 1.33) {
-    return { level: 'MEDIA', message: 'I tempi cambiano in modo sensibile tra un lavoro e l altro.' };
-  }
-  return { level: 'ALTA', message: 'Pochi lavori lunghi possono bloccare molta capacita.' };
+  var messages = {
+    BASSA: 'I tempi sono abbastanza regolari.',
+    MEDIA: 'I tempi cambiano in modo sensibile tra un lavoro e l altro.',
+    ALTA: 'Pochi lavori lunghi possono bloccare molta capacita.'
+  };
+  return { level: level, message: messages[level] };
 }
 
 function waitingMessage_(load) {
@@ -925,6 +943,13 @@ function reworkMetrics_(completed, lambda, teamSize, mu, secondMoment) {
   };
 }
 
+// R10.4 (terzo giro di correzioni, redesign "Margine di stabilita'"):
+// oltre a margine/fattori gia' esistenti, espone anche rho_effective
+// (il numero che determina davvero lo stato - il client lo mostra come
+// "Utilizzo", prima riga intuitiva del pannello) e variability_level
+// (BASSA/MEDIA/ALTA, stesso criterio di variabilityLevel_ usato per
+// Cv^2 in "Tempi e variabilita'" - un solo criterio nel cruscotto per
+// due numeri della stessa famiglia, non due scale diverse).
 function stabilityMetrics_(rho, rhoEffective, cs2) {
   var state = 'stable';
   if (rhoEffective >= 1) {
@@ -934,11 +959,19 @@ function stabilityMetrics_(rho, rhoEffective, cs2) {
   } else if (rhoEffective >= 0.70) {
     state = 'stressed';
   }
+  var variabilityFactor = round_((1 + cs2) / 2);
 
   return {
     margin: round_(1 - rhoEffective),
+    // U = rho/(1-rho) (fattore di congestione di Kingman) non e'
+    // definito in modo sensato quando rho >= 100% - cresce senza
+    // limite, non e' un dato mancante ma una formula che smette di
+    // avere senso in quella zona (il client lo spiega esplicitamente
+    // invece di un generico "dato non stimabile").
     congestion_factor: rho >= 1 ? null : round_(rho / (1 - rho)),
-    variability_factor: round_((1 + cs2) / 2),
+    variability_factor: variabilityFactor,
+    variability_level: variabilityLevel_(variabilityFactor),
+    rho_effective: round_(rhoEffective),
     system_state: state
   };
 }

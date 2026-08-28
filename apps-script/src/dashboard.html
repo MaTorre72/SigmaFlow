@@ -44,6 +44,11 @@
          di confondersi con quel nome - "Nuovi" indica il flusso in
          ingresso nel periodo, distinto dallo stock. -->
     <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Nuovi" e "Completati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
+    <!-- R10.6 (terzo giro di correzioni): i numeri di Vista Rapida
+         possono superare il massimo degli assi qui sotto - non e' un
+         errore di scala, sono calcolati su basi diverse (vedi sotto),
+         non la stessa identica serie. -->
+    <p class="panel-note">I numeri di Vista Rapida sono una fotografia di adesso e gli ultimi 30 giorni; questo grafico mostra invece medie e conteggi per mese solare, ricostruiti dallo storico - per questo i due possono non coincidere esattamente, soprattutto per il mese ancora in corso.</p>
   </article>
 </section>
 
@@ -64,7 +69,16 @@
     <p id="data-quality-sample" class="secondary-text"></p>
 
     <h3>Margine di stabilita'</h3>
+    <!-- R10.4 (terzo giro di correzioni, redesign): Stato in cima (era
+         in fondo alla dl, l'unica riga gia' immediata per chi legge
+         senza background tecnico), badge + spiegazione in linguaggio
+         semplice, stesso stile del badge "Stato del sistema" sopra. -->
+    <div class="status-summary">
+      <div id="stability-state" class="state-badge">-</div>
+    </div>
+    <p id="stability-state-message" class="panel-message"></p>
     <dl id="stability-metrics"></dl>
+    <p class="panel-note" id="stability-variability-note"></p>
     <p class="panel-note">Quanto margine resta rispetto alla capacita' disponibile - puo' essere gia' negativo, se il carico l'ha gia' superata. Il numero e' nel pannello "Rilavorazione".</p>
   </article>
 

@@ -2305,6 +2305,14 @@ function testBuildSystemStateExposesStabilityMetrics() {
   assertTrue_(Boolean(state.stabilityMetrics), 'stabilityMetrics valorizzata con abbastanza campioni');
   assertTrue_(state.stabilityMetrics.margin !== null, 'margin calcolato');
   assertTrue_(['stable', 'stressed', 'critical', 'unstable'].indexOf(state.stabilityMetrics.system_state) !== -1, 'system_state e\' uno dei codici noti');
+  // R10.4: rho_effective/variability_level - buildSystemState_ ricostruisce
+  // l'oggetto stabilityMetrics campo per campo invece di passare 'stability'
+  // cosi' com'e' - un campo nuovo aggiunto solo a stabilityMetrics_ (Model.gs)
+  // resta silenziosamente 'undefined' qui se non viene copiato esplicitamente
+  // in entrambi i punti (successo reale in questa sessione, catturato solo
+  // dal collaudo visivo, non dai test - aggiunta qui per non ripetere l'errore).
+  assertTrue_(state.stabilityMetrics.rho_effective !== undefined, 'rho_effective deve essere copiato in buildSystemState_, non dimenticato');
+  assertTrue_(['BASSA', 'MEDIA', 'ALTA'].indexOf(state.stabilityMetrics.variability_level) !== -1, 'variability_level deve essere uno dei tre livelli noti');
 }
 
 // M5 (DESIGN_dashboard.md, §4.2): T_cliente/T_ente/T_interno - somma di

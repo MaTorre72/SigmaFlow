@@ -2280,13 +2280,43 @@
     // nel pannello Rilavorazione e del numero di Vista rapida) rimosso
     // da qui - resta solo un rimando testuale (vedi anche la nota di
     // pannello in dashboard.html).
+    // R10.4 (terzo giro di correzioni, redesign): tre righe che prima
+    // erano tutte sullo stesso piano (un placeholder che sembrava un
+    // dato mancante, un numero nudo senza scala, lo "Stato" - l'unica
+    // riga davvero immediata - in fondo) sono riordinate: Stato in
+    // cima con badge, poi Utilizzo (il numero che chi legge senza
+    // background tecnico puo' interpretare da solo), poi Fattore di
+    // variabilita' con la stessa scala BASSA/MEDIA/ALTA di Cv^2, infine
+    // Fattore di congestione come dettaglio tecnico secondario.
     var stability = system.stabilityMetrics || null;
     var stabilityStateLabels = { stable: 'STABILE', stressed: 'SOTTO PRESSIONE', critical: 'CRITICO', unstable: 'INSTABILE' };
-    renderDl('stability-metrics', {
-      'Fattore di congestione': stability && stability.congestion_factor !== null ? rateValue(stability.congestion_factor) : 'Dato non ancora stimabile',
-      'Fattore di variabilita\'': stability ? rateValue(stability.variability_factor) : 'Dato non ancora stimabile',
-      'Stato': stability ? (stabilityStateLabels[stability.system_state] || stability.system_state) : 'Dato non ancora stimabile'
-    });
+    var stabilityStateMessages = {
+      stable: 'Il sistema ha margine operativo.',
+      stressed: 'Il margine si sta riducendo - da tenere d\'occhio.',
+      critical: 'Il sistema e\' vicino alla saturazione.',
+      unstable: 'Il carico supera la capacita\' disponibile: il lavoro tende ad accumularsi invece di essere smaltito.'
+    };
+    var stabilityStateEl = document.getElementById('stability-state');
+    var stabilityCode = stability ? stability.system_state : null;
+    stabilityStateEl.className = 'state-badge state-' + (stabilityCode || 'unknown');
+    stabilityStateEl.textContent = stability ? (stabilityStateLabels[stabilityCode] || stabilityCode) : 'Dato non ancora stimabile';
+    document.getElementById('stability-state-message').textContent = stability ? (stabilityStateMessages[stabilityCode] || '') : 'Servono piu\' dati per stimare il margine di stabilita\'.';
+
+    var stabilityDl = {
+      'Utilizzo (rho effettivo)': stability ? nullablePercent(stability.rho_effective, true) : 'Dato non ancora stimabile',
+      'Fattore di variabilita\' (V)': stability ? (rateValue(stability.variability_factor) + (stability.variability_level ? ' (' + stability.variability_level + ')' : '')) : 'Dato non ancora stimabile',
+      // R10.4: U = rho/(1-rho) non e' definito in modo sensato quando
+      // rho >= 100% (cresce senza limite) - il testo spiega la causa
+      // reale invece di un generico placeholder da "dato mancante".
+      'Fattore di congestione (U)': !stability ? 'Dato non ancora stimabile' : (stability.congestion_factor !== null ? rateValue(stability.congestion_factor) : 'Non calcolabile: il carico supera gia\' la capacita\' disponibile.')
+    };
+    renderDl('stability-metrics', stabilityDl, outOfScaleClasses_('Utilizzo (rho effettivo)', stability ? stability.rho_effective : null));
+    // R10.4: "Fattore di variabilita'" (V, media tra variabilita' di
+    // arrivo e di lavorazione) NON e' la stessa grandezza di "Cv^2" nel
+    // pannello "Tempi e variabilita'" (solo lavorazione) - due fatti
+    // distinti che si assomigliano, da distinguere esplicitamente
+    // invece di rischiare che sembrino la stessa cosa con due nomi.
+    document.getElementById('stability-variability-note').textContent = '"Fattore di variabilita\' (V)" non e\' lo stesso numero di "Cv²" nel pannello "Tempi e variabilita\'": Cv² e\' solo la variabilita\' dei tempi di lavorazione, V e\' la media tra quella e la variabilita\' di arrivo del lavoro - due fatti distinti, stessa scala BASSA/MEDIA/ALTA.';
 
     // M5, chiesto da Marco (2026-08-20, punto 4): non solo il totale
     // complessivo, anche occorrenze/media/min/max per tipo - la nuova

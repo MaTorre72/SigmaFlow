@@ -1,6 +1,91 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — R10.4 (redesign "Margine di stabilita'") + R10.6 (chiarito disallineamento assi/card) (2026-08-28, sessione 16)
+
+Ripreso lo stesso prompt "terzo giro" ricevuto una seconda volta con
+R10.4 sostanzialmente riscritto (non piu' solo una legenda per Cv²,
+un redesign completo del pannello "Margine di stabilita'") e un nuovo
+R10.6. Parte 0/Parte 1/R10.1-R10.3/R10.5 gia' chiusi nella sessione
+precedente (vedi voce sotto) - non ritoccati qui.
+
+**R10.4 (redesign completo)**: pannello "Margine di stabilita'"
+riordinato dall'alto:
+1. **Stato in cima** (badge colorato, stesso stile di "Stato del
+   sistema") con spiegazione in linguaggio semplice sotto (es. per
+   INSTABILE: "Il carico supera la capacita' disponibile: il lavoro
+   tende ad accumularsi invece di essere smaltito.") - prima era
+   l'ultima riga di una `dl`, senza risalto.
+2. **Utilizzo (rho effettivo)** come prima riga intuitiva (percentuale,
+   enfasi se >100% via `outOfScaleClasses_` gia' esistente) - non piu'
+   "Fattore di congestione" (la sua trasformata u/(1-u), senza
+   un'unita' intuitiva) come prima cosa mostrata. Usa lo stesso
+   `rho_effective` che gia' determina "Stato" altrove in questo
+   pannello (nessun nuovo calcolo, nessuna terza cifra di utilizzo
+   diversa da quelle gia' esistenti sul cruscotto).
+3. **Fattore di variabilita' (V)** con la stessa scala BASSA/MEDIA/ALTA
+   di Cv² (soglie 0,75/1,33, gia' confermate da Marco per R10.4
+   originale) - estratta la logica in `variabilityLevel_()` (Model.gs),
+   riusata da entrambi `variabilityInterpretation_` (Cv², "Tempi e
+   variabilita'") e `stabilityMetrics_` (V, questo pannello): un solo
+   criterio nel cruscotto, non due scale per due numeri simili.
+4. **Fattore di congestione (U)** retrocesso a dettaglio secondario.
+   Quando non calcolabile (rho>=100%), il testo spiega la causa reale
+   ("Non calcolabile: il carico supera gia' la capacita' disponibile.")
+   invece del generico "Dato non ancora stimabile" (che leggeva come
+   un dato mancante, non come "la formula non ha piu' senso qui").
+5. **Nota esplicita** che distingue "Fattore di variabilita' (V)" da
+   "Cv²" (pannello "Tempi e variabilita'") - V e' la media tra
+   variabilita' di arrivo e di lavorazione, Cv² e' solo quella di
+   lavorazione - due fatti distinti che si assomigliano, non la stessa
+   cosa con due nomi (l'opposto di R9.6).
+
+**Bug reale trovato durante la verifica visiva** (non dai test):
+`buildSystemState_` ricostruiva l'oggetto `stabilityMetrics` campo per
+campo invece di passare l'oggetto restituito da `stabilityMetrics_`
+cosi' com'e' - i due campi nuovi (`rho_effective`, `variability_level`)
+restavano silenziosamente `undefined` nella risposta al client, senza
+nessun errore (il pannello avrebbe mostrato "Dato non ancora
+stimabile" anche con dati reali disponibili). Trovato SOLO richiamando
+`getMetrics()` via fetch e ispezionando la risposta grezza - i test
+Node esistenti non lo coprivano. Corretto, e aggiunto un test
+(`testBuildSystemStateExposesStabilityMetrics`, esteso) che verifica
+esplicitamente la presenza di questi due campi, per non ripetere
+l'errore a un futuro campo nuovo.
+
+**R10.6 (disallineamento assi/card chiarito, non un bug)**: verificato
+da codice che la card "Lavoro accettato" (Vista Rapida,
+`points.committed_points`) e la linea "Lavoro accettato" del grafico
+(`points.timeline`, da `monthBuckets_`) sono calcolate da fonti
+diverse per costruzione, non per errore: la card e' una fotografia
+istantanea (via `workStage_` sullo stato live delle colonne), il
+grafico e' una MEDIA mensile ricostruita dal log
+(`stockSeriesFromIndex_`) - stesso principio gia' applicato a S4 (media
+settimanale vs istantanea, mai garantite identiche). Stessa cosa per
+"Nuovi punti": la card usa una finestra MOBILE di 30 giorni
+(`observation_window_days`), il grafico usa il MESE SOLARE - range di
+date diversi, specialmente per il mese in corso (parziale). Aggiunta
+una nota di pannello esplicita sotto "Andamento del carico" che spiega
+entrambe le differenze in linguaggio semplice, invece di lasciare il
+disallineamento senza spiegazione.
+
+**Verifica**: 210/210 test Node (uno in piu' di prima: nuova
+asserzione su rho_effective/variability_level), `client.html` senza
+errori di sintassi, push su TEST verificato (16/16 file identici),
+collaudo visivo su Browser pane con dati demo - verificato via fetch
+diretto a `getMetrics()` che tutti i campi nuovi arrivano popolati
+correttamente (non solo via rendering, per essere sicuri del bug
+trovato sopra), screenshot del pannello "Margine di stabilita'"
+riordinato confermato visivamente (badge verde STABILE in cima,
+Utilizzo/Fattore di variabilita'/Fattore di congestione in ordine,
+nota di distinzione V/Cv² presente).
+
+**Non ancora verificato su TEST reale** (solo su dati demo in questa
+sessione): l'aspetto del badge/messaggio quando lo stato e' CRITICO o
+INSTABILE (il dataset demo di questa verifica era STABILE) - il testo
+per quei casi e' scritto e sintatticamente corretto ma non visto a
+schermo con dati reali che li attivino.
+
 ## Fase R e S — terzo giro di correzioni dashboard: verifica R9 residuo + R10 (2026-08-28, sessione 15)
 
 Eseguito il prompt "Fase R/S, terzo giro di correzioni dashboard
