@@ -1,6 +1,93 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — S4: WIP attivo ricostruito dal log (2026-08-28, sessione 10) — codice pronto, in attesa della verifica su dati reali
+
+Da `docs/DESIGN_R_S_addendum_collaudo.md`, sez. S4 (`PROMPT_S4_wip_attivo_log.md`). Stesso branch, prosegue la stessa fase — non una nuova.
+
+**Cosa e' cambiato**: `flowWeeklyBuckets_.wip_medio` non stima piu' il
+WIP come "entrato meno completato, cumulato" (che includeva il tempo in
+backlog) — ora e' il WIP **attivo** ricostruito dallo storico reale dei
+passaggi di colonna.
+
+- **Classificazione colonne** — riusato il `role` gia' esistente
+  (nessun campo nuovo): nuova costante `SIGMAFLOW.WIP_COLUMN_CLASS`
+  (Constants.gs) che mappa ogni ruolo a `backlog`/`active`/`done`
+  (`active` = prep, wip, stand_by — le colonne di attesa contano come
+  lavoro aperto; `neutral`, es. una colonna Note, trattato come
+  `backlog` per mancanza di un ruolo piu' specifico).
+- **`jobColumnIntervalsFromLog_(job, columnMap, now)`** (Model.gs):
+  ricostruisce la timeline di colonna di un job dai soli eventi `move`
+  di `activity_log_json` (stesso principio di base di
+  `computeVisiteFromLog_` — la sequenza viene dai `to` in ordine, mai da
+  `from`) — un intervallo per colonna attraversata, l'ultimo chiuso da
+  `incarico_chiuso_ts` o da `now` se ancora aperto. Restituisce `null`
+  (non un array vuoto) quando il log non ha nessun evento `move`
+  interpretabile — segnale esplicito per escludere il job, mai stimarlo
+  alla cieca.
+- **`activeWipWeeklyFromLog_(jobs, archivedJobs, columnMap, now, weeksCount)`**:
+  per ogni settimana, somma su tutti i job i giorni passati in una
+  colonna `active` quella settimana, pesati per `size_points` (`giorni
+  attivi / 7 * size_points`). Ritorna sia l'array settimanale sia
+  `excluded_job_ids` (i job senza log interpretabile).
+- **`flowWeeklyBuckets_`**: nuovo parametro `activeWipWeeklyRounded` —
+  `wip_medio` e' ora semplicemente quel valore, non piu' ricalcolato
+  internamente. Throughput e tempo di ciclo **non toccati**, stesso
+  identico calcolo di prima.
+- **Trasparenza sulla copertura**: `systemState.wipCoverage` (nuovo
+  campo: `excluded_jobs`/`excluded_job_ids`) espone ad ogni caricamento
+  della dashboard quanti job sono esclusi dal calcolo — non serve piu'
+  un controllo separato per saperlo, e' sempre visibile nella risposta
+  di `getMetrics()`.
+- **Diagnostica di sola lettura** `checkS4WipCoverage_()` +
+  wrapper `checkS4WipCoverageOnTest()`/`checkS4WipCoverageSuProd()`
+  (stesso pattern gia' in uso nel progetto — `withEnvironment_` con
+  `requiresLock=false`, come `api()` fa gia' per le azioni di lettura):
+  confronta il WIP ricostruito della settimana corrente con il totale
+  live del pannello per-colonna (colonne non-backlog, non-done) —
+  stessa fotografia, deve tornare lo stesso numero.
+
+**197/197 test nell'harness Node** (3 nuovi + 1 aggiornato per il nuovo
+contratto di `flowWeeklyBuckets_`, che ora riceve il WIP dall'esterno
+invece di calcolarlo).
+
+**Collaudo eseguito**:
+- Browser pane (server locale, dati demo via `seedTestData`, 60 job):
+  `getMetrics()` senza errori, `wipCoverage.excluded_jobs = 0` (il
+  generatore demo produce sempre un log completo), valori di
+  `wip_medio` piu' bassi e piu' realistici delle settimane recenti
+  rispetto alla vecchia stima cumulata (192-242 pt contro 480-580 pt
+  della sessione precedente sullo stesso tipo di dataset) — coerente
+  con l'attesa (il cumulato sovrastimava includendo il backlog).
+- **Verifica di coerenza eseguita sui dati demo** (harness Node,
+  `checkS4WipCoverage_` chiamata direttamente): `current_week_wip_reconstructed`
+  = `current_week_wip_live_panel` = 242, **differenza 0** — conferma che
+  la logica e' internamente corretta quando il log e' completo.
+
+**Non ancora verificato — richiede i dati reali di TEST/PROD, non
+sostituibile dal dataset demo sintetico**: la copertura del log sui
+job REALI piu' vecchi (pre-esistenti all'introduzione di
+`activity_log_json`) e la verifica di coerenza sulla fotografia reale
+del pannello per-colonna. `clasp run` resta bloccato (stesso limite
+documentato in P7/Q — "Unable to run script function...", verificato
+di nuovo con `checkS4WipCoverageOnTest`). **Push su TEST gia' fatto e
+verificato (16/16 identici)** — le funzioni sono gia' disponibili
+nell'editor Apps Script di TEST.
+
+**Prossimo passo, richiesto a Marco**: dall'editor Apps Script di TEST,
+eseguire `checkS4WipCoverageOnTest` (menu Esegui → Log di esecuzione) e
+incollare il risultato JSON qui in chat. Se `difference` non e' 0 (a
+meno di arrotondamento) o `excluded_jobs` e' alto, **non chiudere S4** —
+va capito il motivo prima (classificazione colonne, log incompleto sui
+job piu' vecchi, bug nella ricostruzione). Se il risultato torna pulito,
+opzionalmente ripetere con `checkS4WipCoverageSuProd` su PROD (sola
+lettura, nessuna scrittura, sicuro da eseguire).
+
+Nessuna PR aperta, nessun merge su `main` — branch
+`feat/fase-r-s-metriche-2026-08-27`, invariato.
+
+---
+
 ## Fase R e S — correzioni di chiusura collaudo: R5 (corretto), R6 (nuovo), S2/S3 (corretto) (2026-08-28, sessione 9)
 
 Seguito di `docs/DESIGN_R_S_addendum_collaudo.md` (Marco), stesso branch
