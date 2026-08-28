@@ -2170,7 +2170,7 @@
       'Carico da rilavorazione (a settimana)': perWeekValue(rework.additional_passages_from_rework, ' passaggi/settimana'),
       'Carico totale (a settimana)': perWeekValue(rework.total_passages_per_day, ' passaggi/settimana'),
       'Quota di capacita\' occupata dal carico totale': nullablePercent(system.capacityMetrics.effective_load, true)
-    });
+    }, outOfScaleClasses_('Quota di capacita\' occupata dal carico totale', system.capacityMetrics.effective_load));
     // R9.6: "Passaggi totali alla settimana"/"Carico aggiuntivo dalla
     // rilavorazione" rimossi da qui - stesso identico numero gia'
     // mostrato sopra in system-load-metrics ("Carico totale"/"Carico
@@ -2195,16 +2195,25 @@
     renderDl('system-rework-metrics', reworkDl);
 
     var time = system.timeMetrics || {};
-    renderDl('time-metrics', {
+    var timeDl = {
       'Tempo medio di lavorazione': estimableValue(time.average_service_days, ' giorni'),
       // R9.7: il numero (Cv^2) che determina l'etichetta categorica va
       // mostrato nello stesso pannello, non solo nel Quadro avanzato.
       'Variabilita dei tempi': (time.variability_level || 'Dato non ancora stimabile') + (time.variability !== null && time.variability !== undefined ? ' (Cv² = ' + metricValue(time.variability) + ')' : ''),
       'Tempo alto osservato': estimableValue(time.high_observed_days, ' giorni'),
-      'Tempo prudenziale consigliato': estimableValue(time.prudent_service_days, ' giorni'),
-      'Attesa stimata': estimableValue(time.estimated_wait_days, ' giorni'),
-      'Tempo totale stimato': estimableValue(time.estimated_total_days, ' giorni')
-    });
+      'Tempo prudenziale consigliato': estimableValue(time.prudent_service_days, ' giorni')
+    };
+    // R9.10 (esteso oltre M/M/1 e M/G/1, stesso principio): quando
+    // entrambe le stime dipendono dalla stessa coda instabile, una riga
+    // sola spiega il perche' invece di due "Dato non ancora stimabile"
+    // affiancate senza contesto.
+    if (time.estimated_wait_days === null && time.estimated_total_days === null) {
+      timeDl['Attesa e tempo totale stimati'] = 'Dato non ancora stimabile (sistema instabile o dati insufficienti)';
+    } else {
+      timeDl['Attesa stimata'] = estimableValue(time.estimated_wait_days, ' giorni');
+      timeDl['Tempo totale stimato'] = estimableValue(time.estimated_total_days, ' giorni');
+    }
+    renderDl('time-metrics', timeDl);
     document.getElementById('time-message').textContent = (time.variability_message || '') + ' ' + (time.waiting_message || '');
 
     // Chiesto da Marco (2026-08-20, punto 3): anche il lavoro presente
@@ -2256,7 +2265,7 @@
     // R9.6: "Margine disponibile" (= 1 - carico effettivo) rimosso da
     // qui - stesso fatto gia' mostrato in Vista rapida e come "Quota di
     // capacita' occupata dal carico totale" nel pannello Rilavorazione.
-    renderDl('capacity-metrics', capacityDl);
+    renderDl('capacity-metrics', capacityDl, outOfScaleClasses_('Margine residuo (alla settimana)', capacity.residual_per_day));
 
     // R9.6: "Margine rispetto alla saturazione" (= 1 - carico effettivo,
     // stesso numero di "Quota di capacita' occupata dal carico totale"
@@ -2563,32 +2572,49 @@
     var ctx = canvas.getContext('2d');
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, width, height);
-    var pad = { left: 40, right: 16, top: 12, bottom: 46 };
+    var pad = { left: 50, right: 16, top: 12, bottom: 46 };
     var plotWidth = width - pad.left - pad.right;
     var plotHeight = height - pad.top - pad.bottom;
     var bandField = yField === 'throughput_punti_settimana' ? 'throughput_medio' : 'ct_medio';
-    var rawPoints = weeklyBuckets.filter(function(b) { return b[yField] !== null; });
-    var maxWip = Math.max.apply(null, rawPoints.map(function(b) { return b.wip_medio; }).concat(bands.map(function(b) { return b.wip_medio; })).concat([1]));
-    var maxY = Math.max.apply(null, rawPoints.map(function(b) { return b[yField]; }).concat(bands.map(function(b) { return b[bandField]; })).concat([1]));
+    var rawPoints = weeklyBuckets.filter(function(b) { return b[yField] !== null && !isNaN(b[yField]); });
+    var bandsClean = bands.filter(function(b) { return !isNaN(b.wip_medio) && !isNaN(b[bandField]); });
+    var maxWipRaw = Math.max.apply(null, rawPoints.map(function(b) { return b.wip_medio; }).concat(bandsClean.map(function(b) { return b.wip_medio; })).concat([1]));
+    var maxYRaw = Math.max.apply(null, rawPoints.map(function(b) { return b[yField]; }).concat(bandsClean.map(function(b) { return b[bandField]; })).concat([1]));
+    // Difesa: se per qualche motivo un valore non numerico arriva fin qui,
+    // il grafico degrada a "dato non sufficiente" invece di mostrare NaN sugli assi.
+    if (!bandsClean.length || bandsClean.length < MIN_WIP_BANDS_ || isNaN(maxWipRaw) || isNaN(maxYRaw)) {
+      canvas.hidden = true;
+      empty.hidden = false;
+      return;
+    }
+    var bands_ = bandsClean;
+    var maxWip = maxWipRaw;
+    var maxY = maxYRaw;
     ctx.font = '11px Arial';
     ctx.strokeStyle = '#d8dee8';
     ctx.fillStyle = '#627184';
     // R9.3: tacche numeriche su entrambi gli assi (stesso pattern di
     // drawPointsTimeline/drawWaitTimeTrend_) - tolta la tacca vera, la
     // freccia testuale "->" diventa ridondante.
+    ctx.textAlign = 'right';
     for (var gy = 0; gy <= 4; gy++) {
       var yPix = pad.top + plotHeight * gy / 4;
       ctx.beginPath(); ctx.moveTo(pad.left, yPix); ctx.lineTo(width - pad.right, yPix); ctx.stroke();
-      ctx.fillText(String(Math.round(maxY * (1 - gy / 4))), 4, yPix + 4);
+      ctx.fillText(String(Math.round(maxY * (1 - gy / 4))), pad.left - 6, yPix + 4);
     }
+    ctx.textAlign = 'left';
     for (var gx = 0; gx <= 4; gx++) {
       var xPix = pad.left + plotWidth * gx / 4;
       ctx.fillText(String(Math.round(maxWip * gx / 4)), xPix - 8, height - pad.bottom + 14);
     }
     ctx.beginPath(); ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, height - pad.bottom); ctx.lineTo(width - pad.right, height - pad.bottom); ctx.stroke();
     ctx.fillText('Lavoro in corso (pt)', pad.left, height - 8);
+    // Titolo asse Y ruotato: a sinistra delle tacche numeriche (che finiscono
+    // a pad.left-6), mai sovrapposto - vedi bocciatura collaudo su grafico
+    // illeggibile per sovrapposizione testo/numeri.
     ctx.save();
-    ctx.translate(10, height - pad.bottom);
+    ctx.textAlign = 'left';
+    ctx.translate(10, pad.top + plotHeight);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText(yLabel, 0, 0);
     ctx.restore();
@@ -2608,14 +2634,14 @@
     ctx.strokeStyle = '#2F6B9A';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    bands.forEach(function(b, index) {
+    bands_.forEach(function(b, index) {
       var x = pad.left + plotWidth * (b.wip_medio / maxWip);
       var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
       if (index === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
     });
     ctx.stroke();
     ctx.fillStyle = '#2F6B9A';
-    bands.forEach(function(b) {
+    bands_.forEach(function(b) {
       var x = pad.left + plotWidth * (b.wip_medio / maxWip);
       var y = height - pad.bottom - plotHeight * (b[bandField] / maxY);
       ctx.beginPath();

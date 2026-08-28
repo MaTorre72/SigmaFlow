@@ -1,6 +1,86 @@
 # Stato SigmaFlow
 Aggiornato: 2026-08-28
 
+## Fase R e S — terzo giro di collaudo: bocciatura su 7 screenshot reali (2026-08-28, sessione 12)
+
+Marco ha ricollaudato il giro precedente (vedi voce sotto) su TEST reale
+con 7 screenshot dell'intera dashboard, confrontandoli col file di
+audit originale (`AUDIT_UX_dashboard.md`, fuori dal repo, in
+`Downloads`) — esito ancora insoddisfacente: *"non ci siamo proprio...
+non so piu' come fare per dare le indicazioni per ottenere una
+dashboard decente"*. Problemi concreti individuati dagli screenshot:
+
+1. **Grafico "Tempo di ciclo vs Lavoro in corso"**: asse Y mostrava
+   letteralmente `NaN` sulle tacche. Rilettura completa di
+   `wipBands_`/`round_`/`drawWipScatter_` non ha trovato un percorso
+   logico che produca NaN nel codice attualmente committato (round_ e'
+   gia' guardato contro NaN/null/undefined, wipBands_ pre-filtra le
+   settimane senza ct) — sospetto principale: cache del browser su una
+   versione precedente della pagina, viste le numerose push nella
+   stessa sessione precedente. Non verificabile con certezza senza
+   accesso diretto al browser di Marco. **Aggiunta comunque una difesa
+   strutturale** in `drawWipScatter_` (client.html): filtra punti/fasce
+   non numeriche prima di calcolare `maxY`/`maxWip`, e se il risultato
+   e' ancora NaN o le fasce valide scendono sotto soglia, il grafico
+   mostra "Dato non ancora sufficiente" invece di disegnare assi rotti.
+2. **Sovrapposizione testo/numeri sull'asse Y** (grafico "Throughput vs
+   Lavoro in corso", frammento illeggibile "d throughput..."): bug
+   layout reale confermato — le tacche numeriche (x=4) e il titolo
+   asse ruotato (x=10) occupavano la stessa fascia orizzontale.
+   Corretto: tacche allineate a destra subito a sinistra dell'asse
+   (`pad.left - 6`), titolo ruotato spostato piu' a sinistra
+   (`pad.left` aumentato a 50 per fare spazio a entrambi).
+3. **Nota "Margine di stabilita'"** diceva *"quanto margine resta
+   prima che il carico superi la capacita'"* anche quando il sistema e'
+   gia' CRITICO/oltre capacita' — tempo verbale sbagliato quando il
+   margine e' gia' negativo. Riscritta in forma neutra rispetto allo
+   stato: *"quanto margine resta rispetto alla capacita' disponibile -
+   puo' essere gia' negativo, se il carico l'ha gia' superata"*.
+4. **Enfasi fuori scala non applicata coerentemente** (R9.5/R9.13):
+   prima limitata alle sole righe rho/rho-effettivo nel Quadro
+   avanzato. Estesa a "Quota di capacita' occupata dal carico totale"
+   (pannello Rilavorazione, puo' superare 100%) e "Margine residuo
+   alla settimana" (pannello Capacita', puo' essere negativo) —
+   `outOfScaleClasses_` riusata cosi' com'e', nessun nuovo criterio.
+5. **Pattern "compatta quando nullo" (R9.10) non applicato fuori dal
+   Quadro avanzato**: "Attesa stimata"/"Tempo totale stimato" nel
+   pannello "Tempi e variabilita'" mostravano due righe separate
+   "Dato non ancora stimabile" senza spiegazione, stesso caso gia'
+   risolto per M/M/1/M/G/1. Ora compattate in un'unica riga con lo
+   stesso messaggio ("sistema instabile o dati insufficienti") quando
+   entrambe sono nulle.
+
+**Non ancora investigato in questa sessione**: il finding (b) di
+`AUDIT_UX_dashboard.md` §3 — `mu = 0,14` risultava l'unico valore
+incoerente rispetto agli altri valori impliciti dai dati reali
+(~0.163-0.169 per capacita'/rho/carico, tra loro coerenti). Da
+verificare in una prossima sessione se ancora presente sui dati
+attuali.
+
+**Verifica**: 206/206 test Node, `client.html` controllato per errori
+di sintassi (`/tmp/sf-scratch/syntax-check.js`, 0 errori), push su TEST
+verificato con `push-and-verify.sh` (16/16 file identici). Nessuna
+verifica visiva diretta nel Browser pane in questo giro (il repro
+locale non riproduce lo stato reale di TEST necessario per il bug
+NaN) — **richiesta a Marco**: ricollaudare con hard refresh
+(Ctrl+Shift+R) prima di guardare il grafico "Tempo di ciclo vs Lavoro
+in corso", per escludere la cache come causa residua.
+
+**Nota di processo, esplicitamente per le prossime sessioni**: due
+bocciature consecutive nello stesso giro di collaudo indicano che il
+checklist-per-punto (R9.1, R9.2, ...) non basta a garantire un
+risultato che Marco trovi accettabile, anche quando ogni singolo punto
+e' tecnicamente soddisfatto. Proposta per il prossimo giro: prima di
+scrivere codice per un cambio di UX/testo, produrre un confronto
+esplicito riga-per-riga con le sezioni 1 (pattern A-F) e 5 (regole di
+formattazione 1-8) di `AUDIT_UX_dashboard.md`, non solo con la lista
+puntuale R9.1-R9.13 — i pattern trasversali dell'audit (stesso fatto
+ripetuto, formattazione incoerente, testo esplicativo posizionato in
+modo incoerente) sono piu' facili da perdere quando si lavora punto
+per punto.
+
+---
+
 ## Fase R e S — secondo giro di collaudo: R7/R8/S5/R9 + correzioni R5/R6.6/S2-S3 (2026-08-28, sessione 11) — BOCCIATO in prima consegna sulla qualita' del testo, corretto
 
 **Esito della verifica su dati reali di TEST** (`checkS4WipCoverageOnTest`,
