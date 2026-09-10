@@ -83,15 +83,37 @@ chiamarla da codice o da un gate automatico.
 
 ### Criteri di accettazione
 
-- [ ] Gli ingressi UI restano protetti dal lock globale di
+- [x] Gli ingressi UI restano protetti dal lock globale di
       `api()`/`withEnvironment_` introdotto in Fase P2.
-- [ ] `syncVisiteFromLog_` usa lo stesso helper rientrante attorno
+- [x] `syncVisiteFromLog_` usa lo stesso helper rientrante attorno
       all'intera sequenza di lettura, delete e append, proteggendo anche
       le chiamate dirette senza doppie acquisizioni o rilasci anticipati.
-- [ ] Test che forza due chiamate quasi simultanee sullo stesso job:
+- [x] Test che forza due chiamate quasi simultanee sullo stesso job:
       nessuna riga duplicata in `visite` al termine.
-- [ ] Dopo l'esecuzione di 1.2 da parte di Marco: righe in `visite` =
+- [x] Dopo l'esecuzione di 1.2 da parte di Marco: righe in `visite` =
       rientri veri (dal log) + 1 per ogni job vivo, nessun residuo.
+
+### Esito pulizia PROD — 2026-09-10, ore 18:07
+
+Marco ha eseguito `migrateVisiteFromHistorySuProd()` con la board ferma.
+Il log riporta:
+
+- `jobs_processed = 56`;
+- `jobs_without_log = 0`;
+- `visite_written = 99`;
+- 2 warning `RIENTRO_DIRETTO_A_WIP`, sui job
+  `JOB-20260707-0YXL` e `JOB-20260707-8NJ7`.
+
+Il risultato riconcilia esattamente il conteggio atteso: 56 visite
+iniziali + 43 rientri reali = 99 righe. Le 134 righe presenti prima
+della pulizia includevano quindi 35 record eccedenti, ora eliminati. I
+due warning descrivono transizioni storiche dirette da attesa ente a
+WIP, gestite dalla ricostruzione; non sono duplicati e non costituiscono
+un errore della migrazione.
+
+Il fix preventivo del lock resta da rilasciare nell'applicazione PROD
+prima di riaprire stabilmente la board, altrimenti nuove esecuzioni
+concorrenti potrebbero ricreare duplicati.
 
 ---
 

@@ -1,17 +1,18 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-10
 
-## Fase U — fix su TEST, migrazione PROD non ancora eseguita (2026-09-10)
+## Fase U — duplicati PROD ripuliti, rilascio lock PROD pendente (2026-09-10)
 
 Eseguiti sul branch dedicato `codex/fase-u-bug-residui` i punti 1 e 2
 di `docs/DESIGN_fase_U.md`. Dopo la riautenticazione clasp, il codice e'
 stato pubblicato sul progetto TEST e verificato con esito
-**16/16 file identici** fra il pull remoto e `apps-script/src`.
-Correzione del 2026-09-10: la precedente annotazione secondo cui Marco
-aveva gia' eseguito la pulizia PROD era errata; il suo "ho gia' fatto"
-si riferiva all'autenticazione clasp. `migrateVisiteFromHistorySuProd()`
-**non e' stata eseguita**, ne' su TEST ne' su PROD. Le visite duplicate
-esistenti non risultano quindi ancora ripulite.
+**16/16 file identici** fra il pull remoto e `apps-script/src`. Dopo la
+rettifica dell'equivoco sulla prima conferma, Marco ha eseguito davvero
+`migrateVisiteFromHistorySuProd()` alle 18:06–18:07 del 2026-09-10, con
+la board ferma. La migrazione ha processato tutti i 56 job, senza job
+privi di log, e ha ricostruito esattamente 99 visite: 56 visite iniziali
++ 43 rientri reali. Rispetto alle 134 righe precedenti sono stati
+eliminati i 35 record eccedenti.
 
 - **U1 — lock `syncVisiteFromLog_`, codice e test locali completati**:
   la ricognizione ha confermato che i quattro ingressi UI passano gia'
@@ -33,6 +34,11 @@ esistenti non risultano quindi ancora ripulite.
   sullo stesso job lascino una sola riga visita, senza duplicati; il
   limite dichiarato dell'harness Node resta che le due esecuzioni sono
   ravvicinate ma non realmente parallele.
+- **U1 — pulizia PROD completata**: risultato
+  `{jobs_processed:56, jobs_without_log:0, visite_written:99}`. I due
+  warning `RIENTRO_DIRETTO_A_WIP` riguardano transizioni storiche note
+  dei job `JOB-20260707-0YXL` e `JOB-20260707-8NJ7`; non indicano visite
+  duplicate e non hanno impedito la ricostruzione.
 - **U2 — test fuso orario completato**:
   `testStockSeriesFromLogGeneralizesOverIncludedRoles` usa ora istanti
   ISO espliciti `Europe/Rome` (`+02:00`) per l'intera fixture, senza
@@ -66,12 +72,12 @@ esistenti non risultano quindi ancora ripulite.
   coperture delle curve restano sopra soglia (12 settimane throughput,
   23 settimane cycle time).
 
-**Esito Fase U**: **NON DONE**. Il lock rientrante e' implementato,
-testato e pubblicato su TEST, ma non risulta ancora rilasciato
-nell'applicazione PROD. La migrazione una tantum non e' stata eseguita:
-i duplicati storici non sono stati rimossi e, finche' il lock non e'
-live su PROD, possono ancora ricrearsi. Dopo rilascio e pulizia vanno
-verificati il conteggio di `visite` e nuovamente U3a/U3b.
+**Esito Fase U**: i duplicati storici sono stati rimossi e il conteggio
+post-pulizia e' riconciliato (**99 attese = 99 scritte**). La fase non e'
+ancora DONE solo perche' il lock rientrante risulta pubblicato su TEST,
+non ancora nell'applicazione PROD: senza quel rilascio i duplicati
+potrebbero ricrearsi. Restano inoltre da ripetere U3a/U3b dopo la
+pulizia, come richiesto dall'ordine formale della fase.
 
 ---
 
