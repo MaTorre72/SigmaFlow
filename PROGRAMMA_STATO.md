@@ -1,5 +1,42 @@
 # Stato SigmaFlow
-Aggiornato: 2026-08-28
+Aggiornato: 2026-09-10
+
+## Fase R e S — S6/R9.14/R9.16 confermati su dati reali di PROD (2026-09-10)
+
+A seguito del completamento dello storico reale in PROD, Marco ha
+eseguito `checkS4WipCoverageSuProd()` (sola lettura, **Model.gs**) sui
+dati reali. Risultato: `total_jobs_scanned: 56`, `excluded_jobs: 0`.
+
+- **S6 (curva teorica)**: `weeks_with_cycle_time_sample: 23` e
+  `weeks_with_throughput_gt_0: 12`, entrambi sopra la soglia di 10
+  (`MIN_SAMPLES_FOR_THEORETICAL_FIT_`) — `cycle_time_theoretical_fit`
+  (`{a:796.84, w0:162.84, n_samples:23}`) e
+  `throughput_theoretical_fit` (`{t_max:19.77, k:138.34, n_samples:12}`)
+  non sono piu' `null`: le curve tratteggiate compaiono davvero nei due
+  grafici diagnostici sui dati reali. **Chiuso**, era l'ultimo punto
+  aperto della fase R/S non ancora confermato su dati reali.
+- **R9.14 (stesso dato, stesso nome, sopra e sotto)**:
+  `accepted_work_instant_from_log: 205` = `accepted_work_instant_live_panel:
+  205`, differenza **0** sui dati reali di PROD (non solo sui dati demo
+  gia' verificati in sessione 17). `stockInstantSeriesFromIndex_`
+  produce lo stesso numero della card anche fuori dal dataset
+  sintetico. **Chiuso**.
+- **R9.16** (assi separati stock/flussi): dipendeva solo dalla stessa
+  serie dati di R9.14 — confermato di conseguenza, nessuna verifica
+  aggiuntiva necessaria.
+- **S4, ricontrollato per completezza**: `instant_wip_from_log: 142` =
+  `instant_wip_live_panel: 142`, differenza 0 — ancora solido dopo il
+  completamento dello storico.
+
+**R10.4 (badge CRITICO), chiuso in giornata**: il carico reale ha
+superato abbondantemente il 100% nelle ore successive alla verifica
+sopra — occasione colta al volo per il collaudo mai fatto prima.
+Confermato da Marco su dashboard reale: badge rosso "CRITICO" compare
+correttamente nel pannello "Margine di stabilita'". Con questo si
+chiude l'ultimo punto aperto della fase R/S non ancora confermato su
+dati reali — nessuna verifica residua nota su S6/R9.14/R9.16/R10.
+
+---
 
 ## Fase R e S — R10.6 risolto per davvero (non con una nota), R9.1 completato, nota V/Cv² semplificata (2026-08-28, sessione 17)
 
