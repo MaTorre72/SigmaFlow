@@ -1,6 +1,84 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-10
 
+## Fase U — DONE: duplicati ripuliti e lock rilasciato in PROD (2026-09-10)
+
+Eseguiti sul branch dedicato `codex/fase-u-bug-residui` i punti 1 e 2
+di `docs/DESIGN_fase_U.md`. Dopo la riautenticazione clasp, il codice e'
+stato pubblicato sul progetto TEST e verificato con esito
+**16/16 file identici** fra il pull remoto e `apps-script/src`. Dopo la
+rettifica dell'equivoco sulla prima conferma, Marco ha eseguito davvero
+`migrateVisiteFromHistorySuProd()` alle 18:06–18:07 del 2026-09-10, con
+la board ferma. La migrazione ha processato tutti i 56 job, senza job
+privi di log, e ha ricostruito esattamente 99 visite: 56 visite iniziali
++ 43 rientri reali. Rispetto alle 134 righe precedenti sono stati
+eliminati i 35 record eccedenti.
+
+- **U1 — lock `syncVisiteFromLog_`, codice e test locali completati**:
+  la ricognizione ha confermato che i quattro ingressi UI passano gia'
+  da `api()`/`withEnvironment_` e quindi possiedono il lock globale
+  introdotto da P2; aggiungere un secondo lock non coordinato dentro i
+  chiamanti avrebbe creato acquisizioni/rilasci annidati. Introdotto
+  `withScriptLock_`, wrapper rientrante per la singola esecuzione:
+  acquisisce e rilascia il `ScriptLock` reale solo al livello piu'
+  esterno. `syncVisiteFromLog_` esegue ora l'intero delete-poi-append
+  dentro quel wrapper: `moveJob`, `addActivityEvent`,
+  `updateActivityEvent`, `deleteActivityEvent` e
+  `migrateSingleJobActivityLog_` sono quindi tutti serializzati, sia
+  tramite gli ingressi gia' protetti sia se invocati direttamente.
+  `withEnvironment_`, `withTestSpreadsheet_` ed
+  `eseguiMigrazioneCompleta_` usano lo stesso wrapper, evitando che un
+  livello interno rilasci prematuramente il lock posseduto dal livello
+  esterno. `computeVisiteFromLog_` non e' stata modificata. Aggiunti un
+  test sull'acquisizione diretta e un'asserzione che due scritture rapide
+  sullo stesso job lascino una sola riga visita, senza duplicati; il
+  limite dichiarato dell'harness Node resta che le due esecuzioni sono
+  ravvicinate ma non realmente parallele.
+- **U1 — pulizia PROD completata**: risultato
+  `{jobs_processed:56, jobs_without_log:0, visite_written:99}`. I due
+  warning `RIENTRO_DIRETTO_A_WIP` riguardano transizioni storiche note
+  dei job `JOB-20260707-0YXL` e `JOB-20260707-8NJ7`; non indicano visite
+  duplicate e non hanno impedito la ricostruzione.
+- **U2 — test fuso orario completato**:
+  `testStockSeriesFromLogGeneralizesOverIncludedRoles` usa ora istanti
+  ISO espliciti `Europe/Rome` (`+02:00`) per l'intera fixture, senza
+  `new Date(anno, mese, giorno)` dipendente dal fuso del processo. Suite
+  completa: **213/213 in `TZ=UTC`** e **213/213 in
+  `TZ=Europe/Rome`**. Il test aggiuntivo copre anche il wrapper PROD
+  read-only descritto sotto.
+- **U3a — verifica post-pulizia completata**: le etichette richieste erano
+  gia' presenti su `main` dalla fase R6.2 (`Tasso di servizio per
+  persona (mu)` e `Capacita' disponibile stimata (team, N persone)`).
+  `checkMuConsistencySuProd()` ha restituito `displayed_mu = 0,02`,
+  `recomputed_mu_same_formula = 0,02` e `capacity_implied_mu = 0,02`,
+  con entrambi i confronti `true`; `E[S] = 53,25 giorni`, 7 campioni,
+  `team_size = 3` e capacita' effettiva `0,06/giorno`. I valori non
+  arrotondati sono circa `0,01878/giorno/persona` e
+  `0,05634/giorno/team`: stessa popolazione e stessa formula. Resta il
+  noto artefatto di presentazione dovuto all'arrotondamento separato a
+  due decimali prima della conversione settimanale, non un bug di
+  calcolo. Il controllo e' stato eseguito dopo il gate: **chiuso**.
+- **U3b — popolazioni distinte confermate post-pulizia**: il codice separa
+  `completed_initiatives` (job distinti) da `completed_passages` (righe
+  visita). Dopo la pulizia entrambe valgono **8** nel periodo: poiche' i
+  binding e le aggregazioni sono distinti, l'uguaglianza e' una
+  coincidenza legittima dello snapshot, non un errore. **Chiuso**.
+- **Controlli collaterali PROD**: `checkS4WipCoverageSuProd()` ha letto
+  56 job senza esclusioni; WIP istantaneo `142 = 142` e lavoro
+  accettato istantaneo `205 = 205`, con differenze pari a zero. Le
+  coperture delle curve restano sopra soglia (12 settimane throughput,
+  23 settimane cycle time); fit aggiornati a `{a:804.24, w0:163.48}` e
+  `{t_max:20.99, k:257.05}`.
+
+**Esito Fase U — DONE**: i duplicati storici sono stati rimossi e il
+conteggio post-pulizia e' riconciliato (**99 attese = 99 scritte**).
+Marco ha confermato il successivo deploy nell'applicazione PROD del lock
+rientrante gia' verificato su TEST: la causa delle duplicazioni e' ora
+prevenuta anche sulla board operativa. U2, U3a e U3b sono definitivamente
+chiusi.
+
+---
+
 ## Fase R e S — S6/R9.14/R9.16 confermati su dati reali di PROD (2026-09-10)
 
 A seguito del completamento dello storico reale in PROD, Marco ha

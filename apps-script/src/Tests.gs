@@ -287,6 +287,7 @@ function runAllTests() {
     testGetSpreadsheetIgnoresDirtyAmbientSpreadsheetProperty,
     testApiTakesLockOnlyForWriteActions,
     testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange,
+    testSyncVisiteFromLogTakesLockWhenCalledDirectly,
     testDoPostDelegatesToApiInheritingEnvironmentAndLock,
     testGetArchivioReturnsAnagraficaAndVisitCount,
     testGetCestinoReturnsAnagraficaAndVisitCount,
@@ -355,6 +356,7 @@ function runAllTests() {
     testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus,
     testCalculateMetricsE_S0E_S1NullWhenNoSamples,
     testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinIt,
+    testCheckMuConsistencyProdWrapperReadsProdWithoutWriting,
     testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
     testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
     testBuildSystemStateTimelineIncludesArchivedJobs,
@@ -1810,9 +1812,9 @@ function testApiTakesLockOnlyForWriteActions() {
     assertEquals_(before, __sfLockState.waitCalls, action + ' (lettura) non deve prendere il lock globale');
   });
 
-  // moveJob/addActivityEvent: le due scritture piu' usate che NON hanno
-  // un lock proprio (§2.2 del documento) — dipendono al 100% dal lock
-  // globale di withEnvironment_ per la sicurezza in concorrenza.
+  // moveJob/addActivityEvent: tramite api() prendono il lock globale di
+  // withEnvironment_. Dalla Fase U la sincronizzazione visite ha anche
+  // una protezione locale rientrante, che qui riusa il lock gia' preso.
   var beforeMove = __sfLockState.waitCalls;
   var moveResponse = api('moveJob', { env: 'test', job_id: created.job_id, status: 'wip' });
   assertTrue_(moveResponse.success, 'moveJob via api() deve avere successo: ' + JSON.stringify(moveResponse));
@@ -1857,6 +1859,42 @@ function testTwoRapidSequentialWritesOnSameJobDoNotLoseEitherChange() {
 
   var moveEvents = logResponse.data.log.filter(function(event) { return event.type === 'move'; });
   assertTrue_(moveEvents.length > 0, 'anche l\'evento della prima scrittura (move) deve restare nel log, nessuna delle due scritture ha perso l\'altra');
+
+  // Fase U: entrambe le scritture ricostruiscono 'visite' con
+  // delete+append. Nell'harness sincrono non si puo' sovrapporre davvero
+  // l'esecuzione (limite documentato sopra), ma il risultato autorevole
+  // dopo due chiamate quasi simultanee deve contenere una sola copia della
+  // visita calcolata dal log, mai due append della stessa sequenza.
+  var testId = PropertiesService.getScriptProperties().getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
+  var ss = SpreadsheetApp.openById(testId);
+  var visite = readVisiteForJob_(ss, created.job_id);
+  assertEquals_(1, visite.length, 'due sincronizzazioni rapide sullo stesso job non devono duplicare la visita');
+}
+
+// Fase U: i cinque percorsi che chiamano syncVisiteFromLog_ sono coperti
+// dal lock esterno quando passano da api()/migrazioni, ma la funzione deve
+// restare sicura anche se invocata direttamente (editor o test mirato).
+function testSyncVisiteFromLogTakesLockWhenCalledDirectly() {
+  var previousId = __sfRoutedSpreadsheetId_;
+  var testId = PropertiesService.getScriptProperties().getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
+  var ss = SpreadsheetApp.openById(testId);
+  __sfRoutedSpreadsheetId_ = testId;
+  try {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Fase U lock diretto', size_class: 'S' }).data;
+    var jobsSheet = ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS);
+    var row = findRowById_(jobsSheet, 'job_id', created.job_id);
+    var job = readJobFromRow_(jobsSheet, row, getHeaderMap_(jobsSheet));
+    var moves = parseActivityLog_(job.activity_log_json).filter(function(event) { return event.type === 'move'; });
+    var before = __sfLockState.waitCalls;
+
+    syncVisiteFromLog_(job, moves);
+
+    assertEquals_(before + 1, __sfLockState.waitCalls, 'la chiamata diretta deve acquisire il lock di script');
+    assertEquals_(1, readVisiteForJob_(ss, created.job_id).length, 'la ricostruzione diretta lascia una sola visita');
+  } finally {
+    __sfRoutedSpreadsheetId_ = previousId;
+  }
 }
 
 // P3 (DESIGN_lock_ambiente.md §2.3): doPost deve delegare ad api(), non
@@ -2934,14 +2972,17 @@ function testActiveWipWeeklyFromLogTracksBacklogActiveWaitAndClosedIntervals() {
 // ['backlog','prep','wip','stand_by'] (deve includere anche i 2 giorni
 // di backlog: (2g backlog + 2g wip + 2g wait_client)/7*7 = 6).
 function testStockSeriesFromLogGeneralizesOverIncludedRoles() {
-  var now = new Date(2026, 7, 27);
+  // Tutta la fixture usa timestamp espliciti Europe/Rome (CEST, UTC+02):
+  // il costruttore numerico new Date(anno, mese, giorno) userebbe invece
+  // il fuso locale dell'ambiente che esegue la suite.
+  var now = new Date('2026-08-27T00:00:00+02:00');
   var columnMap = {};
   columnsFromConfig_(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(c) { columnMap[c.id] = c; });
-  var closedAt = testIsoDaysAgo_(now, 1);
+  var closedAt = '2026-08-26T00:00:00+02:00';
   var log = [
-    { id: 'e1', type: 'move', to: 'backlog', ts: testIsoDaysAgo_(now, 7) },
-    { id: 'e2', type: 'move', to: 'wip', ts: testIsoDaysAgo_(now, 5) },
-    { id: 'e3', type: 'move', to: 'wait_client', ts: testIsoDaysAgo_(now, 3) },
+    { id: 'e1', type: 'move', to: 'backlog', ts: '2026-08-20T00:00:00+02:00' },
+    { id: 'e2', type: 'move', to: 'wip', ts: '2026-08-22T00:00:00+02:00' },
+    { id: 'e3', type: 'move', to: 'wait_client', ts: '2026-08-24T00:00:00+02:00' },
     { id: 'e4', type: 'move', to: 'done', ts: closedAt }
   ];
   var jobs = [{
@@ -3409,6 +3450,38 @@ function testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinI
   var metrics = calculateMetrics_(jobs, visite, config, now);
 
   assertTrue_(Math.abs(metrics.E_S - 145) < 1, 'la visita, aperta 150 giorni fa e consegnata 5 giorni fa, deve contare (~145 giorni di servizio, non esclusa dalla finestra)');
+}
+
+// Fase U: il wrapper PROD della diagnostica mu deve instradare la lettura
+// al database reale senza scrivere nulla. Nel harness il mock PROD e'
+// separato dal TEST e contiene un singolo campione coerente.
+function testCheckMuConsistencyProdWrapperReadsProdWithoutWriting() {
+  var prod = resetProdMock_();
+  ensureSheet_(prod, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
+  ensureSheet_(prod, SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, JOB_ARCHIVIO_HEADERS);
+  ensureSheet_(prod, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO, VISITE_ARCHIVIO_HEADERS);
+  var now = new Date();
+  var opened = Utilities.formatDate(new Date(now.getTime() - 10 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var delivered = Utilities.formatDate(now, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  prod.getSheetByName(SIGMAFLOW.SHEETS.JOBS).appendRow(jobToRow_({
+    job_id: 'JOB-MU-PROD',
+    title: 'Campione mu PROD',
+    status: 'done',
+    arrival_ts: opened
+  }));
+  appendVisitRow_(prod.getSheetByName(SIGMAFLOW.SHEETS.VISITE), {
+    job_id: 'JOB-MU-PROD',
+    numero_visita: 1,
+    apertura_ts: opened,
+    start_ts: opened,
+    consegna_ts: delivered
+  });
+  var rowsBefore = prod.getSheetByName(SIGMAFLOW.SHEETS.VISITE).getLastRow();
+
+  var result = checkMuConsistencySuProd();
+
+  assertEquals_(rowsBefore, prod.getSheetByName(SIGMAFLOW.SHEETS.VISITE).getLastRow(), 'la diagnostica PROD non deve scrivere su visite');
+  assertEquals_(1, result.recomputed_completed_samples, 'la diagnostica deve leggere il campione PROD predisposto');
 }
 
 function testGetMetricsUsesVisiteNotJobFields() {
@@ -5283,24 +5356,22 @@ function runSingleTest_(testFn) {
 // per-esecuzione __sfRoutedSpreadsheetId_ (Utils.gs) usata da
 // withEnvironment_ — stesso principio, stesso meccanismo.
 function withTestSpreadsheet_(callback) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  var props = PropertiesService.getScriptProperties();
-  var previousId = __sfRoutedSpreadsheetId_;
-  var testId = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
+  return withScriptLock_(function() {
+    var props = PropertiesService.getScriptProperties();
+    var previousId = __sfRoutedSpreadsheetId_;
+    var testId = props.getProperty(SIGMAFLOW_TEST_PROP_SPREADSHEET_ID) || SIGMAFLOW.DEFAULT_TEST_SPREADSHEET_ID;
 
-  if (!testId) {
-    lock.releaseLock();
-    throw new Error('Script Property mancante: ' + SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
-  }
+    if (!testId) {
+      throw new Error('Script Property mancante: ' + SIGMAFLOW_TEST_PROP_SPREADSHEET_ID);
+    }
 
-  __sfRoutedSpreadsheetId_ = testId;
-  try {
-    return callback(SpreadsheetApp.openById(testId));
-  } finally {
-    __sfRoutedSpreadsheetId_ = previousId;
-    lock.releaseLock();
-  }
+    __sfRoutedSpreadsheetId_ = testId;
+    try {
+      return callback(SpreadsheetApp.openById(testId));
+    } finally {
+      __sfRoutedSpreadsheetId_ = previousId;
+    }
+  });
 }
 
 function resetTestDatabase_(ss) {

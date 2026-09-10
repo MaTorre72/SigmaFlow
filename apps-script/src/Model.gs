@@ -1743,3 +1743,14 @@ function checkMuConsistencyOnTest() {
     return result;
   }, false);
 }
+
+// Fase U: diagnostica gemella, esclusivamente di lettura, da eseguire
+// dopo la pulizia manuale di 'visite' su PROD. Non modifica fogli o
+// configurazione: espone gli stessi tre valori confrontati su TEST.
+function checkMuConsistencySuProd() {
+  return withEnvironment_('prod', function() {
+    var result = checkMuConsistency_();
+    Logger.log(JSON.stringify(result));
+    return result;
+  }, false);
+}

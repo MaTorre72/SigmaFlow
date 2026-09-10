@@ -30,8 +30,9 @@ function doPost(e) {
 // routeAction_, non dedotte per intuito. Ogni altra azione di
 // routeAction_ resta di scrittura e sotto lock globale, nessuna
 // eccezione (moveJob/addActivityEvent/updateActivityEvent/
-// deleteActivityEvent inclusi — non hanno un lock proprio, dipendono al
-// 100% da questo per la sicurezza in concorrenza).
+// deleteActivityEvent inclusi). Dalla Fase U syncVisiteFromLog_ possiede
+// anche una protezione locale rientrante per i percorsi diretti: tramite
+// api() riusa questo stesso lock globale, senza una seconda acquisizione.
 var SF_READ_ACTIONS_ = {
   getBoard: true,
   getActivityLog: true,
@@ -388,29 +389,35 @@ function moveJob(params) {
 // stessa fase). 'moveLog' deve arrivare gia' filtrato sui soli eventi
 // 'move' e ordinato per ts (stesso log gia' pronto in ogni chiamante).
 function syncVisiteFromLog_(job, moveLog) {
-  var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
-  if (!visiteSheet) {
-    // Non dovrebbe succedere dopo ensureCurrentSchema_() in testa ai
-    // chiamanti principali: se succede comunque, non si blocca l'azione
-    // sul job per un problema di sola derivazione metriche.
-    return null;
-  }
+  // Fase U: delete+append deve essere atomico anche quando uno dei cinque
+  // chiamanti viene eseguito direttamente, fuori da api(). Se api(), una
+  // migrazione completa o un test possiedono gia' il lock, withScriptLock_
+  // lo riusa senza acquisirlo/rilasciarlo una seconda volta.
+  return withScriptLock_(function() {
+    var visiteSheet = getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+    if (!visiteSheet) {
+      // Non dovrebbe succedere dopo ensureCurrentSchema_() in testa ai
+      // chiamanti principali: se succede comunque, non si blocca l'azione
+      // sul job per un problema di sola derivazione metriche.
+      return null;
+    }
 
-  var result = computeVisiteFromLog_(job.job_id, moveLog);
-  deleteVisiteRowsForJob_(visiteSheet, job.job_id);
-  result.visite.forEach(function(visit) {
-    appendVisitRow_(visiteSheet, visit);
+    var result = computeVisiteFromLog_(job.job_id, moveLog);
+    deleteVisiteRowsForJob_(visiteSheet, job.job_id);
+    result.visite.forEach(function(visit) {
+      appendVisitRow_(visiteSheet, visit);
+    });
+
+    if (result.warnings.length) {
+      // Stesso formato di migrateVisiteFromHistory_ (es. RIENTRO_DIRETTO_A_WIP
+      // nello storico) — non e' un errore che deve bloccare l'azione in
+      // corso (l'evento e' gia' stato validato da validateSequence_ per
+      // quanto riguarda QUESTA chiamata), ma non va perso in silenzio.
+      Logger.log('syncVisiteFromLog_ (' + job.job_id + '): ' + JSON.stringify(result.warnings));
+    }
+
+    return result.visite.length ? result.visite[result.visite.length - 1] : null;
   });
-
-  if (result.warnings.length) {
-    // Stesso formato di migrateVisiteFromHistory_ (es. RIENTRO_DIRETTO_A_WIP
-    // nello storico) — non e' un errore che deve bloccare l'azione in
-    // corso (l'evento e' gia' stato validato da validateSequence_ per
-    // quanto riguarda QUESTA chiamata), ma non va perso in silenzio.
-    Logger.log('syncVisiteFromLog_ (' + job.job_id + '): ' + JSON.stringify(result.warnings));
-  }
-
-  return result.visite.length ? result.visite[result.visite.length - 1] : null;
 }
 
 // O3 (DESIGN_performance.md): la ricerca del job_id e' delegata a
