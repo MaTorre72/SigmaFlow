@@ -4462,48 +4462,48 @@ sopra):
 
 ## Prossimi passi noti
 
-Raccolti da Marco il 16/08/2026, nessuna priorità assegnata (il punto
-sulla pulizia campi e' stato chiuso in M0-A, vedi sopra):
+Lista raccolta da Marco il 16/08/2026 — **ripulita il 2026-09-10**: tre
+dei quattro punti originali risultavano già chiusi da fasi successive
+(M0-B/M8, M2, M7/R10.4) e mai tolti da qui, segnalato da Marco che ha
+notato l'incoerenza. Verificato a codice/commit prima di rimuoverli,
+non per assunzione — dettaglio in `PROGRAMMA_STATO.md` (voce
+2026-09-10, sessione di verifica R9.14/R9.16/S6/R10) se serve
+ripercorrere la verifica.
 
-- **Frontend lentissimo** — M0-A (punti 1-3 sopra) affronta le cause a
-  piu' alto impatto individuate in ricerca (reload ridondanti, polling
-  sempre attivo, metriche caricate a freddo). Restano, non affrontate:
-  rendering completo del DOM ad ogni `renderBoard()` (ricostruisce
-  tutte le colonne/card anche per una singola modifica) e la crescita
-  nel tempo dei fogli Google Sheets (`getDataRange().getValues()`
-  rilegge tutto ad ogni chiamata).
-- **Ricostruzione date reali delle card di PROD** — molte card reali
-  hanno `arrival_ts`/`apertura_ts` mancanti; oltre al fallback già
-  implementato (data dal nome del job, `extractDateFromJobId_`), mail e
-  date di creazione delle cartelle di progetto sono fonti future per una
-  ricostruzione più accurata caso per caso.
-- **Migliore allineamento e lettura della dashboard alla dispensa FSC**
-  — riferimento a un documento/manuale FSC esterno da riprendere.
-- **Buco trovato da Marco il 2026-08-19, non affrontato (esplicitamente
-  fuori scope della sessione archiviazione/backup)**: modificare la
-  Cronologia a mano (tab Cronologia, `addActivityEvent`/
-  `updateActivityEvent`, Kanban.gs) non aggiorna lo stato derivato
-  del caso. Verificato nel codice, non solo osservato: `checkStructuralAlignment_`/
-  `applyStructuralAlignment_`/`alignOpenVisitFields_` allineano **solo**
-  i campi di data (`start_ts`/`done_ts`/`incarico_ts`/`prep_ts`/
-  `arrival_ts`) sulla **visita già aperta** (`ensureOpenVisit_`) — mai
-  `job.status` (la card non cambia colonna sulla board) e mai la
-  creazione di una **nuova** riga `visite` per un vero rientro (quello
-  — nuova visita, `numero_visita` incrementato — vive solo dentro
-  `moveJob()`/`updateVisiteForMove_`, il percorso reale del
-  drag-and-drop, mai richiamato da qui). Conseguenza pratica: un
-  rientro (o un cambio di colonna) registrato a mano in Cronologia
-  resta visibile solo in `activity_log_json` — non sposta la card, non
-  crea la visita corrispondente, e sparisce da tutte le metriche che
-  leggono `visite` (rientri, tempi, capacità — quasi tutta la
-  dashboard). Da decidere in una sessione dedicata: se questo è il
-  comportamento voluto (Cronologia = solo racconto della storia, non
-  fonte di verità per lo stato derivato) o se serve un meccanismo che,
-  quando un evento 'move' in Cronologia rappresenta un rientro reale,
-  ricalcoli anche `status` e crei la visita mancante — non banale,
-  perché "rientro" non è "qualunque move" (regole di validazione come
-  il divieto di rientro diretto in `wip` andrebbero rispettate anche
-  fuori da un'interazione reale sulla board).
+- ~~Frontend lentissimo (DOM completo ad ogni render)~~ — **chiuso**:
+  M0-B (17/08) rende incrementale l'aggiornamento su drag-and-drop/
+  eliminazione, M8 (19/08) estende lo stesso principio al polling
+  periodico (salta il redraw se lo snapshot non è cambiato). La sola
+  parte deliberatamente non affrontata — caching lato server di
+  `getDataRange().getValues()` — è una decisione esplicita di M8 (fuori
+  scope per il rischio di stato condiviso disallineato, non un
+  dimenticato), da riprendere solo se una latenza misurata lo
+  giustifica.
+- ~~Cronologia manuale non aggiorna lo stato derivato~~ — **chiuso**:
+  M2 (fase dashboard, 19/08), Marco ha scelto l'opzione "un rientro
+  manuale in Cronologia ricalcola status e crea la visita mancante,
+  stesse regole di validazione del drag-and-drop" — implementato
+  (`applyManualReentryIfNeeded_`, hard error
+  `RIENTRO_DIRETTO_WIP_NON_CONSENTITO`), 6 test dedicati incluso lo
+  scenario esatto descritto qui in precedenza.
+- ~~Allineamento dashboard/dispensa FSC~~ — **in gran parte chiuso**:
+  M7 (profilo di rientro, Cap. 13) letto direttamente da `docs/fsc.md`;
+  R10.4 ha aggiornato le soglie Cv² da dispensa FSC, confermate da
+  Marco. Non escluso un confronto capitolo-per-capitolo mai fatto per
+  intero, ma non è più un punto da "riprendere da zero".
+
+- ~~Ricostruzione date reali delle card di PROD~~ — **chiuso, per via
+  operativa non tecnica** (2026-09-10): Marco ha aggiornato a mano in
+  PROD date, cronologia e storico dei job reali — il problema che
+  motivava il punto (molte card con `arrival_ts`/`apertura_ts`
+  mancanti) non sussiste più sui dati attuali. L'idea originale (fonti
+  automatiche da mail/cartelle progetto) resta scartata: valutata da
+  Marco come opzione troppo "futuribile" per lo scarto rispetto al
+  correggere a mano i casi residui.
+
+**Nessun punto residuo in questa lista** — tutti e quattro i candidati
+del 16/08/2026 sono chiusi, tre da codice/fasi successive, uno per via
+operativa.
 
 ## Riferimenti tecnici correnti
 
