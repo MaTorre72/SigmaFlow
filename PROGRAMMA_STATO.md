@@ -1,14 +1,15 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-10
 
-## Fase U — fix locali completati, push TEST bloccato da autenticazione clasp (2026-09-10)
+## Fase U — fix pubblicati su TEST, diagnostica PROD da raccogliere (2026-09-10)
 
 Eseguiti sul branch dedicato `codex/fase-u-bug-residui` i punti 1 e 2
-di `docs/DESIGN_fase_U.md`. La fase **non e' ancora DONE**: il push e la
-verifica su TEST non sono partiti perche' Google ha rifiutato le
-credenziali clasp locali con `invalid_grant` / `invalid_rapt` (richiesta
-di riautenticazione). Nessuna scrittura e' stata eseguita su TEST o
-PROD in questa sessione.
+di `docs/DESIGN_fase_U.md`. Dopo la riautenticazione clasp, il codice e'
+stato pubblicato sul progetto TEST e verificato con esito
+**16/16 file identici** fra il pull remoto e `apps-script/src`. Marco ha
+inoltre confermato di avere gia' eseguito manualmente la pulizia PROD
+prevista dal gate. La fase **non e' ancora DONE**: restano da raccogliere
+i JSON delle due diagnostiche esclusivamente di lettura sui dati reali.
 
 - **U1 — lock `syncVisiteFromLog_`, codice e test locali completati**:
   la ricognizione ha confermato che i quattro ingressi UI passano gia'
@@ -34,22 +35,26 @@ PROD in questa sessione.
   `testStockSeriesFromLogGeneralizesOverIncludedRoles` usa ora istanti
   ISO espliciti `Europe/Rome` (`+02:00`) per l'intera fixture, senza
   `new Date(anno, mese, giorno)` dipendente dal fuso del processo. Suite
-  completa: **212/212 in `TZ=UTC`** e **212/212 in
-  `TZ=Europe/Rome`**.
-- **U3a/U3b — gate non ancora eseguito**: le etichette richieste erano
+  completa: **213/213 in `TZ=UTC`** e **213/213 in
+  `TZ=Europe/Rome`**. Il test aggiuntivo copre anche il wrapper PROD
+  read-only descritto sotto.
+- **U3a/U3b — gate completato, letture reali da raccogliere**: le etichette richieste erano
   gia' presenti su `main` dalla fase R6.2 (`Tasso di servizio per
   persona (mu)` e `Capacita' disponibile stimata (team, N persone)`),
   e il codice gia' separa `completed_initiatives` (job distinti) da
-  `completed_passages` (righe visita). La nuova verifica richiesta sui
-  dati reali resta comunque sospesa: prima serve il push del fix U1 su
-  TEST e poi l'esecuzione manuale, da parte di Marco e a board ferma, di
-  `migrateVisiteFromHistorySuProd`. La funzione non e' stata invocata ne'
-  automatizzata.
+  `completed_passages` (righe visita). Aggiunta
+  `checkMuConsistencySuProd()`, gemella PROD esclusivamente di lettura
+  che restituisce e registra gli stessi valori della diagnostica TEST.
+  Il tentativo di eseguirla via `clasp run` e' stato respinto dalla
+  Apps Script Execution API per permessi della funzione, non per un
+  errore applicativo: occorre quindi lanciarla dall'editor Apps Script,
+  insieme alla gia' esistente `checkS4WipCoverageSuProd()`, e conservare
+  i due JSON per chiudere il confronto sui dati reali.
 
-**Blocco da risolvere**: riautenticare clasp, quindi rieseguire
-`apps-script/test-harness/push-and-verify.sh`. Solo dopo la pulizia
-manuale PROD procedere con la verifica dati di U3a/U3b e documentarne
-l'esito.
+**Passo residuo**: dall'editor Apps Script eseguire, senza altre
+scritture, `checkMuConsistencySuProd()` e
+`checkS4WipCoverageSuProd()`; riportare i due JSON in questo documento
+e classificare definitivamente U3a/U3b.
 
 ---
 

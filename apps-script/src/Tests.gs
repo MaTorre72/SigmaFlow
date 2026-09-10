@@ -356,6 +356,7 @@ function runAllTests() {
     testCalculateMetricsComputesE_S0AndE_S1SeparatelyByReworkStatus,
     testCalculateMetricsE_S0E_S1NullWhenNoSamples,
     testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinIt,
+    testCheckMuConsistencyProdWrapperReadsProdWithoutWriting,
     testBuildSystemStateIncludesArchivedJobsInHistoricPoints,
     testBuildSystemStateOpenPointsNeverIncludeArchivedJobs,
     testBuildSystemStateTimelineIncludesArchivedJobs,
@@ -3449,6 +3450,38 @@ function testCalculateMetricsIncludesVisitsOpenedBeforeWindowButDeliveredWithinI
   var metrics = calculateMetrics_(jobs, visite, config, now);
 
   assertTrue_(Math.abs(metrics.E_S - 145) < 1, 'la visita, aperta 150 giorni fa e consegnata 5 giorni fa, deve contare (~145 giorni di servizio, non esclusa dalla finestra)');
+}
+
+// Fase U: il wrapper PROD della diagnostica mu deve instradare la lettura
+// al database reale senza scrivere nulla. Nel harness il mock PROD e'
+// separato dal TEST e contiene un singolo campione coerente.
+function testCheckMuConsistencyProdWrapperReadsProdWithoutWriting() {
+  var prod = resetProdMock_();
+  ensureSheet_(prod, SIGMAFLOW.SHEETS.VISITE, VISITE_HEADERS);
+  ensureSheet_(prod, SIGMAFLOW.SHEETS.JOBS_ARCHIVIO, JOB_ARCHIVIO_HEADERS);
+  ensureSheet_(prod, SIGMAFLOW.SHEETS.VISITE_ARCHIVIO, VISITE_ARCHIVIO_HEADERS);
+  var now = new Date();
+  var opened = Utilities.formatDate(new Date(now.getTime() - 10 * 864e5), SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var delivered = Utilities.formatDate(now, SIGMAFLOW.TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  prod.getSheetByName(SIGMAFLOW.SHEETS.JOBS).appendRow(jobToRow_({
+    job_id: 'JOB-MU-PROD',
+    title: 'Campione mu PROD',
+    status: 'done',
+    arrival_ts: opened
+  }));
+  appendVisitRow_(prod.getSheetByName(SIGMAFLOW.SHEETS.VISITE), {
+    job_id: 'JOB-MU-PROD',
+    numero_visita: 1,
+    apertura_ts: opened,
+    start_ts: opened,
+    consegna_ts: delivered
+  });
+  var rowsBefore = prod.getSheetByName(SIGMAFLOW.SHEETS.VISITE).getLastRow();
+
+  var result = checkMuConsistencySuProd();
+
+  assertEquals_(rowsBefore, prod.getSheetByName(SIGMAFLOW.SHEETS.VISITE).getLastRow(), 'la diagnostica PROD non deve scrivere su visite');
+  assertEquals_(1, result.recomputed_completed_samples, 'la diagnostica deve leggere il campione PROD predisposto');
 }
 
 function testGetMetricsUsesVisiteNotJobFields() {
