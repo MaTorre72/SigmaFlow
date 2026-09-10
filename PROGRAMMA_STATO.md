@@ -1,7 +1,7 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-10
 
-## Fase U — duplicati PROD ripuliti, rilascio lock PROD pendente (2026-09-10)
+## Fase U — DONE: duplicati ripuliti e lock rilasciato in PROD (2026-09-10)
 
 Eseguiti sul branch dedicato `codex/fase-u-bug-residui` i punti 1 e 2
 di `docs/DESIGN_fase_U.md`. Dopo la riautenticazione clasp, il codice e'
@@ -70,12 +70,12 @@ eliminati i 35 record eccedenti.
   23 settimane cycle time); fit aggiornati a `{a:804.24, w0:163.48}` e
   `{t_max:20.99, k:257.05}`.
 
-**Esito Fase U**: i duplicati storici sono stati rimossi e il conteggio
-post-pulizia e' riconciliato (**99 attese = 99 scritte**). La fase non e'
-ancora DONE solo perche' il lock rientrante risulta pubblicato su TEST,
-non ancora nell'applicazione PROD: senza quel rilascio i duplicati
-potrebbero ricrearsi. U3a e U3b sono invece definitivamente chiusi sui
-dati ripuliti.
+**Esito Fase U — DONE**: i duplicati storici sono stati rimossi e il
+conteggio post-pulizia e' riconciliato (**99 attese = 99 scritte**).
+Marco ha confermato il successivo deploy nell'applicazione PROD del lock
+rientrante gia' verificato su TEST: la causa delle duplicazioni e' ora
+prevenuta anche sulla board operativa. U2, U3a e U3b sono definitivamente
+chiusi.
 
 ---
 

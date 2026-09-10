@@ -111,9 +111,10 @@ due warning descrivono transizioni storiche dirette da attesa ente a
 WIP, gestite dalla ricostruzione; non sono duplicati e non costituiscono
 un errore della migrazione.
 
-Il fix preventivo del lock resta da rilasciare nell'applicazione PROD
-prima di riaprire stabilmente la board, altrimenti nuove esecuzioni
-concorrenti potrebbero ricreare duplicati.
+Marco ha successivamente confermato il deploy del fix preventivo del
+lock nell'applicazione PROD. La board operativa usa quindi la protezione
+rientrante e può essere riaperta: la causa delle duplicazioni è risolta
+anche per le scritture future.
 
 ---
 
