@@ -67,6 +67,33 @@ function normalizeEnv_(env) {
   return env === 'test' ? 'test' : 'prod';
 }
 
+// Fase U: alcune funzioni di business possono essere invocate sia tramite
+// api()/withEnvironment_ (che possiede gia' il lock globale), sia
+// direttamente da test, migrazioni o editor Apps Script. LockService non
+// espone il proprietario corrente: teniamo quindi la profondita' nella
+// singola esecuzione e acquisiamo/rilasciamo il lock reale solo al livello
+// piu' esterno. Il finally riporta sempre la profondita' a zero, anche in
+// caso di errore.
+var __sfScriptLockDepth_ = 0;
+
+function withScriptLock_(callback) {
+  var ownsLock = __sfScriptLockDepth_ === 0;
+  var lock = null;
+  if (ownsLock) {
+    lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+  }
+  __sfScriptLockDepth_++;
+  try {
+    return callback();
+  } finally {
+    __sfScriptLockDepth_--;
+    if (ownsLock) {
+      lock.releaseLock();
+    }
+  }
+}
+
 // P2 (DESIGN_lock_ambiente.md, §2.2/§4): il lock globale protegge la
 // concorrenza sulle SCRITTURE (jobs/visite/config) — le azioni di sola
 // lettura (getBoard/getActivityLog/getArchivio/getCestino/getMetrics,
@@ -77,23 +104,18 @@ function normalizeEnv_(env) {
 // api() lo valorizza a false per le azioni di lettura classificate.
 function withEnvironment_(env, callback, requiresLock) {
   var needsLock = requiresLock !== false;
-  var lock = null;
-  if (needsLock) {
-    lock = LockService.getScriptLock();
-    lock.waitLock(30000);
-  }
-  var previousId = __sfRoutedSpreadsheetId_;
-  var ss = getSpreadsheetForEnv_(normalizeEnv_(env));
+  var execute = function() {
+    var previousId = __sfRoutedSpreadsheetId_;
+    var ss = getSpreadsheetForEnv_(normalizeEnv_(env));
 
-  try {
-    __sfRoutedSpreadsheetId_ = ss.getId();
-    return callback(ss);
-  } finally {
-    __sfRoutedSpreadsheetId_ = previousId;
-    if (lock) {
-      lock.releaseLock();
+    try {
+      __sfRoutedSpreadsheetId_ = ss.getId();
+      return callback(ss);
+    } finally {
+      __sfRoutedSpreadsheetId_ = previousId;
     }
-  }
+  };
+  return needsLock ? withScriptLock_(execute) : execute();
 }
 
 function include(filename) {

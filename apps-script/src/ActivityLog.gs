@@ -682,13 +682,12 @@ function eseguiMigrazioneCompleta_(ss, params) {
     throw new Error('confermaNome ("' + nomeAtteso + '") non corrisponde al nome del foglio target ("' + nomeReale + '"). Nessuna modifica eseguita.');
   }
 
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  var previousSpreadsheetId = __sfRoutedSpreadsheetId_;
-  __sfRoutedSpreadsheetId_ = ss.getId();
+  return withScriptLock_(function() {
+    var previousSpreadsheetId = __sfRoutedSpreadsheetId_;
+    __sfRoutedSpreadsheetId_ = ss.getId();
 
-  try {
-    var schemaAlignment = setupSigmaFlow();
+    try {
+      var schemaAlignment = setupSigmaFlow();
     // N1: setupSigmaFlow() apre un proprio riferimento allo spreadsheet
     // (getSpreadsheet_ -> SpreadsheetApp.openById), indipendente da
     // 'ss' qui sopra. Finche' setupSigmaFlow toccava poco lo schema il
@@ -699,25 +698,25 @@ function eseguiMigrazioneCompleta_(ss, params) {
     // ipotizzato inizialmente) di "Sheet non trovato" in
     // migrateActivityLogData_ subito dopo, trovata da Marco durante il
     // collaudo N1. Un openById successivo riallinea il riferimento.
-    ss = SpreadsheetApp.openById(ss.getId());
-    var backfillActivityLog = migrateActivityLogData_(ss);
-    var columnsJson = fixPrepColumnRole_(ss);
-    var visiteMigration = migrateVisiteFromHistory_(ss);
+      ss = SpreadsheetApp.openById(ss.getId());
+      var backfillActivityLog = migrateActivityLogData_(ss);
+      var columnsJson = fixPrepColumnRole_(ss);
+      var visiteMigration = migrateVisiteFromHistory_(ss);
 
-    var summary = {
-      spreadsheet_id: ss.getId(),
-      spreadsheet_name: nomeReale,
-      step1_backfill_activity_log: backfillActivityLog,
-      step2_columns_json: columnsJson,
-      step3_schema_alignment: schemaAlignment,
-      step4_migrazione_visite: visiteMigration
-    };
-    console.log(JSON.stringify(summary));
-    return summary;
-  } finally {
-    __sfRoutedSpreadsheetId_ = previousSpreadsheetId;
-    lock.releaseLock();
-  }
+      var summary = {
+        spreadsheet_id: ss.getId(),
+        spreadsheet_name: nomeReale,
+        step1_backfill_activity_log: backfillActivityLog,
+        step2_columns_json: columnsJson,
+        step3_schema_alignment: schemaAlignment,
+        step4_migrazione_visite: visiteMigration
+      };
+      console.log(JSON.stringify(summary));
+      return summary;
+    } finally {
+      __sfRoutedSpreadsheetId_ = previousSpreadsheetId;
+    }
+  });
 }
 
 // R3 (AUDIT_MIGRAZIONE_PROD.md v2, sez. 5): esecuzione eseguibile con un

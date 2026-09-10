@@ -1,6 +1,58 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-10
 
+## Fase U — fix locali completati, push TEST bloccato da autenticazione clasp (2026-09-10)
+
+Eseguiti sul branch dedicato `codex/fase-u-bug-residui` i punti 1 e 2
+di `docs/DESIGN_fase_U.md`. La fase **non e' ancora DONE**: il push e la
+verifica su TEST non sono partiti perche' Google ha rifiutato le
+credenziali clasp locali con `invalid_grant` / `invalid_rapt` (richiesta
+di riautenticazione). Nessuna scrittura e' stata eseguita su TEST o
+PROD in questa sessione.
+
+- **U1 — lock `syncVisiteFromLog_`, codice e test locali completati**:
+  la ricognizione ha confermato che i quattro ingressi UI passano gia'
+  da `api()`/`withEnvironment_` e quindi possiedono il lock globale
+  introdotto da P2; aggiungere un secondo lock non coordinato dentro i
+  chiamanti avrebbe creato acquisizioni/rilasci annidati. Introdotto
+  `withScriptLock_`, wrapper rientrante per la singola esecuzione:
+  acquisisce e rilascia il `ScriptLock` reale solo al livello piu'
+  esterno. `syncVisiteFromLog_` esegue ora l'intero delete-poi-append
+  dentro quel wrapper: `moveJob`, `addActivityEvent`,
+  `updateActivityEvent`, `deleteActivityEvent` e
+  `migrateSingleJobActivityLog_` sono quindi tutti serializzati, sia
+  tramite gli ingressi gia' protetti sia se invocati direttamente.
+  `withEnvironment_`, `withTestSpreadsheet_` ed
+  `eseguiMigrazioneCompleta_` usano lo stesso wrapper, evitando che un
+  livello interno rilasci prematuramente il lock posseduto dal livello
+  esterno. `computeVisiteFromLog_` non e' stata modificata. Aggiunti un
+  test sull'acquisizione diretta e un'asserzione che due scritture rapide
+  sullo stesso job lascino una sola riga visita, senza duplicati; il
+  limite dichiarato dell'harness Node resta che le due esecuzioni sono
+  ravvicinate ma non realmente parallele.
+- **U2 — test fuso orario completato**:
+  `testStockSeriesFromLogGeneralizesOverIncludedRoles` usa ora istanti
+  ISO espliciti `Europe/Rome` (`+02:00`) per l'intera fixture, senza
+  `new Date(anno, mese, giorno)` dipendente dal fuso del processo. Suite
+  completa: **212/212 in `TZ=UTC`** e **212/212 in
+  `TZ=Europe/Rome`**.
+- **U3a/U3b — gate non ancora eseguito**: le etichette richieste erano
+  gia' presenti su `main` dalla fase R6.2 (`Tasso di servizio per
+  persona (mu)` e `Capacita' disponibile stimata (team, N persone)`),
+  e il codice gia' separa `completed_initiatives` (job distinti) da
+  `completed_passages` (righe visita). La nuova verifica richiesta sui
+  dati reali resta comunque sospesa: prima serve il push del fix U1 su
+  TEST e poi l'esecuzione manuale, da parte di Marco e a board ferma, di
+  `migrateVisiteFromHistorySuProd`. La funzione non e' stata invocata ne'
+  automatizzata.
+
+**Blocco da risolvere**: riautenticare clasp, quindi rieseguire
+`apps-script/test-harness/push-and-verify.sh`. Solo dopo la pulizia
+manuale PROD procedere con la verifica dati di U3a/U3b e documentarne
+l'esito.
+
+---
+
 ## Fase R e S — S6/R9.14/R9.16 confermati su dati reali di PROD (2026-09-10)
 
 A seguito del completamento dello storico reale in PROD, Marco ha
