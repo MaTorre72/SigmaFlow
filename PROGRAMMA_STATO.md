@@ -1,15 +1,16 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-10
 
-## Fase U — fix pubblicati su TEST, diagnostica PROD da raccogliere (2026-09-10)
+## Fase U — diagnostiche PROD completate, nessun bug metrico residuo (2026-09-10)
 
 Eseguiti sul branch dedicato `codex/fase-u-bug-residui` i punti 1 e 2
 di `docs/DESIGN_fase_U.md`. Dopo la riautenticazione clasp, il codice e'
 stato pubblicato sul progetto TEST e verificato con esito
 **16/16 file identici** fra il pull remoto e `apps-script/src`. Marco ha
 inoltre confermato di avere gia' eseguito manualmente la pulizia PROD
-prevista dal gate. La fase **non e' ancora DONE**: restano da raccogliere
-i JSON delle due diagnostiche esclusivamente di lettura sui dati reali.
+prevista dal gate. Le due diagnostiche esclusivamente di lettura sono
+state eseguite sui dati reali PROD e chiudono U3a/U3b senza ulteriori
+modifiche applicative.
 
 - **U1 — lock `syncVisiteFromLog_`, codice e test locali completati**:
   la ricognizione ha confermato che i quattro ingressi UI passano gia'
@@ -38,23 +39,33 @@ i JSON delle due diagnostiche esclusivamente di lettura sui dati reali.
   completa: **213/213 in `TZ=UTC`** e **213/213 in
   `TZ=Europe/Rome`**. Il test aggiuntivo copre anche il wrapper PROD
   read-only descritto sotto.
-- **U3a/U3b — gate completato, letture reali da raccogliere**: le etichette richieste erano
+- **U3a — mu coerente, nessun fix di formula**: le etichette richieste erano
   gia' presenti su `main` dalla fase R6.2 (`Tasso di servizio per
-  persona (mu)` e `Capacita' disponibile stimata (team, N persone)`),
-  e il codice gia' separa `completed_initiatives` (job distinti) da
-  `completed_passages` (righe visita). Aggiunta
-  `checkMuConsistencySuProd()`, gemella PROD esclusivamente di lettura
-  che restituisce e registra gli stessi valori della diagnostica TEST.
-  Il tentativo di eseguirla via `clasp run` e' stato respinto dalla
-  Apps Script Execution API per permessi della funzione, non per un
-  errore applicativo: occorre quindi lanciarla dall'editor Apps Script,
-  insieme alla gia' esistente `checkS4WipCoverageSuProd()`, e conservare
-  i due JSON per chiudere il confronto sui dati reali.
+  persona (mu)` e `Capacita' disponibile stimata (team, N persone)`).
+  `checkMuConsistencySuProd()` ha restituito `displayed_mu = 0,02`,
+  `recomputed_mu_same_formula = 0,02` e `capacity_implied_mu = 0,02`,
+  con entrambi i confronti `true`; `E[S] = 55,69 giorni`, 9 campioni,
+  `team_size = 3` e capacita' effettiva `0,05/giorno`. I valori non
+  arrotondati sono circa `0,01796/giorno/persona` e
+  `0,05387/giorno/team`: stessa popolazione e stessa formula. Resta il
+  noto artefatto di presentazione dovuto all'arrotondamento separato a
+  due decimali prima della conversione settimanale, non un bug di
+  calcolo. Nessuna modifica richiesta.
+- **U3b — popolazioni distinte confermate su PROD**: il codice separa
+  `completed_initiatives` (job distinti) da `completed_passages` (righe
+  visita), e i dati reali lo dimostrano: rispettivamente **11** e
+  **14** nel periodo. Il precedente `12 = 12` era una coincidenza dello
+  snapshot, non un errore di binding. Nessuna modifica richiesta.
+- **Controlli collaterali PROD**: `checkS4WipCoverageSuProd()` ha letto
+  56 job senza esclusioni; WIP istantaneo `142 = 142` e lavoro
+  accettato istantaneo `205 = 205`, con differenze pari a zero. Le
+  coperture delle curve restano sopra soglia (12 settimane throughput,
+  23 settimane cycle time).
 
-**Passo residuo**: dall'editor Apps Script eseguire, senza altre
-scritture, `checkMuConsistencySuProd()` e
-`checkS4WipCoverageSuProd()`; riportare i due JSON in questo documento
-e classificare definitivamente U3a/U3b.
+**Esito Fase U**: implementazione e diagnostiche completate; nessun bug
+metrico residuo in U3a/U3b. Rimane separata la verifica materiale del
+conteggio post-pulizia di `visite` prevista dal criterio §1.2, se non
+gia' registrata nel log della migrazione manuale.
 
 ---
 

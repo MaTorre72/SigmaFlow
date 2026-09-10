@@ -176,12 +176,37 @@ cambia da solo una volta puliti i dati.
 
 ### Criteri di accettazione
 
-- [ ] Verifica eseguita sui dati reali dopo la pulizia (§1.2).
-- [ ] Se trovata una causa nel codice (popolazione/filtro divergente),
-      corretta — le due letture usano la stessa popolazione di visite.
-- [ ] Se i numeri già coincidevano: documentato che nessuna correzione
+- [x] Verifica eseguita sui dati reali dopo la pulizia (§1.2).
+- [x] Nessuna popolazione/filtro divergente trovata; il criterio di
+      correzione condizionale non si applica.
+- [x] I numeri coincidono: documentato che nessuna correzione
       di calcolo era necessaria.
 - [x] Etichette già implementate come sopra; nessun intervento residuo.
+
+### Esito sui dati reali PROD — 2026-09-10
+
+Dopo la pulizia manuale, `checkMuConsistencySuProd()` ha restituito:
+
+- `displayed_mu = 0,02`;
+- `recomputed_mu_same_formula = 0,02`;
+- `capacity_implied_mu = 0,02`;
+- entrambi i confronti `true`;
+- `E[S] = 55,69 giorni`, 9 campioni completati, `team_size = 3`;
+- capacità effettiva registrata: `0,05` passaggi/giorno per il team.
+
+Non esiste una divergenza di popolazione o formula: sia `mu` sia la
+capacità di team derivano dallo stesso tempo medio. Prima degli
+arrotondamenti, `1 / 55,69 ≈ 0,01796` passaggi/giorno/persona e
+`3 / 55,69 ≈ 0,05387` passaggi/giorno/team. L'apparente scarto nella
+dashboard nasce dall'arrotondamento separato a due decimali dei tassi
+giornalieri prima della conversione settimanale ×7, artefatto già
+documentato in Fase R6.2; non richiede una modifica alle formule.
+
+Nota metodologica: i booleani della diagnostica confrontano i valori
+giornalieri già arrotondati (`0,02` e `0,05`), quindi confermano il
+percorso applicativo ma non sono da soli una prova indipendente della
+precisione di presentazione. La formula non arrotondata nel codice
+fornisce la riconciliazione decisiva.
 
 ---
 
@@ -215,10 +240,20 @@ fix presunto.
 
 ### Criteri di accettazione
 
-- [ ] Verificato nel codice se le due metriche usano popolazioni
+- [x] Verificato nel codice se le due metriche usano popolazioni
       distinte.
-- [ ] Esito documentato: bug trovato e corretto, oppure coincidenza
+- [x] Esito documentato: bug trovato e corretto, oppure coincidenza
       plausibile confermata, nessuna azione necessaria.
+
+### Esito sui dati reali PROD — 2026-09-10
+
+`checkS4WipCoverageSuProd()` ha restituito, sulla stessa finestra,
+`completed_initiatives_periodo = 11` e
+`completed_passages_periodo = 14`. Le due metriche leggono quindi
+popolazioni realmente distinte anche sui dati PROD: 11 lavori unici
+conclusi contro 14 singoli passaggi conclusi. Il precedente `12 = 12`
+era una coincidenza del periodo osservato, non un errore di binding o
+di aggregazione. Nessuna modifica necessaria.
 
 ---
 
