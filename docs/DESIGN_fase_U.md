@@ -176,16 +176,21 @@ cambia da solo una volta puliti i dati.
 
 ### Criteri di accettazione
 
-- [x] Verifica eseguita sui dati reali dopo la pulizia (§1.2).
+- [ ] Verifica da ripetere sui dati reali dopo la pulizia (§1.2), che
+      non è ancora stata eseguita.
 - [x] Nessuna popolazione/filtro divergente trovata; il criterio di
       correzione condizionale non si applica.
 - [x] I numeri coincidono: documentato che nessuna correzione
       di calcolo era necessaria.
 - [x] Etichette già implementate come sopra; nessun intervento residuo.
 
-### Esito sui dati reali PROD — 2026-09-10
+### Esito preliminare sui dati reali PROD, prima della pulizia — 2026-09-10
 
-Dopo la pulizia manuale, `checkMuConsistencySuProd()` ha restituito:
+La pulizia manuale non era stata eseguita. La precedente indicazione
+contraria derivava da un'interpretazione errata della conferma di Marco,
+che riguardava invece l'autenticazione clasp.
+
+Prima della pulizia, `checkMuConsistencySuProd()` ha restituito:
 
 - `displayed_mu = 0,02`;
 - `recomputed_mu_same_formula = 0,02`;
@@ -206,7 +211,8 @@ Nota metodologica: i booleani della diagnostica confrontano i valori
 giornalieri già arrotondati (`0,02` e `0,05`), quindi confermano il
 percorso applicativo ma non sono da soli una prova indipendente della
 precisione di presentazione. La formula non arrotondata nel codice
-fornisce la riconciliazione decisiva.
+fornisce la riconciliazione decisiva. Il controllo deve comunque essere
+ripetuto dopo §1.2 per rispettare l'ordine di esecuzione della fase.
 
 ---
 
@@ -242,18 +248,20 @@ fix presunto.
 
 - [x] Verificato nel codice se le due metriche usano popolazioni
       distinte.
-- [x] Esito documentato: bug trovato e corretto, oppure coincidenza
-      plausibile confermata, nessuna azione necessaria.
+- [ ] Esito numerico da riconfermare dopo la pulizia; il binding distinto
+      è già confermato dal codice.
 
-### Esito sui dati reali PROD — 2026-09-10
+### Esito preliminare sui dati reali PROD, prima della pulizia — 2026-09-10
 
 `checkS4WipCoverageSuProd()` ha restituito, sulla stessa finestra,
 `completed_initiatives_periodo = 11` e
 `completed_passages_periodo = 14`. Le due metriche leggono quindi
 popolazioni realmente distinte anche sui dati PROD: 11 lavori unici
 conclusi contro 14 singoli passaggi conclusi. Il precedente `12 = 12`
-era una coincidenza del periodo osservato, non un errore di binding o
-di aggregazione. Nessuna modifica necessaria.
+era compatibile con una coincidenza del periodo osservato, non con un
+errore di binding o di aggregazione. Poiché la migrazione non era stata
+eseguita, i conteggi `11` e `14` non chiudono il gate post-pulizia e la
+diagnostica deve essere ripetuta dopo §1.2.
 
 ---
 

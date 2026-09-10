@@ -1,16 +1,17 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-10
 
-## Fase U — diagnostiche PROD completate, nessun bug metrico residuo (2026-09-10)
+## Fase U — fix su TEST, migrazione PROD non ancora eseguita (2026-09-10)
 
 Eseguiti sul branch dedicato `codex/fase-u-bug-residui` i punti 1 e 2
 di `docs/DESIGN_fase_U.md`. Dopo la riautenticazione clasp, il codice e'
 stato pubblicato sul progetto TEST e verificato con esito
-**16/16 file identici** fra il pull remoto e `apps-script/src`. Marco ha
-inoltre confermato di avere gia' eseguito manualmente la pulizia PROD
-prevista dal gate. Le due diagnostiche esclusivamente di lettura sono
-state eseguite sui dati reali PROD e chiudono U3a/U3b senza ulteriori
-modifiche applicative.
+**16/16 file identici** fra il pull remoto e `apps-script/src`.
+Correzione del 2026-09-10: la precedente annotazione secondo cui Marco
+aveva gia' eseguito la pulizia PROD era errata; il suo "ho gia' fatto"
+si riferiva all'autenticazione clasp. `migrateVisiteFromHistorySuProd()`
+**non e' stata eseguita**, ne' su TEST ne' su PROD. Le visite duplicate
+esistenti non risultano quindi ancora ripulite.
 
 - **U1 — lock `syncVisiteFromLog_`, codice e test locali completati**:
   la ricognizione ha confermato che i quattro ingressi UI passano gia'
@@ -39,7 +40,7 @@ modifiche applicative.
   completa: **213/213 in `TZ=UTC`** e **213/213 in
   `TZ=Europe/Rome`**. Il test aggiuntivo copre anche il wrapper PROD
   read-only descritto sotto.
-- **U3a — mu coerente, nessun fix di formula**: le etichette richieste erano
+- **U3a — verifica preliminare prima della pulizia**: le etichette richieste erano
   gia' presenti su `main` dalla fase R6.2 (`Tasso di servizio per
   persona (mu)` e `Capacita' disponibile stimata (team, N persone)`).
   `checkMuConsistencySuProd()` ha restituito `displayed_mu = 0,02`,
@@ -50,22 +51,27 @@ modifiche applicative.
   `0,05387/giorno/team`: stessa popolazione e stessa formula. Resta il
   noto artefatto di presentazione dovuto all'arrotondamento separato a
   due decimali prima della conversione settimanale, non un bug di
-  calcolo. Nessuna modifica richiesta.
-- **U3b — popolazioni distinte confermate su PROD**: il codice separa
+  calcolo. Poiche' la pulizia non era stata eseguita, il controllo sui
+  dati reali deve essere ripetuto dopo il gate per soddisfare il criterio
+  formale della Fase U.
+- **U3b — binding distinti confermati, verifica post-pulizia pendente**: il codice separa
   `completed_initiatives` (job distinti) da `completed_passages` (righe
   visita), e i dati reali lo dimostrano: rispettivamente **11** e
   **14** nel periodo. Il precedente `12 = 12` era una coincidenza dello
-  snapshot, non un errore di binding. Nessuna modifica richiesta.
+  snapshot, non un errore di binding. Il risultato numerico e' pero'
+  precedente alla pulizia e andra' riconfermato dopo il gate.
 - **Controlli collaterali PROD**: `checkS4WipCoverageSuProd()` ha letto
   56 job senza esclusioni; WIP istantaneo `142 = 142` e lavoro
   accettato istantaneo `205 = 205`, con differenze pari a zero. Le
   coperture delle curve restano sopra soglia (12 settimane throughput,
   23 settimane cycle time).
 
-**Esito Fase U**: implementazione e diagnostiche completate; nessun bug
-metrico residuo in U3a/U3b. Rimane separata la verifica materiale del
-conteggio post-pulizia di `visite` prevista dal criterio §1.2, se non
-gia' registrata nel log della migrazione manuale.
+**Esito Fase U**: **NON DONE**. Il lock rientrante e' implementato,
+testato e pubblicato su TEST, ma non risulta ancora rilasciato
+nell'applicazione PROD. La migrazione una tantum non e' stata eseguita:
+i duplicati storici non sono stati rimossi e, finche' il lock non e'
+live su PROD, possono ancora ricrearsi. Dopo rilascio e pulizia vanno
+verificati il conteggio di `visite` e nuovamente U3a/U3b.
 
 ---
 
