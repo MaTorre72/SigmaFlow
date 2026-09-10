@@ -198,43 +198,39 @@ cambia da solo una volta puliti i dati.
 
 ### Criteri di accettazione
 
-- [ ] Verifica da ripetere sui dati reali dopo la pulizia (§1.2), che
-      non è ancora stata eseguita.
+- [x] Verifica eseguita sui dati reali dopo la pulizia (§1.2).
 - [x] Nessuna popolazione/filtro divergente trovata; il criterio di
       correzione condizionale non si applica.
 - [x] I numeri coincidono: documentato che nessuna correzione
       di calcolo era necessaria.
 - [x] Etichette già implementate come sopra; nessun intervento residuo.
 
-### Esito preliminare sui dati reali PROD, prima della pulizia — 2026-09-10
+### Esito definitivo sui dati reali PROD dopo la pulizia — 2026-09-10
 
-La pulizia manuale non era stata eseguita. La precedente indicazione
-contraria derivava da un'interpretazione errata della conferma di Marco,
-che riguardava invece l'autenticazione clasp.
-
-Prima della pulizia, `checkMuConsistencySuProd()` ha restituito:
+Dopo la ricostruzione delle 99 visite, `checkMuConsistencySuProd()` ha
+restituito:
 
 - `displayed_mu = 0,02`;
 - `recomputed_mu_same_formula = 0,02`;
 - `capacity_implied_mu = 0,02`;
 - entrambi i confronti `true`;
-- `E[S] = 55,69 giorni`, 9 campioni completati, `team_size = 3`;
-- capacità effettiva registrata: `0,05` passaggi/giorno per il team.
+- `E[S] = 53,25 giorni`, 7 campioni completati, `team_size = 3`;
+- capacità effettiva registrata: `0,06` passaggi/giorno per il team.
 
 Non esiste una divergenza di popolazione o formula: sia `mu` sia la
 capacità di team derivano dallo stesso tempo medio. Prima degli
-arrotondamenti, `1 / 55,69 ≈ 0,01796` passaggi/giorno/persona e
-`3 / 55,69 ≈ 0,05387` passaggi/giorno/team. L'apparente scarto nella
+arrotondamenti, `1 / 53,25 ≈ 0,01878` passaggi/giorno/persona e
+`3 / 53,25 ≈ 0,05634` passaggi/giorno/team. L'apparente scarto nella
 dashboard nasce dall'arrotondamento separato a due decimali dei tassi
 giornalieri prima della conversione settimanale ×7, artefatto già
 documentato in Fase R6.2; non richiede una modifica alle formule.
 
 Nota metodologica: i booleani della diagnostica confrontano i valori
-giornalieri già arrotondati (`0,02` e `0,05`), quindi confermano il
+giornalieri già arrotondati (`0,02` e `0,06`), quindi confermano il
 percorso applicativo ma non sono da soli una prova indipendente della
 precisione di presentazione. La formula non arrotondata nel codice
-fornisce la riconciliazione decisiva. Il controllo deve comunque essere
-ripetuto dopo §1.2 per rispettare l'ordine di esecuzione della fase.
+fornisce la riconciliazione decisiva. U3a è chiuso senza modifiche di
+calcolo.
 
 ---
 
@@ -270,20 +266,19 @@ fix presunto.
 
 - [x] Verificato nel codice se le due metriche usano popolazioni
       distinte.
-- [ ] Esito numerico da riconfermare dopo la pulizia; il binding distinto
-      è già confermato dal codice.
+- [x] Esito post-pulizia documentato: uguaglianza numerica plausibile,
+      nessuna azione necessaria.
 
-### Esito preliminare sui dati reali PROD, prima della pulizia — 2026-09-10
+### Esito definitivo sui dati reali PROD dopo la pulizia — 2026-09-10
 
 `checkS4WipCoverageSuProd()` ha restituito, sulla stessa finestra,
-`completed_initiatives_periodo = 11` e
-`completed_passages_periodo = 14`. Le due metriche leggono quindi
-popolazioni realmente distinte anche sui dati PROD: 11 lavori unici
-conclusi contro 14 singoli passaggi conclusi. Il precedente `12 = 12`
-era compatibile con una coincidenza del periodo osservato, non con un
-errore di binding o di aggregazione. Poiché la migrazione non era stata
-eseguita, i conteggi `11` e `14` non chiudono il gate post-pulizia e la
-diagnostica deve essere ripetuta dopo §1.2.
+`completed_initiatives_periodo = 8` e
+`completed_passages_periodo = 8`. Il codice aggrega comunque due
+popolazioni distinte: lavori unici conclusi e singoli passaggi conclusi.
+Sul dataset ripulito, ciascuno degli 8 lavori conclusi nel periodo ha un
+solo passaggio concluso conteggiato nella stessa finestra; l'uguaglianza
+è quindi una coincidenza valida, non un errore di binding o di
+aggregazione. U3b è chiuso senza modifiche.
 
 ---
 

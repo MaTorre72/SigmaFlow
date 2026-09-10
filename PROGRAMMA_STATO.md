@@ -46,38 +46,36 @@ eliminati i 35 record eccedenti.
   completa: **213/213 in `TZ=UTC`** e **213/213 in
   `TZ=Europe/Rome`**. Il test aggiuntivo copre anche il wrapper PROD
   read-only descritto sotto.
-- **U3a — verifica preliminare prima della pulizia**: le etichette richieste erano
+- **U3a — verifica post-pulizia completata**: le etichette richieste erano
   gia' presenti su `main` dalla fase R6.2 (`Tasso di servizio per
   persona (mu)` e `Capacita' disponibile stimata (team, N persone)`).
   `checkMuConsistencySuProd()` ha restituito `displayed_mu = 0,02`,
   `recomputed_mu_same_formula = 0,02` e `capacity_implied_mu = 0,02`,
-  con entrambi i confronti `true`; `E[S] = 55,69 giorni`, 9 campioni,
-  `team_size = 3` e capacita' effettiva `0,05/giorno`. I valori non
-  arrotondati sono circa `0,01796/giorno/persona` e
-  `0,05387/giorno/team`: stessa popolazione e stessa formula. Resta il
+  con entrambi i confronti `true`; `E[S] = 53,25 giorni`, 7 campioni,
+  `team_size = 3` e capacita' effettiva `0,06/giorno`. I valori non
+  arrotondati sono circa `0,01878/giorno/persona` e
+  `0,05634/giorno/team`: stessa popolazione e stessa formula. Resta il
   noto artefatto di presentazione dovuto all'arrotondamento separato a
   due decimali prima della conversione settimanale, non un bug di
-  calcolo. Poiche' la pulizia non era stata eseguita, il controllo sui
-  dati reali deve essere ripetuto dopo il gate per soddisfare il criterio
-  formale della Fase U.
-- **U3b — binding distinti confermati, verifica post-pulizia pendente**: il codice separa
+  calcolo. Il controllo e' stato eseguito dopo il gate: **chiuso**.
+- **U3b — popolazioni distinte confermate post-pulizia**: il codice separa
   `completed_initiatives` (job distinti) da `completed_passages` (righe
-  visita), e i dati reali lo dimostrano: rispettivamente **11** e
-  **14** nel periodo. Il precedente `12 = 12` era una coincidenza dello
-  snapshot, non un errore di binding. Il risultato numerico e' pero'
-  precedente alla pulizia e andra' riconfermato dopo il gate.
+  visita). Dopo la pulizia entrambe valgono **8** nel periodo: poiche' i
+  binding e le aggregazioni sono distinti, l'uguaglianza e' una
+  coincidenza legittima dello snapshot, non un errore. **Chiuso**.
 - **Controlli collaterali PROD**: `checkS4WipCoverageSuProd()` ha letto
   56 job senza esclusioni; WIP istantaneo `142 = 142` e lavoro
   accettato istantaneo `205 = 205`, con differenze pari a zero. Le
   coperture delle curve restano sopra soglia (12 settimane throughput,
-  23 settimane cycle time).
+  23 settimane cycle time); fit aggiornati a `{a:804.24, w0:163.48}` e
+  `{t_max:20.99, k:257.05}`.
 
 **Esito Fase U**: i duplicati storici sono stati rimossi e il conteggio
 post-pulizia e' riconciliato (**99 attese = 99 scritte**). La fase non e'
 ancora DONE solo perche' il lock rientrante risulta pubblicato su TEST,
 non ancora nell'applicazione PROD: senza quel rilascio i duplicati
-potrebbero ricrearsi. Restano inoltre da ripetere U3a/U3b dopo la
-pulizia, come richiesto dall'ordine formale della fase.
+potrebbero ricrearsi. U3a e U3b sono invece definitivamente chiusi sui
+dati ripuliti.
 
 ---
 
