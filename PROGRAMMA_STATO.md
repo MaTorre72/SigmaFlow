@@ -36,6 +36,11 @@ correttamente nel pannello "Margine di stabilita'". Con questo si
 chiude l'ultimo punto aperto della fase R/S non ancora confermato su
 dati reali — nessuna verifica residua nota su S6/R9.14/R9.16/R10.
 
+**Chiusura amministrativa**: aggiornamento committato su branch
+dedicato `docs/stato-fase-r-s-chiusura-2026-09-10`, PR
+[#19](https://github.com/MaTorre72/SigmaFlow/pull/19) mergiata su
+`main` da Marco, branch eliminato (locale e remoto).
+
 ---
 
 ## Fase R e S — R10.6 risolto per davvero (non con una nota), R9.1 completato, nota V/Cv² semplificata (2026-08-28, sessione 17)
