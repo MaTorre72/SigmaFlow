@@ -9,6 +9,26 @@ function generateActivityEventId_() {
   return Utilities.getUuid();
 }
 
+// V4: identita' best-effort dell'operatore. In deployment eseguiti come
+// proprietario getActiveUser().getEmail() puo' essere vuoto: il fallback e'
+// esplicito e non finge un autore che Apps Script non ha esposto.
+function activityOperationActor_() {
+  try {
+    var email = Session.getActiveUser().getEmail();
+    return email || 'unavailable';
+  } catch (err) {
+    return 'unavailable';
+  }
+}
+
+function activityEventAuditSnapshot_(event) {
+  var snapshot = {};
+  Object.keys(event || {}).forEach(function(key) {
+    if (key !== 'audit_history') { snapshot[key] = event[key]; }
+  });
+  return snapshot;
+}
+
 // Interpreta in modo sicuro il JSON dell'activity log: mai un errore fatale.
 function parseActivityLog_(rawValue) {
   if (!rawValue || typeof rawValue !== 'string') {
@@ -171,14 +191,10 @@ function validateSequence_(events, candidate) {
     if (touchesCandidate(current, next)) {
       // SEQUENZA_MODIFICATA: inserendo/spostando il candidato, il from
       // dell'evento move successivo non corrisponde piu' al to precedente.
-      if (next.from !== undefined && next.from !== null && next.from !== current.to) {
-        sequenceWarnings.push({
-          code: 'SEQUENZA_MODIFICATA',
-          eventTs: next.ts,
-          oldFrom: next.from,
-          newFrom: current.to
-        });
-      }
+      // V4: il writer riallinea deterministicamente tutti i `from` dopo
+      // add/update. La sola variazione del `from` successivo non richiede
+      // piu' conferma; restano invece warning le anomalie semantiche vere
+      // (colonna doppia e attesa senza uscita).
 
       // COLONNA_DOPPIA: due move consecutivi verso la stessa colonna.
       if (current.to === next.to) {
@@ -379,6 +395,12 @@ function migrateSingleJobActivityLog_(job, migrationTs) {
     log.push({
       id: generateActivityEventId_(),
       ts: job.arrival_ts || extractDateFromJobId_(job.job_id) || migrationTs,
+      event_ts: job.arrival_ts || extractDateFromJobId_(job.job_id) || migrationTs,
+      operation_ts: migrationTs,
+      created_operation_ts: migrationTs,
+      updated_operation_ts: migrationTs,
+      operation_actor: activityOperationActor_(),
+      operation_force: false,
       type: 'move',
       source: 'auto',
       to: backfillTo || job.status || 'backlog',
@@ -637,6 +659,67 @@ function computeVisiteFromLog_(jobId, moveLog) {
   });
 
   return result;
+}
+
+// V4 §3: confronto strettamente read-only fra la materializzazione corrente
+// e quanto computeVisiteFromLog_ produrrebbe oggi. Non modifica il foglio e
+// non tenta una bonifica; serve a misurare il debito sul dataset reale.
+function checkVisiteSyncV4_(ss) {
+  var jobs = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.JOBS));
+  var actual = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+  var actualByJob = {};
+  actual.forEach(function(visit) {
+    if (!actualByJob[visit.job_id]) { actualByJob[visit.job_id] = []; }
+    actualByJob[visit.job_id].push(visit);
+  });
+  var fields = VISITE_HEADERS.slice();
+  function canonical(visit) {
+    var value = {};
+    fields.forEach(function(field) {
+      value[field] = field === 'numero_visita' ? Number(visit[field] || 0) : String(visit[field] === undefined || visit[field] === null ? '' : visit[field]);
+    });
+    return value;
+  }
+  var mismatches = [];
+  jobs.forEach(function(job) {
+    var moves = parseActivityLog_(job.activity_log_json).filter(function(event) { return event.type === 'move'; });
+    var expected = computeVisiteFromLog_(job.job_id, moves).visite.map(canonical);
+    var found = (actualByJob[job.job_id] || []).map(canonical).sort(function(a, b) { return a.numero_visita - b.numero_visita; });
+    if (JSON.stringify(expected) !== JSON.stringify(found)) {
+      var differing = {};
+      var count = Math.max(expected.length, found.length);
+      for (var i = 0; i < count; i++) {
+        fields.forEach(function(field) {
+          if (!expected[i] || !found[i] || expected[i][field] !== found[i][field]) { differing[field] = true; }
+        });
+      }
+      mismatches.push({
+        job_id: job.job_id,
+        expected_visits: expected.length,
+        actual_visits: found.length,
+        differing_fields: Object.keys(differing)
+      });
+    }
+  });
+  var knownJobs = {};
+  jobs.forEach(function(job) { knownJobs[job.job_id] = true; });
+  var result = {
+    jobs_checked: jobs.length,
+    visits_checked: actual.length,
+    jobs_out_of_sync: mismatches.length,
+    orphan_visits: actual.filter(function(visit) { return !knownJobs[visit.job_id]; }).length,
+    mismatches: mismatches
+  };
+  Logger.log(JSON.stringify(result));
+  return result;
+}
+
+function checkVisiteSyncV4OnTest() {
+  return withTestSpreadsheet_(function(ss) { return checkVisiteSyncV4_(ss); });
+}
+
+function checkVisiteSyncV4SuProd() {
+  return checkVisiteSyncV4_(SpreadsheetApp.openById(SIGMAFLOW.DEFAULT_SPREADSHEET_ID));
 }
 
 // Fase "R2" (AUDIT_MIGRAZIONE_PROD.md v2, sez. 4-5): orchestratrice

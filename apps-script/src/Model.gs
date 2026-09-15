@@ -1,4 +1,25 @@
+// Percorso rapido della home V3: costruisce soltanto il contratto usato
+// dalla vista operativa. La dashboard legacy viene caricata separatamente
+// e solo quando l'utente apre la sezione di confronto/taratura.
+function getDashboardMetrics() {
+  var startedAt = new Date().getTime();
+  var config = readConfig_();
+  var jobs = loadJobsWithVisitSummary_();
+  var spreadsheet = getSpreadsheet_();
+  var visite = readTable_(spreadsheet.getSheetByName(SIGMAFLOW.SHEETS.VISITE));
+  var archivedJobs = loadArchivedJobsWithVisitSummary_();
+  var visiteArchivio = readTable_(spreadsheet.getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
+  var dashboardState = buildDashboardStateV2_(jobs, visite, config, new Date(), archivedJobs, visiteArchivio);
+  dashboardState.performance = {
+    backend_calculation_ms: new Date().getTime() - startedAt,
+    backend_requests_for_dashboard: 1,
+    legacy_dashboard_deferred: true
+  };
+  return ok_({ dashboardState: dashboardState });
+}
+
 function getMetrics() {
+  var startedAt = new Date().getTime();
   var config = readConfig_();
   // loadJobsWithVisitSummary_ (Kanban.gs): dopo L5 parte 2/2, done_ts non
   // e' piu' un campo di jobs — serve ricalcolato per pointsStatistics_/
@@ -11,7 +32,12 @@ function getMetrics() {
   // stato archiviato) — MAI il Cestino, che non e' letto qui ne' altrove.
   var archivedJobs = loadArchivedJobsWithVisitSummary_();
   var visiteArchivio = readTable_(getSpreadsheet_().getSheetByName(SIGMAFLOW.SHEETS.VISITE_ARCHIVIO));
-  return ok_(calculateMetrics_(jobs, visite, config, new Date(), archivedJobs, visiteArchivio));
+  var metrics = calculateMetrics_(jobs, visite, config, new Date(), archivedJobs, visiteArchivio);
+  metrics.dashboardState.performance = {
+    backend_calculation_ms: new Date().getTime() - startedAt,
+    backend_requests_for_dashboard: 1
+  };
+  return ok_(metrics);
 }
 
 // Fase L4 (DESIGN_modello_caso_visita.md, sez. 10-11): le metriche di
@@ -107,6 +133,9 @@ function calculateMetrics_(jobs, visite, config, now, archivedJobs, visiteArchiv
     }
   };
   result.systemState = buildSystemState_(jobs, visite, config, now, archivedJobs, visiteArchivio);
+  // V2: contratto semantico parallelo alla dashboard legacy. La UI
+  // esistente continua a leggere systemState senza alcuna regressione.
+  result.dashboardState = buildDashboardStateV2_(jobs, visite, config, now, archivedJobs, visiteArchivio);
   return result;
 }
 

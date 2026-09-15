@@ -1,5 +1,46 @@
 # Metriche dashboard SigmaFlow
 
+## V5 — precisione home, lettura verticale e viste temporali
+
+I valori di presentazione nei riquadri principali sono meno precisi del
+contratto numerico: `committed_weeks` mostra al massimo una cifra decimale;
+`lead_time_median_days` e `lead_time_p80_days` sono arrotondati all'intero.
+Il dettaglio e la diagnostica conservano la precisione backend a due decimali.
+
+"Andamento del lavoro" usa le boundary settimanali del backend senza
+ricalcolare gli stock nel browser. La selezione puntuale espone lavoro già
+acquisito, in corso, in attesa, completato e totale; funziona con puntatore,
+tocco e frecce da tastiera. Sotto le bande, sullo stesso asse temporale, sono
+mostrati i conteggi settimanali `new_work_jobs`, `rework_wip_episodes` e
+`completed_visits` come Nuovi ingressi, Rientri e Consegne.
+
+`dashboardV2History_` espone `weekly`, `monthly`, `quarterly` e `annual_cfd`.
+I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
+anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
+stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta
+`has_data: false` e il relativo `empty_state_message` esplicito.
+
+## Trasparenza V4 dello Stato del flusso
+
+La fascia mostrata in UI si chiama **Fascia centrale osservata**: quando non
+configurata e' il 25°–75° percentile (`linear_interpolation_p25_p75`) delle
+medie settimanali di WIP pesate per durata. L'export di taratura espone per
+ogni settimana `avg_wip_jobs`, copertura temporale, completamenti/punti e i
+flag `sufficiently_loaded`/`included_in_baseline`.
+
+Il ritmo recente usa la finestra `(generated_at - capacity_window_weeks,
+generated_at]`. Contratto e dettaglio espongono estremi ISO, timezone,
+completamenti, punti e settimane con almeno un completamento; il drill-down
+aggiunge `job_id`, numero visita, `consegna_ts` e punti. Qualita' del ritmo
+recente e qualita' della baseline storica sono distinte (`sufficient`,
+`partial`, `insufficient`). Il messaggio di stato combina separatamente il
+fatto sul WIP e quello sul ritmo, senza dedurre congestione.
+
+Il riepilogo diagnostico copre soltanto i controlli dichiarati: identita' CFD
+dell'ultimo bucket, job senza stato osservato, log non parsabili, colonne
+orfane, visite senza job e timestamp dell'ultimo dato. Uno zero non equivale
+a una certificazione generale del dataset.
+
 ## Principio
 
 La dashboard descrive lo stato osservato nel periodo configurato. Non produce ancora previsioni future.
@@ -69,6 +110,10 @@ R5 (2026-08-27) ha diviso quello che prima era un unico numero mescolato in tre 
 - **Lavori bloccati**: job in colonne con ruolo `stand_by`.
 
 ## Tempi
+
+- **Tempo tipico alla consegna (V5)**: mediana degli intervalli completi dal primo ingresso osservato in backlog/preparazione/WIP alla successiva entrata in `done`. Attese e rientri intermedi restano nello stesso intervallo; un nuovo ingresso operativo dopo `done` apre una nuova unità valida soltanto per questa misura.
+- **8 pratiche su 10 entro (V5)**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
+- La stima M/G/1 della vista legacy usa visite e tempi di servizio ed è una grandezza teorica diversa: non viene usata come sostituto del lead time osservato e non compare nella home.
 
 - **Tempo medio di lavorazione**: media del tempo di servizio (`consegna_ts - start_ts` sulla visita) sulle visite completate valide.
 - **Variabilita'**: rapporto tra varianza e quadrato della media dei tempi.

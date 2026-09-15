@@ -65,6 +65,17 @@ aspetta ancora su `jobs` (`visit_number`, `is_rework`, `rework_cause`,
 `start_ts`, `done_ts`) — nessuna scrittura duplicata, `visite` resta
 l'unica fonte.
 
+`visite` e' una materializzazione **live**, non uno snapshot periodico:
+`moveJob`, `addActivityEvent`, `updateActivityEvent` e
+`deleteActivityEvent` invocano `syncVisiteFromLog_` dopo ogni mutazione e
+ricostruiscono le righe del job dal log completo. Migrazioni e rebuild
+servono soltanto a riallineare dati storici gia' rimasti indietro. La
+dashboard V3 usa il log per episodi WIP/riprese, ma usa `visite` per i
+completamenti tecnici; anche dashboard legacy, tempi, attese, capacita' e
+rilavorazione assumono quindi che la materializzazione sia aggiornata.
+`checkVisiteSyncV4OnTest` e `checkVisiteSyncV4SuProd` misurano in sola
+lettura eventuali divergenze senza correggerle.
+
 ### `config`
 
 | Chiave | Default |
@@ -213,3 +224,10 @@ La Cronologia (tab card) mostra gli eventi di `activity_log_json`
 permette correzioni manuali senza toccare direttamente `visite`: i
 campi strutturati si riallineano in automatico alla visita aperta
 corrente.
+
+Dalla V4 ogni nuovo evento conserva separatamente `event_ts` (istante del
+fatto, mantenendo `ts` per compatibilita') e `operation_ts` (istante della
+scrittura), oltre ad autore best-effort e uso di `force`. Le modifiche
+conservano la versione precedente in `audit_history`; le cancellazioni
+lasciano un record `audit` con tombstone. L'audit vale solo in avanti: i
+metadati mancanti nello storico non vengono ricostruiti.

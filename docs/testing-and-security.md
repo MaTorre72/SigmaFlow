@@ -11,6 +11,10 @@ Validare SigmaFlow senza mettere a rischio il database operativo. Ogni test dist
 - Spreadsheet: `SigmaFlow Database`
 - ID: `15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g` (`DEFAULT_SPREADSHEET_ID` in Constants.gs)
 - Web App corrente: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
+- Collaudo del codice appena inviato al progetto Apps Script TEST (deployment
+  HEAD): <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzxoi0-mZWD4rRdcQ7fmEI241507eEa6bqJqvOrugg/dev?env=test>. Il deployment
+  versionato sopra può restare su una versione precedente finché Marco non lo
+  aggiorna esplicitamente; non usarlo per misurare il codice appena pushato.
 
 ### Test
 
@@ -20,7 +24,8 @@ Uno Spreadsheet separato, stessi tab creati automaticamente da `setupSigmaFlow()
 - `visite`
 - `config`
 
-ID di default (`DEFAULT_TEST_SPREADSHEET_ID` in Constants.gs): `1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU`.
+ID di default (`DEFAULT_TEST_SPREADSHEET_ID` in Constants.gs): `1CNoFPeoQKQ2LBmnaldp1Id3_CRtfviep4I4xkKPujtk`
+(`Copia di SigmaFlow Database`, copia di PROD usata per il collaudo TEST reale).
 
 **[Aggiornato 2026-08-25]** La Script Property `SIGMAFLOW_TEST_SPREADSHEET_ID`
 non è più necessaria — `withTestSpreadsheet_` (Tests.gs) ricade
