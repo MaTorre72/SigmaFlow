@@ -324,6 +324,7 @@ function runAllTests() {
     testDashboardV2HistoryCoverageAndCalendar,
     testDashboardV2QuarterlyHistoryAndEmptyStates,
     testDashboardV5DailyCalendarLeapYearAndSelectedPeriod,
+    testDashboardV5HorizontalEquivalentTimeKnownDates,
     testDashboardV2HistoryEmptyAndFromIndependence,
     testDashboardV2DiagnosticsAreExplicitAndIsolated,
     testDashboardV3FlowStatePrecedenceAndRhythm,
@@ -5743,6 +5744,27 @@ function testDashboardV5DailyCalendarLeapYearAndSelectedPeriod() {
     'empty state giornaliero esplicito');
   assertEquals_('Dati non ancora disponibili per il periodo selezionato.',
     history.empty_state_messages.selected_period, 'empty state Da/A esplicito');
+}
+
+function testDashboardV5HorizontalEquivalentTimeKnownDates() {
+  function row(at, completedJobs, arrivalsJobs, completedPoints, arrivalsPoints) {
+    return { sampled_at: at, boundaries: {
+      jobs: { completed_boundary: completedJobs, future_work_boundary: arrivalsJobs },
+      points: { completed_boundary: completedPoints, future_work_boundary: arrivalsPoints }
+    } };
+  }
+  var rows = [row('2026-01-01T00:00:00Z', 0, 2, 0, 10),
+    row('2026-01-03T00:00:00Z', 1, 3, 5, 15),
+    row('2026-01-05T00:00:00Z', 3, 3, 10, 15),
+    row('2026-01-07T00:00:00Z', 3, 4, 15, 20)];
+  dashboardV5AttachEquivalentTimes_(rows);
+  assertEquals_('2026-01-04T00:00:00.000Z', rows[0].equivalent_time.jobs.exit_at,
+    'quota lavori 2 incrocia fra i bucket');
+  assertEquals_(3, rows[0].equivalent_time.jobs.duration_calendar_days, 'delta lavori in giorni calendario');
+  assertEquals_('2026-01-05T00:00:00.000Z', rows[0].equivalent_time.points.exit_at,
+    'quota punti 10 incrocia al bucket noto');
+  assertEquals_(4, rows[0].equivalent_time.points.duration_calendar_days, 'delta punti in giorni calendario');
+  assertEquals_(null, rows[3].equivalent_time.jobs.exit_at, 'quota non completata esplicita');
 }
 
 function testDashboardV2DiagnosticsAreExplicitAndIsolated() {

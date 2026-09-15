@@ -68,6 +68,11 @@ function verifyV3Ui() {
       markup.includes('data-v3-cfd-series="wipRework"') && markup.includes('id="v3-cfd-show-all"') &&
       markup.includes('Mostra tutte') && client.includes('dashboardV5FocusedSeries') &&
       client.includes('ctx.globalAlpha = state.dashboardV5FocusedSeries') && client.includes('ctx.fill(); ctx.globalAlpha = 1')],
+    ['misura orizzontale usa il risultato backend in Lavori e Punti',
+      markup.includes('id="v3-cfd-measure"') && markup.includes('Tempo equivalente dal CFD') === false &&
+      client.includes("selected.equivalent_time") && client.includes("[unit]") &&
+      client.includes('Data ingresso equivalente') && client.includes('Data uscita equivalente') &&
+      client.includes('P50 osservato') && client.includes('P80 osservato')],
     ['lettura verticale completa con crosshair tooltip e selezione accessibile',
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&

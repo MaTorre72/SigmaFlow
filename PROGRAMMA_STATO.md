@@ -1,6 +1,33 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5E misura orizzontale completata su TEST (2026-09-15)
+
+Ogni bucket CFD espone ora `equivalent_time.jobs` e
+`equivalent_time.points`, calcolati nel backend: la quota è la boundary
+cumulativa degli ingressi e l'uscita è il primo incrocio con la boundary dei
+completamenti, interpolato linearmente fra due bucket. Se l'incrocio non è
+ancora osservato l'esito resta esplicitamente nullo. Il frontend non calcola
+stock o cumulative: seleziona una quota e mostra data ingresso equivalente,
+data uscita equivalente e durata in giorni calendario.
+
+Fixture a date note: quota Lavori 2 del **1 gennaio** incrocia il **4 gennaio**
+= **3 giorni**; quota Punti 10 incrocia il **5 gennaio** = **4 giorni**;
+una quota finale non completata restituisce `exit_at=null`.
+
+Gate/checkpoint sul TEST reale, Anno 2025/Mese, quota al 31 dicembre: in
+**Lavori** uscita equivalente **11/08/2026**, durata **222,29 giorni**; in
+**Punti** uscita equivalente **24/08/2026**, durata **235,58 giorni**. Entrambe
+le viste confrontano gli stessi osservati: **P50 91,9 giorni**, **P80 155,28
+giorni**. A **390×844** il controllo “Misura tempo”, il riepilogo e i valori
+sono accessibili; il cambio Lavori/Punti aggiorna l'esito senza cambiare il
+periodo selezionato.
+
+Verifica: **249/249 test Apps Script** e **38/38 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:30:10** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5E DONE**; il gate umano è stato
+registrato come checkpoint secondo la deroga notturna.
+
 ## V5 — Fase 5D focus serie completata su TEST (2026-09-15)
 
 Le cinque voci della legenda CFD sono ora controlli accessibili. La selezione

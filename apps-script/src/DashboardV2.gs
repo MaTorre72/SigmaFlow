@@ -611,6 +611,47 @@ function dashboardV2StocksFromIndex_(stockIndex, start, sampledAt, observedUntil
   return result;
 }
 
+// Per ogni quota sulla curva superiore degli ingressi individua il primo
+// incrocio con la cumulata dei completamenti. L'interpolazione e' lineare tra
+// due campioni backend; il client non ricostruisce questa geometria.
+function dashboardV5AttachEquivalentTimes_(rows) {
+  ['jobs', 'points'].forEach(function(unit) {
+    var exitIndex = 0;
+    rows.forEach(function(row, entryIndex) {
+      row.equivalent_time = row.equivalent_time || {};
+      var target = Number(row.boundaries[unit].future_work_boundary || 0);
+      var completedAtEntry = Number(row.boundaries[unit].completed_boundary || 0);
+      if (!(target > completedAtEntry)) {
+        row.equivalent_time[unit] = { entry_at: row.sampled_at, exit_at: row.sampled_at,
+          duration_calendar_days: 0, quality: 'same_bucket' };
+        return;
+      }
+      exitIndex = Math.max(exitIndex, entryIndex);
+      while (exitIndex < rows.length && Number(rows[exitIndex].boundaries[unit].completed_boundary || 0) < target) { exitIndex++; }
+      if (exitIndex >= rows.length) {
+        row.equivalent_time[unit] = { entry_at: row.sampled_at, exit_at: null,
+          duration_calendar_days: null, quality: 'completion_not_yet_observed' };
+        return;
+      }
+      var exitAt = Date.parse(rows[exitIndex].sampled_at);
+      if (exitIndex > 0) {
+        var previous = rows[exitIndex - 1];
+        var low = Number(previous.boundaries[unit].completed_boundary || 0);
+        var high = Number(rows[exitIndex].boundaries[unit].completed_boundary || 0);
+        if (high > low && target > low) {
+          exitAt = Date.parse(previous.sampled_at) + (target - low) / (high - low) *
+            (Date.parse(rows[exitIndex].sampled_at) - Date.parse(previous.sampled_at));
+        }
+      }
+      var entryAt = Date.parse(row.sampled_at);
+      row.equivalent_time[unit] = { entry_at: row.sampled_at, exit_at: new Date(exitAt).toISOString(),
+        duration_calendar_days: round_(Math.max(0, exitAt - entryAt) / 86400000),
+        quality: 'linear_interpolation_between_backend_buckets' };
+    });
+  });
+  return rows;
+}
+
 function dashboardV2CFD_(normalized, jobs, flow, now, stockIndex) {
   var jobsById = indexBy_(jobs, 'job_id');
   stockIndex = stockIndex || dashboardV2StockIndex_(normalized, jobsById);
@@ -652,6 +693,7 @@ function dashboardV2CFD_(normalized, jobs, flow, now, stockIndex) {
     });
     return row;
   });
+  dashboardV5AttachEquivalentTimes_(weekly);
   var current = dashboardV2StocksFromIndex_(stockIndex, now.getTime(), now.getTime(), now.getTime());
   var missing = normalized.filter(function(item) {
     return stockIndex.first_entry_by_job[item.job_id] === undefined || stockIndex.first_entry_by_job[item.job_id] > now.getTime();

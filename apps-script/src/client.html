@@ -2131,9 +2131,22 @@
     });
     document.getElementById('v3-cfd-select-range').addEventListener('click', function(event) {
       state.dashboardV5SelectingRange = !state.dashboardV5SelectingRange;
+      state.dashboardV5Measuring = false;
+      document.getElementById('v3-cfd-measure').classList.remove('active');
+      document.getElementById('v3-cfd-measure').setAttribute('aria-pressed', 'false');
       state.dashboardV5RangeStart = null;
       event.currentTarget.classList.toggle('active', state.dashboardV5SelectingRange);
       event.currentTarget.setAttribute('aria-pressed', state.dashboardV5SelectingRange ? 'true' : 'false');
+    });
+    document.getElementById('v3-cfd-measure').addEventListener('click', function(event) {
+      state.dashboardV5Measuring = !state.dashboardV5Measuring;
+      state.dashboardV5SelectingRange = false;
+      document.getElementById('v3-cfd-select-range').classList.remove('active');
+      document.getElementById('v3-cfd-select-range').setAttribute('aria-pressed', 'false');
+      event.currentTarget.classList.toggle('active', state.dashboardV5Measuring);
+      event.currentTarget.setAttribute('aria-pressed', state.dashboardV5Measuring ? 'true' : 'false');
+      document.getElementById('v3-cfd-measure-result').hidden = !state.dashboardV5Measuring;
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
     document.querySelectorAll('[data-v3-cfd-series]').forEach(function(button) {
       button.addEventListener('click', function() {
@@ -2499,6 +2512,7 @@
     var canvas = document.getElementById('v3-flow-chart');
     var empty = document.getElementById('v3-flow-chart-empty');
     var selection = document.getElementById('v3-flow-selection');
+    var measureResult = document.getElementById('v3-cfd-measure-result');
     var resolution = document.getElementById('v3-cfd-resolution').value;
     var resolutionLabel = resolution === 'day' ? 'giorno' : resolution === 'month' ? 'mese' : 'settimana';
     var resolutionPrompt = resolution === 'week' ? 'una settimana' : 'un ' + resolutionLabel;
@@ -2512,6 +2526,7 @@
       empty.hidden = false;
       empty.textContent = 'Dati non ancora disponibili per il periodo selezionato.';
       selection.textContent = '';
+      measureResult.hidden = true;
       return;
     }
     canvas.hidden = false;
@@ -2608,6 +2623,10 @@
     if (selectedIndex === null || selectedIndex === undefined) { selectedIndex = state.dashboardV3ChartSelectedIndex; }
     if (selectedIndex === null || selectedIndex === undefined || !rows[selectedIndex]) {
       selection.textContent = 'Sposta il puntatore o tocca il grafico per leggere ' + resolutionPrompt + '.';
+      if (state.dashboardV5Measuring) {
+        measureResult.hidden = false;
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>Seleziona una quota sulla curva degli ingressi.';
+      } else { measureResult.hidden = true; }
       return;
     }
     var selected = rows[selectedIndex];
@@ -2633,6 +2652,33 @@
       ' · Completamenti cumulativi ' + dashboardV3Text_(values.cumulativeCompleted) +
       ' · Nuovi ingressi ' + dashboardV3Text_(selected.new_work_jobs) + ' · Rientri ' +
       dashboardV3Text_(selected.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(selected.completed_visits);
+
+    if (state.dashboardV5Measuring) {
+      var measure = ((selected.equivalent_time || {})[unit] || {});
+      measureResult.hidden = false;
+      if (measure.exit_at && measure.duration_calendar_days !== null && measure.duration_calendar_days !== undefined) {
+        var entryLabel = new Date(measure.entry_at).toLocaleDateString('it-IT');
+        var exitLabel = new Date(measure.exit_at).toLocaleDateString('it-IT');
+        var timing = (dashboard || {}).timing || {};
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>' +
+          'Data ingresso equivalente: ' + escapeHtml(entryLabel) + ' · Data uscita equivalente: ' + escapeHtml(exitLabel) +
+          ' · Durata: ' + escapeHtml(dashboardV3Text_(measure.duration_calendar_days, ' giorni')) +
+          ' · P50 osservato: ' + escapeHtml(dashboardV3Text_(timing.lead_time_median_days, ' giorni')) +
+          ' · P80 osservato: ' + escapeHtml(dashboardV3Text_(timing.lead_time_p80_days, ' giorni'));
+        var exitTime = Date.parse(measure.exit_at);
+        var exitPosition = null;
+        for (var measureIndex = 0; measureIndex < rows.length; measureIndex++) {
+          if (Date.parse(rows[measureIndex].sampled_at) >= exitTime) { exitPosition = measureIndex; break; }
+        }
+        if (exitPosition !== null && exitPosition >= selectedIndex) {
+          ctx.strokeStyle = '#2f6b9a'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+          ctx.beginPath(); ctx.moveTo(x(selectedIndex), y(boundaries.future_work_boundary));
+          ctx.lineTo(x(exitPosition), y(boundaries.future_work_boundary)); ctx.stroke(); ctx.setLineDash([]);
+        }
+      } else {
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>Completamento equivalente non ancora osservato nel periodo disponibile.';
+      }
+    } else { measureResult.hidden = true; }
     var crossX = x(selectedIndex);
     ctx.strokeStyle = '#101828';
     ctx.lineWidth = 1;
