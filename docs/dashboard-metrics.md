@@ -20,6 +20,10 @@ Il WIP puntuale è classificato dal numero dell'episodio osservato: il primo è
 disponibile; nella pila il rework rosso è sotto il nuovo blu.
 
 `dashboardV2History_` espone `weekly`, `monthly`, `quarterly` e `annual_cfd`.
+Espone inoltre `daily` per la navigazione del CFD. La home consente 8
+settimane, 3/6/12 mesi, anno corrente, mese, trimestre, anno e Da/A alle
+risoluzioni giorno/settimana/mese; la scelta filtra bucket calcolati dal
+backend e non ricostruisce le metriche nel browser.
 I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
 anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
 stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta

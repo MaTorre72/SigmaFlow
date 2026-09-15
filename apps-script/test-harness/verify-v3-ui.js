@@ -51,6 +51,10 @@ function verifyV3Ui() {
       client.indexOf("drawBand(keys[1], keys[2], '#c94b4b')") < client.indexOf("drawBand(keys[2], keys[3], '#4f86b5')") &&
       markup.indexOf('v3-legend-wip-rework') < markup.indexOf('v3-legend-wip-new') &&
       style.includes('.v3-legend-wip-rework::before { background: #c94b4b; }')],
+    ['periodi CFD e risoluzioni completi',
+      ['8 settimane', '3 mesi', '6 mesi', '12 mesi', 'Anno corrente', 'Mese', 'Trimestre', 'Anno', 'Da/A', 'Giorno', 'Settimana'].every(label => markup.includes(label)) &&
+      client.includes('dashboardV5CfdRows_') && client.includes('history.daily') && client.includes('history.monthly') &&
+      client.includes("period === 'custom'") && markup.includes('id="v3-cfd-from"') && markup.includes('id="v3-cfd-to"')],
     ['lettura verticale completa con crosshair tooltip e selezione accessibile',
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&

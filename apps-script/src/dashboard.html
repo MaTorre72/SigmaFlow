@@ -76,6 +76,30 @@
         <button type="button" data-v3-chart-unit="points" aria-pressed="false">Punti</button>
       </div>
     </div>
+    <div class="v3-cfd-navigation" aria-label="Periodo e risoluzione del grafico">
+      <label>Periodo
+        <select id="v3-cfd-period">
+          <option value="8w">8 settimane</option><option value="3m">3 mesi</option>
+          <option value="6m">6 mesi</option><option value="12m">12 mesi</option>
+          <option value="current_year">Anno corrente</option><option value="month">Mese</option>
+          <option value="quarter">Trimestre</option><option value="year">Anno</option>
+          <option value="custom">Da/A</option>
+        </select>
+      </label>
+      <label>Risoluzione
+        <select id="v3-cfd-resolution">
+          <option value="day">Giorno</option><option value="week" selected>Settimana</option>
+          <option value="month">Mese</option>
+        </select>
+      </label>
+      <label id="v3-cfd-month-wrap" hidden>Mese <input id="v3-cfd-month" type="month"></label>
+      <label id="v3-cfd-quarter-wrap" hidden>Trimestre
+        <select id="v3-cfd-quarter"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select>
+      </label>
+      <label id="v3-cfd-year-wrap" hidden>Anno <select id="v3-cfd-year"></select></label>
+      <label id="v3-cfd-from-wrap" hidden>Da <input id="v3-cfd-from" type="date"></label>
+      <label id="v3-cfd-to-wrap" hidden>A <input id="v3-cfd-to" type="date"></label>
+    </div>
     <div class="v3-chart-wrap"><canvas id="v3-flow-chart" height="430" tabindex="0" aria-describedby="v3-flow-selection" aria-label="Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere le settimane"></canvas></div>
     <div class="v3-chart-legend" aria-label="Legenda">
       <span class="v3-legend-completed">Completato</span>

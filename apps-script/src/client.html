@@ -2111,6 +2111,15 @@
         drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
       });
     });
+    ['v3-cfd-period', 'v3-cfd-resolution', 'v3-cfd-month', 'v3-cfd-quarter',
+      'v3-cfd-year', 'v3-cfd-from', 'v3-cfd-to'].forEach(function(id) {
+      document.getElementById(id).addEventListener('change', function() {
+        dashboardV5UpdateNavigationVisibility_();
+        state.dashboardV3ChartHoverIndex = null;
+        state.dashboardV3ChartSelectedIndex = null;
+        drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+      });
+    });
     var chart = document.getElementById('v3-flow-chart');
     function chartIndexFromPointer_(event) {
       var geometry = chart._v3ChartGeometry;
@@ -2137,7 +2146,7 @@
     });
     chart.addEventListener('keydown', function(event) {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') { return; }
-      var rows = (((state.dashboardV3 || {}).cfd || {}).weekly || []);
+      var rows = chart._v3ChartRows || [];
       if (!rows.length) { return; }
       event.preventDefault();
       var current = state.dashboardV3ChartSelectedIndex;
@@ -2223,6 +2232,7 @@
   function renderDashboardV3_(dashboard) {
     state.dashboardV3 = dashboard || null;
     state.dashboardV3ChartUnit = state.dashboardV3ChartUnit || 'jobs';
+    dashboardV5InitializeNavigation_(dashboard);
     if (!dashboard) {
       document.getElementById('v3-flow-label').textContent = 'Dati insufficienti';
       document.getElementById('v3-flow-message').textContent = 'La nuova lettura operativa non è disponibile in questo deployment.';
@@ -2319,16 +2329,90 @@
     drawDashboardV3Flow_(dashboard, state.dashboardV3ChartUnit);
   }
 
+  function dashboardV5DateKey_(instant) {
+    return new Date(instant).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+  }
+
+  function dashboardV5InitializeNavigation_(dashboard) {
+    if (state.dashboardV5NavigationReady) { return; }
+    var generatedKey = dashboardV5DateKey_(dashboard.generated_at || new Date());
+    var generatedYear = generatedKey.slice(0, 4);
+    document.getElementById('v3-cfd-month').value = generatedKey.slice(0, 7);
+    document.getElementById('v3-cfd-from').value = generatedKey;
+    document.getElementById('v3-cfd-to').value = generatedKey;
+    document.getElementById('v3-cfd-quarter').value = String(Math.floor((Number(generatedKey.slice(5, 7)) - 1) / 3) + 1);
+    var yearSelect = document.getElementById('v3-cfd-year');
+    var years = (((dashboard || {}).history || {}).available_years || []).slice();
+    if (years.indexOf(Number(generatedYear)) < 0) { years.push(Number(generatedYear)); }
+    years.sort().forEach(function(year) {
+      var option = document.createElement('option'); option.value = String(year); option.textContent = String(year);
+      yearSelect.appendChild(option);
+    });
+    yearSelect.value = generatedYear;
+    state.dashboardV5NavigationReady = true;
+    dashboardV5UpdateNavigationVisibility_();
+  }
+
+  function dashboardV5UpdateNavigationVisibility_() {
+    var period = document.getElementById('v3-cfd-period').value;
+    document.getElementById('v3-cfd-month-wrap').hidden = period !== 'month';
+    document.getElementById('v3-cfd-quarter-wrap').hidden = period !== 'quarter';
+    document.getElementById('v3-cfd-year-wrap').hidden = ['quarter', 'year'].indexOf(period) < 0;
+    document.getElementById('v3-cfd-from-wrap').hidden = period !== 'custom';
+    document.getElementById('v3-cfd-to-wrap').hidden = period !== 'custom';
+  }
+
+  function dashboardV5CfdRows_(dashboard) {
+    var history = (dashboard || {}).history || {};
+    var resolution = document.getElementById('v3-cfd-resolution').value;
+    var rows = (resolution === 'day' ? history.daily : resolution === 'month' ? history.monthly : history.weekly) || [];
+    var period = document.getElementById('v3-cfd-period').value;
+    var generatedKey = dashboardV5DateKey_(dashboard.generated_at || new Date());
+    var end = new Date(generatedKey + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 1);
+    var start = new Date(end);
+    if (period === '8w') { start.setUTCDate(start.getUTCDate() - 56); }
+    else if (/^\d+m$/.test(period)) { start.setUTCMonth(start.getUTCMonth() - Number(period.slice(0, -1))); }
+    else if (period === 'current_year') { start = new Date(generatedKey.slice(0, 4) + '-01-01T00:00:00Z'); }
+    else if (period === 'month') {
+      var month = document.getElementById('v3-cfd-month').value || generatedKey.slice(0, 7);
+      start = new Date(month + '-01T00:00:00Z'); end = new Date(start); end.setUTCMonth(end.getUTCMonth() + 1);
+    } else if (period === 'quarter') {
+      var quarterYear = Number(document.getElementById('v3-cfd-year').value || generatedKey.slice(0, 4));
+      var quarter = Number(document.getElementById('v3-cfd-quarter').value || 1);
+      start = new Date(Date.UTC(quarterYear, (quarter - 1) * 3, 1)); end = new Date(Date.UTC(quarterYear, quarter * 3, 1));
+    } else if (period === 'year') {
+      var year = document.getElementById('v3-cfd-year').value || generatedKey.slice(0, 4);
+      start = new Date(year + '-01-01T00:00:00Z'); end = new Date((Number(year) + 1) + '-01-01T00:00:00Z');
+    } else if (period === 'custom') {
+      var from = document.getElementById('v3-cfd-from').value;
+      var to = document.getElementById('v3-cfd-to').value;
+      if (!from || !to || from > to) { return []; }
+      start = new Date(from + 'T00:00:00Z'); end = new Date(to + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 1);
+    }
+    var selected = rows.filter(function(row) {
+      return Date.parse(row.period_end) > start.getTime() && Date.parse(row.period_start) < end.getTime();
+    });
+    return selected.some(function(row) { return row.has_data !== false; }) ? selected : [];
+  }
+
   function drawDashboardV3Flow_(dashboard, unit) {
     var canvas = document.getElementById('v3-flow-chart');
     var empty = document.getElementById('v3-flow-chart-empty');
-    var rows = dashboard && dashboard.cfd && dashboard.cfd.weekly ? dashboard.cfd.weekly : [];
+    var selection = document.getElementById('v3-flow-selection');
+    var resolution = document.getElementById('v3-cfd-resolution').value;
+    var resolutionLabel = resolution === 'day' ? 'giorno' : resolution === 'month' ? 'mese' : 'settimana';
+    var resolutionPrompt = resolution === 'week' ? 'una settimana' : 'un ' + resolutionLabel;
+    var rows = dashboardV5CfdRows_(dashboard || {});
     if (!rows.length) {
       canvas.hidden = true;
+      canvas._v3ChartRows = [];
       empty.hidden = false;
+      empty.textContent = 'Dati non ancora disponibili per il periodo selezionato.';
+      selection.textContent = '';
       return;
     }
     canvas.hidden = false;
+    canvas.setAttribute('aria-label', 'Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere ' + resolutionPrompt);
     empty.hidden = true;
     var dpr = window.devicePixelRatio || 1;
     var width = Math.max(620, canvas.parentElement.clientWidth || 620);
@@ -2413,11 +2497,11 @@
     });
 
     canvas._v3ChartGeometry = { width: width, left: pad.left, right: width - pad.right, rows: rows.length };
+    canvas._v3ChartRows = rows;
     var selectedIndex = state.dashboardV3ChartHoverIndex;
     if (selectedIndex === null || selectedIndex === undefined) { selectedIndex = state.dashboardV3ChartSelectedIndex; }
-    var selection = document.getElementById('v3-flow-selection');
     if (selectedIndex === null || selectedIndex === undefined || !rows[selectedIndex]) {
-      selection.textContent = 'Sposta il puntatore o tocca il grafico per leggere una settimana.';
+      selection.textContent = 'Sposta il puntatore o tocca il grafico per leggere ' + resolutionPrompt + '.';
       return;
     }
     var selected = rows[selectedIndex];

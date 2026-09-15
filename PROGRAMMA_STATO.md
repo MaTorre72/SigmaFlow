@@ -1,6 +1,34 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5B periodi, bucket e navigazione completata su TEST (2026-09-15)
+
+Il backend espone ora lo storico CFD alle tre risoluzioni prescritte:
+`history.daily`, `history.weekly`, `history.monthly`; i bucket giornalieri sono
+giorni civili Europe/Rome e attraversano correttamente DST e anno bisestile.
+Il frontend filtra esclusivamente questi bucket backend, senza ricalcolare
+stock, flussi o boundary.
+
+La home offre **9 periodi** (8 settimane, 3/6/12 mesi, anno corrente, mese,
+trimestre, anno, Da/A) e **3 risoluzioni** (giorno, settimana, mese). Mese,
+trimestre e anno espongono controlli calendario dedicati; Da/A usa estremi
+inclusivi e segnala intervalli invalidi o privi di righe con “Dati non ancora
+disponibili per il periodo selezionato.”. La navigazione da tastiera legge la
+serie effettivamente visualizzata, non più la sola serie settimanale iniziale.
+
+Fixture 5B: dal **28 febbraio al 2 marzo 2024** risultano **4 bucket
+giornalieri**, incluso il 29 febbraio; il bucket vuoto del 29 espone l'empty
+state giornaliero. Restano verdi i test già presenti su Q4→Q1, dicembre/
+gennaio e settimana ISO 53. Sul TEST reale il selettore Anno espone **5 anni
+(2022–2026)**; verificati 3 mesi/Giorno, trimestre **Q3 2026**, Da/A
+01–03/01/2000 con empty state, e 8 settimane/Settimana. A **390×844** i
+controlli vanno su due colonne, il canvas conserva lo scroll orizzontale e le
+legende restano nel pannello.
+
+Verifica: **248/248 test Apps Script** e **34/34 verifiche statiche UI**. Push
+Apps Script TEST finale completato alle **22:11:11** e pull isolato: **17/17
+file identici**. Nessuna scrittura PROD. **Fase 5B DONE**.
+
 ## V5 — Fase 5A split WIP nuovo/rework completata su TEST (2026-09-15)
 
 Il CFD conserva il totale V2 e lo scompone, in ogni bucket e in entrambe le

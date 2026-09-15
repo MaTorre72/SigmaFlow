@@ -323,6 +323,7 @@ function runAllTests() {
     testDashboardV2AnnualRebasePreservesStocks,
     testDashboardV2HistoryCoverageAndCalendar,
     testDashboardV2QuarterlyHistoryAndEmptyStates,
+    testDashboardV5DailyCalendarLeapYearAndSelectedPeriod,
     testDashboardV2HistoryEmptyAndFromIndependence,
     testDashboardV2DiagnosticsAreExplicitAndIsolated,
     testDashboardV3FlowStatePrecedenceAndRhythm,
@@ -5727,6 +5728,21 @@ function testDashboardV2HistoryEmptyAndFromIndependence() {
   var first = buildDashboardStateV2_([job], [], config, now, [], []).history;
   var log = JSON.parse(job.activity_log_json); log.forEach(function(e) { e.from = 'changed'; }); job.activity_log_json = JSON.stringify(log);
   assertEquals_(JSON.stringify(first), JSON.stringify(buildDashboardStateV2_([job], [], config, now, [], []).history), 'history indipendente dal from');
+}
+
+function testDashboardV5DailyCalendarLeapYearAndSelectedPeriod() {
+  var job = dashboardV2PathFixture_('LEAP', ['backlog', 'done'],
+    ['2024-02-28T09:00:00+01:00', '2024-02-28T10:00:00+01:00'], 3);
+  var history = buildDashboardStateV2_([job], [], dashboardV2TestConfig_(),
+    new Date('2024-03-02T12:00:00+01:00'), [], []).history;
+  assertEquals_(4, history.daily.length, '28/29 febbraio e 1/2 marzo presenti');
+  assertEquals_('2024-02-29T23:00:00.000Z', history.daily[2].period_start,
+    'giorno dopo il bisestile allineato a mezzanotte Roma');
+  assertEquals_(false, history.daily[1].has_data, '29 febbraio vuoto riconosciuto');
+  assertEquals_('Dati non ancora disponibili per questo giorno.', history.daily[1].empty_state_message,
+    'empty state giornaliero esplicito');
+  assertEquals_('Dati non ancora disponibili per il periodo selezionato.',
+    history.empty_state_messages.selected_period, 'empty state Da/A esplicito');
 }
 
 function testDashboardV2DiagnosticsAreExplicitAndIsolated() {

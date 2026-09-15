@@ -442,6 +442,22 @@ function dashboardV2CalendarWeeks_(now, count) {
   return buckets;
 }
 
+function dashboardV2CalendarDaysBetween_(firstDay, now) {
+  var firstCivil = new Date(dashboardV2WallClock_(firstDay).slice(0, 10) + 'T00:00:00Z');
+  var lastCivil = new Date(dashboardV2WallClock_(now).slice(0, 10) + 'T00:00:00Z');
+  var buckets = [];
+  for (var cursor = new Date(firstCivil); cursor <= lastCivil; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    var next = new Date(cursor); next.setUTCDate(next.getUTCDate() + 1);
+    var start = dashboardV2LocalInstant_(cursor.toISOString().slice(0, 19));
+    var end = dashboardV2LocalInstant_(next.toISOString().slice(0, 19));
+    buckets.push({ period_start: start.toISOString(), period_end: end.toISOString(),
+      observed_until: new Date(Math.min(end.getTime(), now.getTime())).toISOString(),
+      is_partial: now < end, calendar_year: cursor.getUTCFullYear(),
+      month: cursor.getUTCMonth() + 1, day: cursor.getUTCDate() });
+  }
+  return buckets;
+}
+
 // Acquisizione una sola volta sullo storico completo; ritorni dalle attese
 // distinti dalle riprese WIP (che iniziano soltanto all'apertura episodio >1).
 // Nessuna ponderazione in punti degli avvii/riprese: la taglia e' del job.
@@ -669,16 +685,19 @@ function dashboardV2History_(normalized, jobs, flow, now, stockIndex) {
     comparison_message: 'Dati storici ancora insufficienti o completezza della raccolta non certificata.',
     coverage_definition: 'intervallo fra prima evidenza disponibile e generated_at; non prova assenza di lacune',
     empty_state_messages: {
+      day: 'Dati non ancora disponibili per questo giorno.',
       month: 'Dati non ancora disponibili per questo mese.',
-      quarter: 'Dati non ancora disponibili per questo trimestre.'
+      quarter: 'Dati non ancora disponibili per questo trimestre.',
+      selected_period: 'Dati non ancora disponibili per il periodo selezionato.'
     },
-    monthly: [], quarterly: [], weekly: [], annual_cfd: [] };
+    daily: [], monthly: [], quarterly: [], weekly: [], annual_cfd: [] };
   if (first === null) { return result; }
   var firstLocal = dashboardV2WallClock_(new Date(first)).slice(0, 10);
   var currentLocal = dashboardV2WallClock_(now).slice(0, 10);
   var firstYear = Number(firstLocal.slice(0, 4)), currentYear = Number(currentLocal.slice(0, 4));
   var count = Math.ceil((Date.parse(currentLocal + 'T00:00:00Z') - Date.parse(firstLocal + 'T00:00:00Z')) / (7 * 86400000)) + 1;
   var weeks = dashboardV2CalendarWeeks_(now, count).filter(function(b) { return Date.parse(b.period_end) > first; });
+  var days = dashboardV2CalendarDaysBetween_(new Date(first), now);
   var months = [];
   var cursor = new Date(firstLocal.slice(0, 7) + '-01T00:00:00Z');
   while (true) {
@@ -729,6 +748,7 @@ function dashboardV2History_(normalized, jobs, flow, now, stockIndex) {
       });
     });
   }
+  result.daily = series(days, result.empty_state_messages.day);
   result.weekly = series(weeks, null);
   result.monthly = series(months, result.empty_state_messages.month);
   result.quarterly = series(quarters, result.empty_state_messages.quarter);
