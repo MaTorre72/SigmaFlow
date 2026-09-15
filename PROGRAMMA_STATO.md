@@ -1,6 +1,23 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 6B stato e taratura completata (2026-09-15)
+
+Scansione del codice applicativo conclusa: **0 occorrenze** di
+`ACCELERATED`; **0 percorsi** di autotaratura operativa. I cinque valori
+quantitativi (`wip_target_min_jobs`, `wip_target_max_jobs`, riferimenti punti
+e completamenti, `flow_slow_ratio`) hanno default vuoto e vengono letti solo
+da CONFIG. Se uno manca o è invalido lo stato resta `INSUFFICIENT_DATA` con
+“Taratura non configurata.”. Le sole condizioni numeriche di classificazione
+confrontano WIP e ritmo con quei valori configurati; nessuna soglia operativa
+è codificata nel classificatore. Verificata la precedenza HIGH_LOAD,
+UNDERFED, dato recente insufficiente, SLOWING, REGULAR; un ritmo superiore
+resta REGULAR.
+
+Checkpoint completo: **249/249 test Apps Script** e **40/40 verifiche UI**.
+Nessuna modifica al codice applicativo, nessun push aggiuntivo e nessuna
+scrittura PROD. **Fase 6B DONE**.
+
 ## V5 — Fase 6A riconciliazione V2 completata (2026-09-15)
 
 Rieseguite le fixture V2 sull'implementazione finale. La fixture non lineare
