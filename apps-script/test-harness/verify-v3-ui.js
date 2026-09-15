@@ -55,6 +55,15 @@ function verifyV3Ui() {
       ['8 settimane', '3 mesi', '6 mesi', '12 mesi', 'Anno corrente', 'Mese', 'Trimestre', 'Anno', 'Da/A', 'Giorno', 'Settimana'].every(label => markup.includes(label)) &&
       client.includes('dashboardV5CfdRows_') && client.includes('history.daily') && client.includes('history.monthly') &&
       client.includes("period === 'custom'") && markup.includes('id="v3-cfd-from"') && markup.includes('id="v3-cfd-to"')],
+    ['zoom pan reset e sottointervallo non mutano i bucket',
+      markup.includes('id="v3-cfd-zoom-in"') && markup.includes('id="v3-cfd-pan-left"') &&
+      markup.includes('id="v3-cfd-reset"') && markup.includes('id="v3-cfd-select-range"') &&
+      client.includes('dashboardV5ZoomChart_') && client.includes('dashboardV5PanChart_') &&
+      client.includes('rows.slice(start, end)') && !/\.boundaries\s*=|\.cumulative\s*=/.test(client.slice(client.indexOf('function dashboardV5WindowedRows_'), client.indexOf('function drawDashboardV3Flow_')))],
+    ['tooltip CFD legge stock e cumulative backend',
+      client.includes("selected['wip_new_' + unit]") && client.includes("selected['wip_rework_' + unit]") &&
+      client.includes("selected['waiting_stock_' + unit]") && client.includes("['cum_new_work_' + unit]") &&
+      client.includes('Ingressi cumulativi') && client.includes('Completamenti cumulativi')],
     ['lettura verticale completa con crosshair tooltip e selezione accessibile',
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&

@@ -2115,10 +2115,25 @@
       'v3-cfd-year', 'v3-cfd-from', 'v3-cfd-to'].forEach(function(id) {
       document.getElementById(id).addEventListener('change', function() {
         dashboardV5UpdateNavigationVisibility_();
+        state.dashboardV5ChartWindow = null;
         state.dashboardV3ChartHoverIndex = null;
         state.dashboardV3ChartSelectedIndex = null;
         drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
       });
+    });
+    document.getElementById('v3-cfd-zoom-in').addEventListener('click', function() { dashboardV5ZoomChart_(0.5); });
+    document.getElementById('v3-cfd-zoom-out').addEventListener('click', function() { dashboardV5ZoomChart_(2); });
+    document.getElementById('v3-cfd-pan-left').addEventListener('click', function() { dashboardV5PanChart_(-1); });
+    document.getElementById('v3-cfd-pan-right').addEventListener('click', function() { dashboardV5PanChart_(1); });
+    document.getElementById('v3-cfd-reset').addEventListener('click', function() {
+      state.dashboardV5ChartWindow = null;
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    document.getElementById('v3-cfd-select-range').addEventListener('click', function(event) {
+      state.dashboardV5SelectingRange = !state.dashboardV5SelectingRange;
+      state.dashboardV5RangeStart = null;
+      event.currentTarget.classList.toggle('active', state.dashboardV5SelectingRange);
+      event.currentTarget.setAttribute('aria-pressed', state.dashboardV5SelectingRange ? 'true' : 'false');
     });
     var chart = document.getElementById('v3-flow-chart');
     function chartIndexFromPointer_(event) {
@@ -2135,13 +2150,36 @@
       state.dashboardV3ChartHoverIndex = index;
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
+    chart.addEventListener('pointerdown', function(event) {
+      if (state.dashboardV5SelectingRange) { state.dashboardV5DragStart = chartIndexFromPointer_(event); }
+    });
+    chart.addEventListener('pointerup', function(event) {
+      if (!state.dashboardV5SelectingRange || state.dashboardV5DragStart === null) { return; }
+      var finish = chartIndexFromPointer_(event);
+      if (finish !== state.dashboardV5DragStart) { dashboardV5FinishRange_(state.dashboardV5DragStart, finish); }
+      state.dashboardV5DragStart = null;
+    });
+    chart.addEventListener('wheel', function(event) {
+      event.preventDefault();
+      dashboardV5ZoomChart_(event.deltaY < 0 ? 0.5 : 2);
+    }, { passive: false });
     chart.addEventListener('pointerleave', function() {
       if (state.dashboardV3ChartHoverIndex === null || state.dashboardV3ChartHoverIndex === undefined) { return; }
       state.dashboardV3ChartHoverIndex = null;
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
     chart.addEventListener('click', function(event) {
-      state.dashboardV3ChartSelectedIndex = chartIndexFromPointer_(event);
+      var clicked = chartIndexFromPointer_(event);
+      if (state.dashboardV5SelectingRange) {
+        if (state.dashboardV5RangeStart === null || state.dashboardV5RangeStart === undefined) {
+          state.dashboardV5RangeStart = clicked;
+          document.getElementById('v3-flow-selection').textContent = 'Seleziona il secondo estremo dell’intervallo.';
+        } else {
+          dashboardV5FinishRange_(state.dashboardV5RangeStart, clicked);
+        }
+        return;
+      }
+      state.dashboardV3ChartSelectedIndex = clicked;
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
     chart.addEventListener('keydown', function(event) {
@@ -2395,6 +2433,51 @@
     return selected.some(function(row) { return row.has_data !== false; }) ? selected : [];
   }
 
+  function dashboardV5WindowedRows_(rows) {
+    var windowRange = state.dashboardV5ChartWindow;
+    if (!windowRange) { return { rows: rows, start: 0 }; }
+    var start = Math.max(0, Math.min(rows.length - 1, windowRange.start));
+    var end = Math.max(start + 1, Math.min(rows.length, windowRange.end));
+    state.dashboardV5ChartWindow = { start: start, end: end };
+    return { rows: rows.slice(start, end), start: start };
+  }
+
+  function dashboardV5FinishRange_(first, last) {
+    var canvas = document.getElementById('v3-flow-chart');
+    var offset = canvas._v3ChartWindowStart || 0;
+    state.dashboardV5ChartWindow = { start: offset + Math.min(first, last), end: offset + Math.max(first, last) + 1 };
+    state.dashboardV5SelectingRange = false;
+    state.dashboardV5RangeStart = null;
+    var button = document.getElementById('v3-cfd-select-range');
+    button.classList.remove('active'); button.setAttribute('aria-pressed', 'false');
+    drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+  }
+
+  function dashboardV5ZoomChart_(factor) {
+    var canvas = document.getElementById('v3-flow-chart');
+    var rows = canvas._v3ChartBaseRows || [];
+    if (rows.length < 2) { return; }
+    var current = state.dashboardV5ChartWindow || { start: 0, end: rows.length };
+    var currentLength = current.end - current.start;
+    var nextLength = Math.max(2, Math.min(rows.length, Math.round(currentLength * factor)));
+    var center = (current.start + current.end) / 2;
+    var start = Math.max(0, Math.min(rows.length - nextLength, Math.round(center - nextLength / 2)));
+    state.dashboardV5ChartWindow = nextLength === rows.length ? null : { start: start, end: start + nextLength };
+    drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+  }
+
+  function dashboardV5PanChart_(direction) {
+    var canvas = document.getElementById('v3-flow-chart');
+    var rows = canvas._v3ChartBaseRows || [];
+    var current = state.dashboardV5ChartWindow;
+    if (!current || !rows.length) { return; }
+    var length = current.end - current.start;
+    var shift = Math.max(1, Math.round(length / 4)) * direction;
+    var start = Math.max(0, Math.min(rows.length - length, current.start + shift));
+    state.dashboardV5ChartWindow = { start: start, end: start + length };
+    drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+  }
+
   function drawDashboardV3Flow_(dashboard, unit) {
     var canvas = document.getElementById('v3-flow-chart');
     var empty = document.getElementById('v3-flow-chart-empty');
@@ -2402,7 +2485,10 @@
     var resolution = document.getElementById('v3-cfd-resolution').value;
     var resolutionLabel = resolution === 'day' ? 'giorno' : resolution === 'month' ? 'mese' : 'settimana';
     var resolutionPrompt = resolution === 'week' ? 'una settimana' : 'un ' + resolutionLabel;
-    var rows = dashboardV5CfdRows_(dashboard || {});
+    var baseRows = dashboardV5CfdRows_(dashboard || {});
+    canvas._v3ChartBaseRows = baseRows;
+    var windowed = dashboardV5WindowedRows_(baseRows);
+    var rows = windowed.rows;
     if (!rows.length) {
       canvas.hidden = true;
       canvas._v3ChartRows = [];
@@ -2498,6 +2584,7 @@
 
     canvas._v3ChartGeometry = { width: width, left: pad.left, right: width - pad.right, rows: rows.length };
     canvas._v3ChartRows = rows;
+    canvas._v3ChartWindowStart = windowed.start;
     var selectedIndex = state.dashboardV3ChartHoverIndex;
     if (selectedIndex === null || selectedIndex === undefined) { selectedIndex = state.dashboardV3ChartSelectedIndex; }
     if (selectedIndex === null || selectedIndex === undefined || !rows[selectedIndex]) {
@@ -2507,13 +2594,15 @@
     var selected = rows[selectedIndex];
     var boundaries = selected.boundaries[unit];
     var values = {
-      completed: Number(boundaries.completed_boundary || 0),
-      waiting: Number(boundaries.waiting_boundary || 0) - Number(boundaries.completed_boundary || 0),
-      wipRework: Number(boundaries.wip_rework_boundary || 0) - Number(boundaries.waiting_boundary || 0),
-      wipNew: Number(boundaries.wip_new_boundary || 0) - Number(boundaries.wip_rework_boundary || 0),
-      wip: Number(boundaries.wip_boundary || 0) - Number(boundaries.waiting_boundary || 0),
-      future: Number(boundaries.future_work_boundary || 0) - Number(boundaries.wip_boundary || 0),
-      total: Number(boundaries.future_work_boundary || 0)
+      completed: Number(((selected.cumulative || {})['cum_completed_' + (unit === 'jobs' ? 'visits' : 'points')]) || 0),
+      waiting: Number(selected['waiting_stock_' + unit] || 0),
+      wipRework: Number(selected['wip_rework_' + unit] || 0),
+      wipNew: Number(selected['wip_new_' + unit] || 0),
+      wip: Number(selected['wip_stock_' + unit] || 0),
+      future: Number(selected['future_work_stock_' + unit] || 0),
+      total: Number(boundaries.future_work_boundary || 0),
+      cumulativeEntries: Number(((selected.cumulative || {})['cum_new_work_' + unit]) || 0),
+      cumulativeCompleted: Number(((selected.cumulative || {})['cum_completed_' + (unit === 'jobs' ? 'visits' : 'points')]) || 0)
     };
     var selectedDate = new Date(selected.sampled_at || selected.period_end);
     var dateLabel = selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -2521,6 +2610,8 @@
       ' · WIP nuovo ' + dashboardV3Text_(values.wipNew) + ' · WIP rework ' + dashboardV3Text_(values.wipRework) +
       ' · WIP totale ' + dashboardV3Text_(values.wip) + ' · In attesa ' + dashboardV3Text_(values.waiting) +
       ' · Completato ' + dashboardV3Text_(values.completed) + ' · Totale ' + dashboardV3Text_(values.total) +
+      ' · Ingressi cumulativi ' + dashboardV3Text_(values.cumulativeEntries) +
+      ' · Completamenti cumulativi ' + dashboardV3Text_(values.cumulativeCompleted) +
       ' · Nuovi ingressi ' + dashboardV3Text_(selected.new_work_jobs) + ' · Rientri ' +
       dashboardV3Text_(selected.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(selected.completed_visits);
     var crossX = x(selectedIndex);
@@ -2536,10 +2627,12 @@
       'WIP nuovo  ' + dashboardV3Text_(values.wipNew), 'WIP rework  ' + dashboardV3Text_(values.wipRework),
       'WIP totale  ' + dashboardV3Text_(values.wip), 'In attesa  ' + dashboardV3Text_(values.waiting),
       'Completato  ' + dashboardV3Text_(values.completed), 'Totale  ' + dashboardV3Text_(values.total),
+      'Ingressi cumulativi  ' + dashboardV3Text_(values.cumulativeEntries),
+      'Completamenti cumulativi  ' + dashboardV3Text_(values.cumulativeCompleted),
       'Nuovi / rientri / consegne  ' + dashboardV3Text_(selected.new_work_jobs) + ' / ' +
         dashboardV3Text_(selected.rework_wip_episodes) + ' / ' + dashboardV3Text_(selected.completed_visits)];
     var tooltipWidth = 250;
-    var tooltipHeight = 182;
+    var tooltipHeight = 220;
     var tooltipX = crossX + 12;
     if (tooltipX + tooltipWidth > width - pad.right) { tooltipX = crossX - tooltipWidth - 12; }
     var tooltipY = 28;

@@ -1,6 +1,36 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5C zoom/pan/crosshair/tooltip completata su TEST (2026-09-15)
+
+Il CFD dispone ora di zoom orizzontale (pulsanti e rotella), pan avanti/
+indietro, reset e selezione di sottointervallo sia con trascinamento sia con
+due estremi successivi. Le operazioni applicano soltanto `slice` alla serie di
+bucket già calcolata dal backend: boundary, cumulative e stock non vengono
+riscritti. Cambio periodo/risoluzione azzera la finestra visiva; frecce da
+tastiera, puntatore e touch operano sui bucket effettivamente visibili.
+
+Il tooltip §17 legge direttamente i campi backend e include data, lavoro già
+acquisito, WIP nuovo/rework/totale, attesa, totale, ingressi cumulativi,
+completamenti cumulativi e movimenti del bucket. Sul TEST reale il bucket
+centrale del **23 agosto 2026** ha restituito, prima dello zoom e dopo reset,
+la stessa stringa: acquisito 9, WIP nuovo 5, rework 1, totale WIP 6, attesa 11,
+completato 20, totale 46, ingressi cumulativi 44 e completamenti cumulativi 20.
+Dopo zoom+pan a sinistra il centro è passato correttamente al **16 agosto**
+(acquisito 10, WIP 4+1, attesa 12, completato 19, totale 46); reset ha
+ripristinato integralmente il 23 agosto.
+
+Collaudo sottointervallo: primo estremo segnala esplicitamente la richiesta
+del secondo, il secondo chiude la modalità (`aria-pressed=false`) e Reset
+ripristina l'intero periodo. Desktop: crosshair e tooltip da **11 righe**
+leggibili. Mobile **390×844**: i 6 comandi si dispongono su due righe, canvas
+scorrevole, tocco sul 23 agosto con gli stessi valori desktop.
+
+Verifica: **248/248 test Apps Script** e **36/36 verifiche statiche UI**. Push
+Apps Script TEST finale completato alle **22:19:49** e pull isolato: **17/17
+file identici**. Nessuna scrittura PROD. **Fase 5C DONE**; il gate umano
+desktop+mobile è stato registrato come checkpoint secondo la deroga notturna.
+
 ## V5 — Fase 5B periodi, bucket e navigazione completata su TEST (2026-09-15)
 
 Il backend espone ora lo storico CFD alle tre risoluzioni prescritte:

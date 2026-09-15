@@ -24,6 +24,11 @@ Espone inoltre `daily` per la navigazione del CFD. La home consente 8
 settimane, 3/6/12 mesi, anno corrente, mese, trimestre, anno e Da/A alle
 risoluzioni giorno/settimana/mese; la scelta filtra bucket calcolati dal
 backend e non ricostruisce le metriche nel browser.
+
+Zoom, pan, reset e selezione di sottointervallo agiscono esclusivamente sulla
+finestra dei bucket visualizzati. Il tooltip legge gli stock e le cumulative
+dal contratto backend e aggiunge ingressi/completamenti cumulativi ai valori
+puntuali già disponibili.
 I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
 anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
 stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta

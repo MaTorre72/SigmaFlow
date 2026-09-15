@@ -99,6 +99,14 @@
       <label id="v3-cfd-year-wrap" hidden>Anno <select id="v3-cfd-year"></select></label>
       <label id="v3-cfd-from-wrap" hidden>Da <input id="v3-cfd-from" type="date"></label>
       <label id="v3-cfd-to-wrap" hidden>A <input id="v3-cfd-to" type="date"></label>
+      <div class="v3-cfd-viewport" role="group" aria-label="Navigazione nel grafico">
+        <button id="v3-cfd-zoom-in" type="button" aria-label="Aumenta zoom">Zoom +</button>
+        <button id="v3-cfd-zoom-out" type="button" aria-label="Riduci zoom">Zoom −</button>
+        <button id="v3-cfd-pan-left" type="button" aria-label="Scorri periodo indietro">←</button>
+        <button id="v3-cfd-pan-right" type="button" aria-label="Scorri periodo avanti">→</button>
+        <button id="v3-cfd-select-range" type="button" aria-pressed="false">Seleziona intervallo</button>
+        <button id="v3-cfd-reset" type="button">Reset zoom</button>
+      </div>
     </div>
     <div class="v3-chart-wrap"><canvas id="v3-flow-chart" height="430" tabindex="0" aria-describedby="v3-flow-selection" aria-label="Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere le settimane"></canvas></div>
     <div class="v3-chart-legend" aria-label="Legenda">
