@@ -89,10 +89,11 @@ function verifyV3Ui() {
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&
       markup.includes('tabindex="0"')],
-    ['serie movimenti sincronizzata sul CFD',
-      client.includes("key: 'new_work_jobs'") && client.includes("key: 'rework_wip_episodes'") &&
-      client.includes("key: 'completed_visits'") && markup.includes('Nuovi ingressi') &&
-      markup.includes('Rientri') && markup.includes('Consegne')],
+    ['movimenti solo nel tooltip senza istogramma permanente',
+      client.includes("' · Nuovi ingressi '") && client.includes("' · Rientri '") &&
+      client.includes("' · Consegne '") && client.includes("'Nuovi / rientri / consegne  '") &&
+      !client.includes("ctx.fillText('Movimenti (lavori)'") &&
+      !markup.includes('aria-label="Legenda movimenti"') && !client.includes('flowMaximum')],
     ['mobile limita lo scorrimento orizzontale al canvas',
       style.includes('.v3-chart-wrap { max-width: 100%; overflow-x: auto; }') &&
       !style.includes('.v3-flow-chart-panel { overflow-x: auto; }') &&

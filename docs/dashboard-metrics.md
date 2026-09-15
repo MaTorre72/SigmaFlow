@@ -50,6 +50,12 @@ flussi o boundary. Il CFD principale e quello di confronto condividono unità,
 massimo dell'asse verticale, finestra di zoom/pan, focus e rate lines. La
 selezione è sincronizzata per posizione relativa, così serie di lunghezza
 diversa restano confrontabili senza forzare date artificialmente uguali.
+
+Le barre permanenti Nuovi ingressi/Rientri/Consegne della prima versione non
+fanno più parte del CFD. Questi movimenti rimangono leggibili nel tooltip del
+bucket e nel riepilogo accessibile del confronto. La card Rientri è l'unico
+riepilogo aggregato della finestra recente, evitando una seconda lettura
+grafica dello stesso fenomeno.
 I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
 anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
 stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta

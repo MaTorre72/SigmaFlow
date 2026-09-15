@@ -1,6 +1,27 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5H pulizia legacy CFD completata su TEST (2026-09-15)
+
+Rimossi da entrambi i CFD l'istogramma permanente Nuovi ingressi/Rientri/
+Consegne, la relativa legenda, il CSS e tutto il codice di disegno ormai
+sostituito. I canvas passano da **430 a 330 px** di altezza. I tre movimenti
+restano disponibili per singolo bucket nel tooltip/crosshair del grafico
+principale e nel riepilogo accessibile del grafico di confronto; la card
+Rientri resta l'unico riepilogo aggregato della finestra recente.
+
+Collaudo reale desktop: sul **23/08/2026** il tooltip continua a mostrare
+Nuovi/Rientri/Consegne **0/0/1**, senza barre né seconda legenda. Con il
+confronto precedente, il bucket sincronizzato **21/06/2026** espone Totale
+**42**, WIP **4** e movimenti **0/0/0**. A **390×844** i due CFD restano
+impilati, compatti, scrollabili e i movimenti sono leggibili come testo.
+
+Verifica: **249/249 test Apps Script** e **40/40 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:49:09** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5H DONE**. Con 5A–5H verdi, la
+Fase 5 è completa e si passa al collaudo integrato Fase 6A–6E; il gate 6F
+resta umano e non è autorizzato in questa sessione.
+
 ## V5 — Fase 5G confronti CFD completata su TEST (2026-09-15)
 
 Il CFD offre ora quattro modalità: nessun confronto, periodo precedente

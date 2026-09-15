@@ -2579,11 +2579,11 @@
     }
     canvas.hidden = false; empty.hidden = true;
     var dpr = window.devicePixelRatio || 1;
-    var width = Math.max(620, canvas.parentElement.clientWidth || 620), height = 430;
+    var width = Math.max(620, canvas.parentElement.clientWidth || 620), height = 330;
     canvas.width = width * dpr; canvas.height = height * dpr;
     canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
     var ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
-    var pad = { left: 48, right: 18, top: 18 }, plotBottom = 270, flowTop = 318, flowBottom = 382;
+    var pad = { left: 48, right: 18, top: 18 }, plotBottom = 270;
     function x(index) { return pad.left + index * (width - pad.left - pad.right) / Math.max(1, rows.length - 1); }
     function y(value) { return pad.top + (maximum - Number(value || 0)) * (plotBottom - pad.top) / maximum; }
     ctx.clearRect(0, 0, width, height); ctx.strokeStyle = '#d9dee5'; ctx.fillStyle = '#667085'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
@@ -2614,22 +2614,6 @@
       rate(state.dashboardV5EntryRate, 'future_work_boundary', '#1f527a');
       rate(state.dashboardV5CompletionRate, 'completed_boundary', '#276749');
     }
-    var flowMaximum = Math.max.apply(null, rows.map(function(row) {
-      return Math.max(Number(row.new_work_jobs || 0), Number(row.rework_wip_episodes || 0), Number(row.completed_visits || 0));
-    }));
-    if (!(flowMaximum > 0)) { flowMaximum = 1; }
-    ctx.fillStyle = '#667085'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('Movimenti (lavori)', pad.left, flowTop - 10);
-    var slot = (width - pad.left - pad.right) / Math.max(1, rows.length - 1);
-    var barWidth = Math.max(2, Math.min(8, slot / 4));
-    [{ key: 'new_work_jobs', color: '#2f6b9a' }, { key: 'rework_wip_episodes', color: '#d97706' },
-      { key: 'completed_visits', color: '#2f855a' }].forEach(function(flowKey, flowIndex) {
-      rows.forEach(function(row, rowIndex) {
-        var barHeight = Number(row[flowKey.key] || 0) * (flowBottom - flowTop) / flowMaximum;
-        ctx.fillStyle = flowKey.color;
-        ctx.fillRect(x(rowIndex) + (flowIndex - 1) * barWidth - barWidth / 2, flowBottom - barHeight, barWidth, barHeight);
-      });
-    });
     ctx.fillStyle = '#667085'; ctx.textAlign = 'center';
     var labelEvery = Math.max(1, Math.ceil(rows.length / 6));
     rows.forEach(function(row, index) {
@@ -2640,10 +2624,12 @@
       Math.round(selectedIndex * Math.max(0, rows.length - 1) / Math.max(1, primaryLength - 1));
     if (comparisonIndex !== null && rows[comparisonIndex]) {
       ctx.strokeStyle = '#101828'; ctx.setLineDash([4, 3]); ctx.beginPath();
-      ctx.moveTo(x(comparisonIndex), pad.top); ctx.lineTo(x(comparisonIndex), flowBottom); ctx.stroke(); ctx.setLineDash([]);
+      ctx.moveTo(x(comparisonIndex), pad.top); ctx.lineTo(x(comparisonIndex), plotBottom); ctx.stroke(); ctx.setLineDash([]);
       var row = rows[comparisonIndex], b = row.boundaries[unit];
       selection.textContent = new Date(row.sampled_at).toLocaleDateString('it-IT') + ' · Totale ' +
-        dashboardV3Text_(b.future_work_boundary) + ' · WIP ' + dashboardV3Text_(row['wip_stock_' + unit]);
+        dashboardV3Text_(b.future_work_boundary) + ' · WIP ' + dashboardV3Text_(row['wip_stock_' + unit]) +
+        ' · Nuovi ingressi ' + dashboardV3Text_(row.new_work_jobs) + ' · Rientri ' +
+        dashboardV3Text_(row.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(row.completed_visits);
     } else { selection.textContent = 'Selezione sincronizzata con il periodo principale.'; }
     canvas._v3ChartGeometry = { width: width, left: pad.left, right: width - pad.right, rows: rows.length };
     canvas._v3ChartRows = rows;
@@ -2687,7 +2673,7 @@
     empty.hidden = true;
     var dpr = window.devicePixelRatio || 1;
     var width = Math.max(620, canvas.parentElement.clientWidth || 620);
-    var height = 430;
+    var height = 330;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     canvas.style.width = width + 'px';
@@ -2696,8 +2682,6 @@
     ctx.scale(dpr, dpr);
     var pad = { left: 48, right: 18, top: 18 };
     var plotBottom = 270;
-    var flowTop = 318;
-    var flowBottom = 382;
     var keys = ['completed_boundary', 'waiting_boundary', 'wip_rework_boundary', 'wip_new_boundary', 'future_work_boundary'];
     var maximum = Math.max.apply(null, rows.map(function(row) {
       return Number((((row.boundaries || {})[unit] || {}).future_work_boundary) || 0);
@@ -2759,33 +2743,6 @@
       rateResult.hidden = false; rateResult.textContent = parts.join(' · ');
     } else { rateResult.hidden = true; rateResult.textContent = ''; }
 
-    // Serie coordinata sul medesimo asse temporale: conteggi di lavori nel
-    // bucket, separati dalle bande cumulative per non alterarne il significato.
-    var flowMaximum = Math.max.apply(null, rows.map(function(row) {
-      return Math.max(Number(row.new_work_jobs || 0), Number(row.rework_wip_episodes || 0), Number(row.completed_visits || 0));
-    }));
-    if (!(flowMaximum > 0)) { flowMaximum = 1; }
-    ctx.fillStyle = '#667085';
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('Movimenti (lavori)', pad.left, flowTop - 10);
-    ctx.strokeStyle = '#d9dee5';
-    ctx.beginPath(); ctx.moveTo(pad.left, flowBottom); ctx.lineTo(width - pad.right, flowBottom); ctx.stroke();
-    var slot = (width - pad.left - pad.right) / Math.max(1, rows.length - 1);
-    var barWidth = Math.max(2, Math.min(8, slot / 4));
-    var flowKeys = [
-      { key: 'new_work_jobs', color: '#2f6b9a' },
-      { key: 'rework_wip_episodes', color: '#d97706' },
-      { key: 'completed_visits', color: '#2f855a' }
-    ];
-    rows.forEach(function(row, rowIndex) {
-      flowKeys.forEach(function(flowKey, flowIndex) {
-        var value = Number(row[flowKey.key] || 0);
-        var barHeight = value * (flowBottom - flowTop) / flowMaximum;
-        ctx.fillStyle = flowKey.color;
-        ctx.fillRect(x(rowIndex) + (flowIndex - 1) * barWidth - barWidth / 2, flowBottom - barHeight, barWidth, barHeight);
-      });
-    });
     ctx.fillStyle = '#667085';
     ctx.textAlign = 'center';
     var labelEvery = Math.max(1, Math.ceil(rows.length / 6));
@@ -2863,7 +2820,7 @@
     ctx.strokeStyle = '#101828';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
-    ctx.beginPath(); ctx.moveTo(crossX, pad.top); ctx.lineTo(crossX, flowBottom); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(crossX, pad.top); ctx.lineTo(crossX, plotBottom); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = '#101828';
     ctx.beginPath(); ctx.arc(crossX, y(boundaries.future_work_boundary), 4, 0, Math.PI * 2); ctx.fill();
