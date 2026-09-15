@@ -1,6 +1,25 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5D focus serie completata su TEST (2026-09-15)
+
+Le cinque voci della legenda CFD sono ora controlli accessibili. La selezione
+di Completato, In attesa, WIP rework, WIP nuovo o Già acquisito mantiene la
+banda scelta al 100% e porta le altre al **12% di opacità**; “Mostra tutte”
+ripristina il 100% per tutte. Il focus modifica soltanto `globalAlpha` subito
+prima del `fill` e lo riporta a 1 subito dopo: path, coordinate, scala,
+boundary e ordine matematico non vengono ricostruiti.
+
+Collaudo reale a **390×844**: selezionando WIP rework il controllo espone
+`aria-pressed=true`, la banda rossa resta piena e le altre quattro risultano
+attenuate ma geometricamente nella stessa posizione; “Mostra tutte” riporta
+`aria-pressed=false` e la resa completa. Legenda e comando restano nel
+pannello, su due righe.
+
+Verifica: **248/248 test Apps Script** e **37/37 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:24:23** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5D DONE**.
+
 ## V5 — Fase 5C zoom/pan/crosshair/tooltip completata su TEST (2026-09-15)
 
 Il CFD dispone ora di zoom orizzontale (pulsanti e rotella), pan avanti/

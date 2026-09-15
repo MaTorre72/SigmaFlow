@@ -1111,7 +1111,10 @@
   .v3-unit-switch button:last-child { border-radius: 0 7px 7px 0; }
   .v3-unit-switch button.active { background: var(--accent); color: #fff; }
   .v3-chart-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
-  .v3-chart-legend span::before { border-radius: 3px; content: ''; display: inline-block; height: 10px; margin-right: 6px; width: 18px; }
+  .v3-chart-legend span::before, .v3-chart-legend button::before { border-radius: 3px; content: ''; display: inline-block; height: 10px; margin-right: 6px; width: 18px; }
+  .v3-chart-legend button { background: transparent; border: 0; color: inherit; cursor: pointer; padding: 2px 0; }
+  .v3-chart-legend button.active { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+  .v3-chart-legend #v3-cfd-show-all::before { display: none; }
   .v3-legend-completed::before { background: #d9eee0; }
   .v3-legend-waiting::before { background: #f5c968; }
   .v3-legend-wip-rework::before { background: #c94b4b; }

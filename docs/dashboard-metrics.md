@@ -29,6 +29,10 @@ Zoom, pan, reset e selezione di sottointervallo agiscono esclusivamente sulla
 finestra dei bucket visualizzati. Il tooltip legge gli stock e le cumulative
 dal contratto backend e aggiunge ingressi/completamenti cumulativi ai valori
 puntuali già disponibili.
+
+La legenda delle cinque bande può applicare un focus visivo: la serie scelta
+resta piena e le altre sono attenuate. La geometria dello stack non cambia;
+“Mostra tutte” azzera il focus.
 I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
 anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
 stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta

@@ -2135,6 +2135,23 @@
       event.currentTarget.classList.toggle('active', state.dashboardV5SelectingRange);
       event.currentTarget.setAttribute('aria-pressed', state.dashboardV5SelectingRange ? 'true' : 'false');
     });
+    document.querySelectorAll('[data-v3-cfd-series]').forEach(function(button) {
+      button.addEventListener('click', function() {
+        state.dashboardV5FocusedSeries = button.dataset.v3CfdSeries;
+        document.querySelectorAll('[data-v3-cfd-series]').forEach(function(other) {
+          var active = other === button; other.classList.toggle('active', active);
+          other.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+      });
+    });
+    document.getElementById('v3-cfd-show-all').addEventListener('click', function() {
+      state.dashboardV5FocusedSeries = null;
+      document.querySelectorAll('[data-v3-cfd-series]').forEach(function(button) {
+        button.classList.remove('active'); button.setAttribute('aria-pressed', 'false');
+      });
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
     var chart = document.getElementById('v3-flow-chart');
     function chartIndexFromPointer_(event) {
       var geometry = chart._v3ChartGeometry;
@@ -2531,20 +2548,22 @@
       ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(width - pad.right, py); ctx.stroke();
       ctx.fillText(Math.round(value).toLocaleString('it-IT'), pad.left - 8, py + 4);
     }
-    function drawBand(lowerKey, upperKey, color) {
+    function drawBand(lowerKey, upperKey, color, seriesKey) {
       ctx.beginPath();
       rows.forEach(function(row, index) { var b = row.boundaries[unit]; var upper = b[upperKey]; if (!index) { ctx.moveTo(x(index), y(upper)); } else { ctx.lineTo(x(index), y(upper)); } });
       for (var index = rows.length - 1; index >= 0; index--) {
         var boundary = rows[index].boundaries[unit];
         ctx.lineTo(x(index), lowerKey ? y(boundary[lowerKey]) : y(0));
       }
-      ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+      ctx.closePath(); ctx.fillStyle = color;
+      ctx.globalAlpha = state.dashboardV5FocusedSeries && state.dashboardV5FocusedSeries !== seriesKey ? 0.12 : 1;
+      ctx.fill(); ctx.globalAlpha = 1;
     }
-    drawBand(null, keys[0], '#d9eee0');
-    drawBand(keys[0], keys[1], '#f5c968');
-    drawBand(keys[1], keys[2], '#c94b4b');
-    drawBand(keys[2], keys[3], '#4f86b5');
-    drawBand(keys[3], keys[4], '#a9bed2');
+    drawBand(null, keys[0], '#d9eee0', 'completed');
+    drawBand(keys[0], keys[1], '#f5c968', 'waiting');
+    drawBand(keys[1], keys[2], '#c94b4b', 'wipRework');
+    drawBand(keys[2], keys[3], '#4f86b5', 'wipNew');
+    drawBand(keys[3], keys[4], '#a9bed2', 'future');
 
     // Serie coordinata sul medesimo asse temporale: conteggi di lavori nel
     // bucket, separati dalle bande cumulative per non alterarne il significato.

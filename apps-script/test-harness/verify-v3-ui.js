@@ -48,7 +48,7 @@ function verifyV3Ui() {
     ['grafico alimentato dalle boundary backend', client.includes('row.boundaries[unit]')],
     ['WIP CFD separato con rework rosso sotto e nuovo blu sopra',
       client.includes("'wip_rework_boundary', 'wip_new_boundary'") &&
-      client.indexOf("drawBand(keys[1], keys[2], '#c94b4b')") < client.indexOf("drawBand(keys[2], keys[3], '#4f86b5')") &&
+      client.indexOf("drawBand(keys[1], keys[2], '#c94b4b'") < client.indexOf("drawBand(keys[2], keys[3], '#4f86b5'") &&
       markup.indexOf('v3-legend-wip-rework') < markup.indexOf('v3-legend-wip-new') &&
       style.includes('.v3-legend-wip-rework::before { background: #c94b4b; }')],
     ['periodi CFD e risoluzioni completi',
@@ -64,6 +64,10 @@ function verifyV3Ui() {
       client.includes("selected['wip_new_' + unit]") && client.includes("selected['wip_rework_' + unit]") &&
       client.includes("selected['waiting_stock_' + unit]") && client.includes("['cum_new_work_' + unit]") &&
       client.includes('Ingressi cumulativi') && client.includes('Completamenti cumulativi')],
+    ['focus serie attenua solo il riempimento e Mostra tutte ripristina',
+      markup.includes('data-v3-cfd-series="wipRework"') && markup.includes('id="v3-cfd-show-all"') &&
+      markup.includes('Mostra tutte') && client.includes('dashboardV5FocusedSeries') &&
+      client.includes('ctx.globalAlpha = state.dashboardV5FocusedSeries') && client.includes('ctx.fill(); ctx.globalAlpha = 1')],
     ['lettura verticale completa con crosshair tooltip e selezione accessibile',
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&

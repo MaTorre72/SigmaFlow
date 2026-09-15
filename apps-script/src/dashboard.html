@@ -110,11 +110,12 @@
     </div>
     <div class="v3-chart-wrap"><canvas id="v3-flow-chart" height="430" tabindex="0" aria-describedby="v3-flow-selection" aria-label="Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere le settimane"></canvas></div>
     <div class="v3-chart-legend" aria-label="Legenda">
-      <span class="v3-legend-completed">Completato</span>
-      <span class="v3-legend-waiting">In attesa</span>
-      <span class="v3-legend-wip-rework">WIP rework</span>
-      <span class="v3-legend-wip-new">WIP nuovo</span>
-      <span class="v3-legend-future">Già acquisito</span>
+      <button type="button" class="v3-legend-completed" data-v3-cfd-series="completed">Completato</button>
+      <button type="button" class="v3-legend-waiting" data-v3-cfd-series="waiting">In attesa</button>
+      <button type="button" class="v3-legend-wip-rework" data-v3-cfd-series="wipRework">WIP rework</button>
+      <button type="button" class="v3-legend-wip-new" data-v3-cfd-series="wipNew">WIP nuovo</button>
+      <button type="button" class="v3-legend-future" data-v3-cfd-series="future">Già acquisito</button>
+      <button id="v3-cfd-show-all" type="button">Mostra tutte</button>
     </div>
     <div class="v3-chart-legend v3-flow-legend" aria-label="Legenda movimenti">
       <span class="v3-legend-new">Nuovi ingressi</span>
