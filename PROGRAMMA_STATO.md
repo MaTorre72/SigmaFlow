@@ -1,6 +1,47 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## Riepilogo notturno per Marco — STOP al gate 6F (2026-09-15)
+
+- **DONE:** Fase 5A–5H e collaudo integrato 6A–6E, ciascuno con commit
+  separato, suite completa verde e verifiche previste.
+- **BLOCKED:** nessun blocco tecnico incontrato.
+- **Non tentato per dipendenze:** nulla; tutte le dipendenze erano verdi.
+- **Ambiente:** ultimo codice pubblicato soltanto su TEST alle **22:49:09**;
+  pull finale isolato **17/17 file identici**. Nessuna scrittura/deploy PROD.
+- **Qualità finale:** **249/249 test Apps Script**, **40/40 verifiche UI**,
+  collaudo reale desktop e **390×844**.
+- **Punto raggiunto:** Fase 6E completata. **6F non eseguita** come prescritto:
+  V5 non è dichiarata chiusa automaticamente.
+- **Decisione richiesta a Marco:** esaminare il TEST e decidere se approvare il
+  gate umano 6F; solo dopo un'approvazione esplicita valutare chiusura V5 e
+  qualsiasi successiva azione PROD.
+
+## V5 — Fase 6E collaudo desktop/mobile completata (2026-09-15)
+
+Collaudo finale sul deployment TEST reale. La home espone: Stato **Rallentato**,
+WIP **4 / 39 punti**, lavoro acquisito **10 / 71**, attesa **12 / 95**,
+settimane impegnate **10,9**, P50 **92 giorni**, P80 **155 giorni**, **21**
+unità concluse e card Rientri **7 nelle ultime 8 settimane / 58%**.
+
+Desktop, 8 settimane/Settimana: il bucket lavori **23/08/2026** espone Totale
+**46**, WIP nuovo/rework **5/1**, attesa **11**, completato **20** e movimenti
+**0/0/1**. In Punti lo stesso bucket espone Totale **349**, WIP **47+8=55**,
+attesa **87**, completato **144**; focus WIP rework attenua le altre bande e
+le rate lines valgono **1,1 ingressi** e **2,89 completamenti punti/settimana**.
+Dopo zoom e pan il principale seleziona **16/08/2026, Totale 349, WIP 47** e
+il confronto precedente **14/06/2026, Totale 310, WIP 44**, con stessa scala
+Y e rate lines sincronizzate.
+
+Mobile **390×844**: controlli fruibili, i due CFD sono impilati, ciascun canvas
+scorre autonomamente, legenda/riepiloghi restano nel pannello e i valori
+selezionati coincidono col desktop. Viewport ripristinato al termine.
+
+Checkpoint conclusivo: **249/249 test Apps Script**, **40/40 verifiche UI** e
+pull TEST isolato **17/17 file identici**. Nessun nuovo push era necessario
+dopo la 5H, perché 6A–6E hanno prodotto solo evidenze di collaudo. Nessuna
+scrittura PROD. **Fase 6E DONE; STOP a 6F, gate umano finale aperto.**
+
 ## V5 — Fase 6D CFD integrato completata (2026-09-15)
 
 Matrice finale dei requisiti Fase 4–5 sul sottoinsieme implementato:
