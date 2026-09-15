@@ -1,6 +1,34 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5A split WIP nuovo/rework completata su TEST (2026-09-15)
+
+Il CFD conserva il totale V2 e lo scompone, in ogni bucket e in entrambe le
+unità, nei quattro campi prescritti: `wip_new_jobs`, `wip_rework_jobs`,
+`wip_new_points`, `wip_rework_points`. La classificazione deriva dal numero
+dell'episodio WIP osservato nel log: episodio 1 nuovo, episodi successivi
+rework. Le boundary additive sono ora, dal basso: completato, attesa, WIP
+rework, WIP nuovo, lavoro già acquisito; `wip_boundary` resta l'alias totale
+compatibile col contratto V2.
+
+Fixture deterministica 5A: 1 lavoro nuovo da 5 punti e 1 lavoro rientrato da
+8 punti producono **1+1=2 lavori WIP** e **5+8=13 punti WIP**; le due identità
+sono verificate anche dalle boundary, senza variazione del totale precedente.
+La validazione backend controlla **10 identità per bucket** (split e stock in
+Lavori/Punti).
+
+Collaudo sul deployment HEAD TEST: ultimo snapshot operativo invariato a **4
+lavori / 39 punti** in corso. Sul bucket selezionato del **21 giugno 2026** il
+tooltip mostra **WIP nuovo 2**, **WIP rework 2**, **WIP totale 4**, oltre a 13
+già acquisiti, 12 in attesa, 13 completati e totale 42. Desktop: rosso rework
+visivamente sotto il blu nuovo; mobile **390×844**: stesso ordine, legenda su
+due righe e riepilogo leggibile senza uscire dal pannello.
+
+Verifica: **247/247 test Apps Script** e **33/33 verifiche statiche UI**. Push
+Apps Script TEST completato alle **21:58:46** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5A DONE**; il gate umano interno è
+stato registrato come checkpoint secondo la deroga notturna.
+
 ## V5 — Fase 1bis consolidamento Stato del flusso completata su TEST (2026-09-15)
 
 Prima dell'intervento sono stati riletti `CLAUDE.md`, questo stato e il design

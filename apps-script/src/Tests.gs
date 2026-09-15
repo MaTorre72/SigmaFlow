@@ -318,6 +318,7 @@ function runAllTests() {
     testDashboardV2ISOCalendarAndDST,
     testDashboardV2FlowBucketsAndArchive,
     testDashboardV2CFDNonlinearStocksAndCumulatives,
+    testDashboardV5CFDSplitsNewAndReworkWip,
     testDashboardV2CFDPartialWeekAndInheritedWork,
     testDashboardV2AnnualRebasePreservesStocks,
     testDashboardV2HistoryCoverageAndCalendar,
@@ -5625,6 +5626,31 @@ function testDashboardV2CFDPartialWeekAndInheritedWork() {
   assertEquals_(5, state.cfd.weekly[1].avg_wip_points, 'media punti pesata durata');
   assertEquals_(1, state.cfd.current.waiting_stock_jobs, 'stato corrente da archivio/log');
   assertEquals_(true, state.cfd.validation.passed, 'identita validate');
+}
+
+function testDashboardV5CFDSplitsNewAndReworkWip() {
+  var dates = ['2026-01-05T00:00:00+01:00', '2026-01-12T00:00:00+01:00',
+    '2026-01-19T00:00:00+01:00', '2026-01-26T00:00:00+01:00'];
+  var first = dashboardV2PathFixture_('NEW', ['backlog', 'wip'], dates.slice(0, 2), 5);
+  var returned = dashboardV2PathFixture_('REWORK', ['wip', 'wait_client', 'wip'], dates.slice(0, 3), 8);
+  var state = buildDashboardStateV2_([first, returned], [],
+    dashboardV2TestConfig_({ wip_trend_weeks: 4 }), new Date('2026-02-01T12:00:00Z'), [], []);
+  var row = state.cfd.weekly[state.cfd.weekly.length - 1];
+  assertEquals_(1, row.wip_new_jobs, 'episodio WIP 1 classificato nuovo');
+  assertEquals_(1, row.wip_rework_jobs, 'episodio WIP successivo classificato rework');
+  assertEquals_(5, row.wip_new_points, 'punti WIP nuovo');
+  assertEquals_(8, row.wip_rework_points, 'punti WIP rework');
+  assertEquals_(row.wip_stock_jobs, row.wip_new_jobs + row.wip_rework_jobs, 'totale lavori WIP invariato');
+  assertEquals_(row.wip_stock_points, row.wip_new_points + row.wip_rework_points, 'totale punti WIP invariato');
+  ['jobs', 'points'].forEach(function(unit) {
+    var boundaries = row.boundaries[unit];
+    assertEquals_(row['wip_rework_' + unit], boundaries.wip_rework_boundary - boundaries.waiting_boundary,
+      'rework rosso sotto');
+    assertEquals_(row['wip_new_' + unit], boundaries.wip_new_boundary - boundaries.wip_rework_boundary,
+      'nuovo blu sopra');
+    assertEquals_(boundaries.wip_boundary, boundaries.wip_new_boundary, 'alias WIP V2 invariato');
+  });
+  assertEquals_(true, state.cfd.validation.passed, 'identita split verificate');
 }
 
 function testDashboardV2AnnualRebasePreservesStocks() {

@@ -9,10 +9,15 @@ Il dettaglio e la diagnostica conservano la precisione backend a due decimali.
 
 "Andamento del lavoro" usa le boundary settimanali del backend senza
 ricalcolare gli stock nel browser. La selezione puntuale espone lavoro già
-acquisito, in corso, in attesa, completato e totale; funziona con puntatore,
+acquisito, WIP nuovo, WIP rework, WIP totale, in attesa, completato e totale;
+funziona con puntatore,
 tocco e frecce da tastiera. Sotto le bande, sullo stesso asse temporale, sono
 mostrati i conteggi settimanali `new_work_jobs`, `rework_wip_episodes` e
 `completed_visits` come Nuovi ingressi, Rientri e Consegne.
+
+Il WIP puntuale è classificato dal numero dell'episodio osservato: il primo è
+`wip_new_*`, i successivi sono `wip_rework_*`. La boundary totale V2 resta
+disponibile; nella pila il rework rosso è sotto il nuovo blu.
 
 `dashboardV2History_` espone `weekly`, `monthly`, `quarterly` e `annual_cfd`.
 I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio

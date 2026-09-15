@@ -46,6 +46,11 @@ function verifyV3Ui() {
     ['metodo tempi confinato alla diagnostica', renderer.includes('timingDiagnostic.interval_method') && renderer.includes('Stima teorica')],
     ['valori null spiegati', renderer.includes('Ritmo di assorbimento del nuovo lavoro non ancora stimabile.')],
     ['grafico alimentato dalle boundary backend', client.includes('row.boundaries[unit]')],
+    ['WIP CFD separato con rework rosso sotto e nuovo blu sopra',
+      client.includes("'wip_rework_boundary', 'wip_new_boundary'") &&
+      client.indexOf("drawBand(keys[1], keys[2], '#c94b4b')") < client.indexOf("drawBand(keys[2], keys[3], '#4f86b5')") &&
+      markup.indexOf('v3-legend-wip-rework') < markup.indexOf('v3-legend-wip-new') &&
+      style.includes('.v3-legend-wip-rework::before { background: #c94b4b; }')],
     ['lettura verticale completa con crosshair tooltip e selezione accessibile',
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&

@@ -550,6 +550,7 @@ function dashboardV2StockIndex_(normalized, jobsOrIndex) {
   normalized.forEach(function(item) {
     var states = item.logical_states || [];
     var points = jobPoints_(jobsById[item.job_id] || {});
+    var wipEpisodeNumber = 0;
     states.forEach(function(state, index) {
       var entered = dashboardV2Instant_(state.entered_at).getTime();
       var exited = index + 1 < states.length
@@ -558,8 +559,10 @@ function dashboardV2StockIndex_(normalized, jobsOrIndex) {
       if (firstEntryByJob[item.job_id] === undefined || entered < firstEntryByJob[item.job_id]) {
         firstEntryByJob[item.job_id] = entered;
       }
+      if (state.role === 'wip') { wipEpisodeNumber++; }
       intervals.push({ job_id: item.job_id, role: state.role, points: points,
-        entered: entered, exited: exited });
+        entered: entered, exited: exited,
+        wip_episode_number: state.role === 'wip' ? wipEpisodeNumber : null });
     });
   });
   return { intervals: intervals, first_entry_by_job: firstEntryByJob };
@@ -568,6 +571,7 @@ function dashboardV2StockIndex_(normalized, jobsOrIndex) {
 function dashboardV2StocksFromIndex_(stockIndex, start, sampledAt, observedUntil) {
   var result = { future_work_stock_jobs: 0, future_work_stock_points: 0,
     wip_stock_jobs: 0, wip_stock_points: 0, waiting_stock_jobs: 0, waiting_stock_points: 0,
+    wip_new_jobs: 0, wip_rework_jobs: 0, wip_new_points: 0, wip_rework_points: 0,
     avg_wip_jobs: 0, avg_wip_points: 0 };
   var duration = observedUntil - start;
   (stockIndex.intervals || []).forEach(function(interval) {
@@ -575,6 +579,11 @@ function dashboardV2StocksFromIndex_(stockIndex, start, sampledAt, observedUntil
     if (key && interval.entered <= sampledAt && sampledAt < interval.exited) {
       result[key + '_stock_jobs']++;
       result[key + '_stock_points'] += interval.points;
+      if (interval.role === 'wip') {
+        var wipKind = Number(interval.wip_episode_number || 0) > 1 ? 'rework' : 'new';
+        result['wip_' + wipKind + '_jobs']++;
+        result['wip_' + wipKind + '_points'] += interval.points;
+      }
     }
     if (interval.role === 'wip' && duration > 0) {
       var weight = Math.max(0, Math.min(interval.exited, observedUntil) - Math.max(interval.entered, start)) / duration;
@@ -609,11 +618,17 @@ function dashboardV2CFD_(normalized, jobs, flow, now, stockIndex) {
       var completed = unit === 'jobs' ? totals.completed_visits : totals.completed_points;
       var boundaries = { completed_boundary: completed };
       boundaries.waiting_boundary = completed + stocks['waiting_stock_' + unit];
-      boundaries.wip_boundary = boundaries.waiting_boundary + stocks['wip_stock_' + unit];
+      boundaries.wip_rework_boundary = boundaries.waiting_boundary + stocks['wip_rework_' + unit];
+      boundaries.wip_new_boundary = boundaries.wip_rework_boundary + stocks['wip_new_' + unit];
+      // Alias totale preservato per compatibilita' col contratto V2.
+      boundaries.wip_boundary = boundaries.wip_new_boundary;
       boundaries.future_work_boundary = boundaries.wip_boundary + stocks['future_work_stock_' + unit];
       row.boundaries[unit] = boundaries;
       var residuals = [boundaries.waiting_boundary - completed - stocks['waiting_stock_' + unit],
+        boundaries.wip_rework_boundary - boundaries.waiting_boundary - stocks['wip_rework_' + unit],
+        boundaries.wip_new_boundary - boundaries.wip_rework_boundary - stocks['wip_new_' + unit],
         boundaries.wip_boundary - boundaries.waiting_boundary - stocks['wip_stock_' + unit],
+        stocks['wip_new_' + unit] + stocks['wip_rework_' + unit] - stocks['wip_stock_' + unit],
         boundaries.future_work_boundary - boundaries.wip_boundary - stocks['future_work_stock_' + unit]];
       if (residuals.some(function(value) { return Math.abs(value) > 1e-9; })) {
         failed.push({ period_start: bucket.period_start, unit: unit, residuals: residuals });
@@ -631,7 +646,7 @@ function dashboardV2CFD_(normalized, jobs, flow, now, stockIndex) {
     count_boundary_base: 'technical_completions_not_unique_jobs',
     history_quality: missing.length ? 'partial' : 'available_not_certified_complete',
     jobs_without_observed_state: missing, current: current, weekly: weekly,
-    validation: { buckets_checked: weekly.length, identities_checked: weekly.length * 6,
+    validation: { buckets_checked: weekly.length, identities_checked: weekly.length * 10,
       absolute_tolerance: 1e-9, passed: weekly.length ? failed.length === 0 : null, failures: failed }
   };
 }
@@ -741,6 +756,8 @@ function dashboardV2History_(normalized, jobs, flow, now, stockIndex) {
         return { sampled_at: row.sampled_at, original_boundaries: row.boundaries, rebased_boundaries: rebased,
           future_work_stock_jobs: row.future_work_stock_jobs, future_work_stock_points: row.future_work_stock_points,
           wip_stock_jobs: row.wip_stock_jobs, wip_stock_points: row.wip_stock_points,
+          wip_new_jobs: row.wip_new_jobs, wip_new_points: row.wip_new_points,
+          wip_rework_jobs: row.wip_rework_jobs, wip_rework_points: row.wip_rework_points,
           waiting_stock_jobs: row.waiting_stock_jobs, waiting_stock_points: row.waiting_stock_points };
       }) });
   }

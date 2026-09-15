@@ -2343,7 +2343,7 @@
     var plotBottom = 270;
     var flowTop = 318;
     var flowBottom = 382;
-    var keys = ['completed_boundary', 'waiting_boundary', 'wip_boundary', 'future_work_boundary'];
+    var keys = ['completed_boundary', 'waiting_boundary', 'wip_rework_boundary', 'wip_new_boundary', 'future_work_boundary'];
     var maximum = Math.max.apply(null, rows.map(function(row) {
       return Number((((row.boundaries || {})[unit] || {}).future_work_boundary) || 0);
     }));
@@ -2372,8 +2372,9 @@
     }
     drawBand(null, keys[0], '#d9eee0');
     drawBand(keys[0], keys[1], '#f5c968');
-    drawBand(keys[1], keys[2], '#4f86b5');
-    drawBand(keys[2], keys[3], '#a9bed2');
+    drawBand(keys[1], keys[2], '#c94b4b');
+    drawBand(keys[2], keys[3], '#4f86b5');
+    drawBand(keys[3], keys[4], '#a9bed2');
 
     // Serie coordinata sul medesimo asse temporale: conteggi di lavori nel
     // bucket, separati dalle bande cumulative per non alterarne il significato.
@@ -2424,6 +2425,8 @@
     var values = {
       completed: Number(boundaries.completed_boundary || 0),
       waiting: Number(boundaries.waiting_boundary || 0) - Number(boundaries.completed_boundary || 0),
+      wipRework: Number(boundaries.wip_rework_boundary || 0) - Number(boundaries.waiting_boundary || 0),
+      wipNew: Number(boundaries.wip_new_boundary || 0) - Number(boundaries.wip_rework_boundary || 0),
       wip: Number(boundaries.wip_boundary || 0) - Number(boundaries.waiting_boundary || 0),
       future: Number(boundaries.future_work_boundary || 0) - Number(boundaries.wip_boundary || 0),
       total: Number(boundaries.future_work_boundary || 0)
@@ -2431,7 +2434,8 @@
     var selectedDate = new Date(selected.sampled_at || selected.period_end);
     var dateLabel = selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
     selection.textContent = dateLabel + ' · Già acquisito ' + dashboardV3Text_(values.future) +
-      ' · In corso ' + dashboardV3Text_(values.wip) + ' · In attesa ' + dashboardV3Text_(values.waiting) +
+      ' · WIP nuovo ' + dashboardV3Text_(values.wipNew) + ' · WIP rework ' + dashboardV3Text_(values.wipRework) +
+      ' · WIP totale ' + dashboardV3Text_(values.wip) + ' · In attesa ' + dashboardV3Text_(values.waiting) +
       ' · Completato ' + dashboardV3Text_(values.completed) + ' · Totale ' + dashboardV3Text_(values.total) +
       ' · Nuovi ingressi ' + dashboardV3Text_(selected.new_work_jobs) + ' · Rientri ' +
       dashboardV3Text_(selected.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(selected.completed_visits);
@@ -2445,12 +2449,13 @@
     ctx.beginPath(); ctx.arc(crossX, y(boundaries.future_work_boundary), 4, 0, Math.PI * 2); ctx.fill();
 
     var tooltipLines = [dateLabel, 'Già acquisito  ' + dashboardV3Text_(values.future),
-      'In corso  ' + dashboardV3Text_(values.wip), 'In attesa  ' + dashboardV3Text_(values.waiting),
+      'WIP nuovo  ' + dashboardV3Text_(values.wipNew), 'WIP rework  ' + dashboardV3Text_(values.wipRework),
+      'WIP totale  ' + dashboardV3Text_(values.wip), 'In attesa  ' + dashboardV3Text_(values.waiting),
       'Completato  ' + dashboardV3Text_(values.completed), 'Totale  ' + dashboardV3Text_(values.total),
       'Nuovi / rientri / consegne  ' + dashboardV3Text_(selected.new_work_jobs) + ' / ' +
         dashboardV3Text_(selected.rework_wip_episodes) + ' / ' + dashboardV3Text_(selected.completed_visits)];
     var tooltipWidth = 250;
-    var tooltipHeight = 144;
+    var tooltipHeight = 182;
     var tooltipX = crossX + 12;
     if (tooltipX + tooltipWidth > width - pad.right) { tooltipX = crossX - tooltipWidth - 12; }
     var tooltipY = 28;
