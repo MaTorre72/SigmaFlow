@@ -1,6 +1,25 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 6C tempi completata (2026-09-15)
+
+Le fixture finali confermano che l'unità di attraversamento parte dal primo
+ingresso operativo e termina in `done`. Nel percorso backlog → WIP → attesa →
+preparazione → WIP → done il rientro intermedio produce **una sola unità da
+10 giorni**, con `rientro_intermedio=true`: origine e tempo non vengono
+azzerati. Solo un nuovo ingresso dopo una consegna apre una seconda unità
+(fixture: **2 e 10 giorni**). Sul campione deterministico **[1,2,3,4,10]** il
+backend restituisce P50 **3**, P80 nearest-rank **4**, numerosità **5** e
+qualità sufficient; la disaggregazione XS/S/M/L/XL conserva gli stessi
+valori osservati. La stima M/G/1 resta esplicitamente separata e nulla nella
+home V5.
+
+Confermati sul TEST reale **21 unità concluse**, P50 **91,9 giorni** e P80
+**155,28 giorni**, gli stessi valori già letti nel collaudo 5E. Checkpoint
+completo: **249/249 test Apps Script** e **40/40 verifiche UI**. Nessuna
+modifica applicativa, nessun push aggiuntivo, nessuna scrittura PROD.
+**Fase 6C DONE**.
+
 ## V5 — Fase 6B stato e taratura completata (2026-09-15)
 
 Scansione del codice applicativo conclusa: **0 occorrenze** di
