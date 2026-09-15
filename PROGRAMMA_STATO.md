@@ -1,6 +1,25 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5F rate lines completata su TEST (2026-09-15)
+
+Aggiunte le linee opzionali “Tasso di ingresso” e “Tasso di completamento”.
+La pendenza usa esclusivamente la differenza fra le boundary iniziale/finale
+del periodo visibile divisa per la sua durata reale in settimane; l'unità è
+lavori/settimana o punti/settimana. I due toggle disegnano overlay tratteggiati
+e un riepilogo, senza introdurre stati o soglie.
+
+Collaudo TEST: su 8 settimane/Lavori i valori sono **0,14 ingressi** e **0,41
+completamenti/settimana**; su 3 mesi/Lavori **0,41** e **0,65**; passando a
+Punti sullo stesso periodo **3,83** e **4,72 punti/settimana**. La stringa
+completa del bucket 23 agosto è risultata byte-per-byte uguale prima, durante
+e dopo l'attivazione dei due overlay; allo spegnimento il riepilogo torna
+nascosto.
+
+Verifica: **249/249 test Apps Script** e **39/39 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:35:29** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5F DONE**.
+
 ## V5 — Fase 5E misura orizzontale completata su TEST (2026-09-15)
 
 Ogni bucket CFD espone ora `equivalent_time.jobs` e

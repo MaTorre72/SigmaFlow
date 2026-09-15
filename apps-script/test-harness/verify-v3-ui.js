@@ -73,6 +73,11 @@ function verifyV3Ui() {
       client.includes("selected.equivalent_time") && client.includes("[unit]") &&
       client.includes('Data ingresso equivalente') && client.includes('Data uscita equivalente') &&
       client.includes('P50 osservato') && client.includes('P80 osservato')],
+    ['rate lines opzionali coerenti col periodo visibile',
+      markup.includes('id="v3-cfd-rate-entry"') && markup.includes('id="v3-cfd-rate-completion"') &&
+      client.includes('elapsedWeeks') && client.includes('future_work_boundary') &&
+      client.includes('completed_boundary') && client.includes("' lavori/settimana'") &&
+      client.includes("' punti/settimana'") && client.includes('drawRateLine(state.dashboardV5EntryRate')],
     ['lettura verticale completa con crosshair tooltip e selezione accessibile',
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&

@@ -38,6 +38,10 @@ La modalità “Misura tempo” usa `equivalent_time.jobs/points`, calcolato dal
 backend mediante l'incrocio orizzontale fra boundary ingressi e completamenti.
 Mostra ingresso equivalente, uscita equivalente e durata, affiancati a P50 e
 P80 osservati; un incrocio futuro non ancora disponibile resta nullo.
+
+Le rate lines opzionali mostrano la pendenza fra prima e ultima boundary del
+periodo visibile, normalizzata per la durata reale in settimane. Ingresso e
+completamento sono indipendenti e cambiano unità insieme al CFD.
 I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
 anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
 stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta

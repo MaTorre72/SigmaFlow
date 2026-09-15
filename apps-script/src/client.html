@@ -2148,6 +2148,15 @@
       document.getElementById('v3-cfd-measure-result').hidden = !state.dashboardV5Measuring;
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
+    [['v3-cfd-rate-entry', 'dashboardV5EntryRate'], ['v3-cfd-rate-completion', 'dashboardV5CompletionRate']]
+      .forEach(function(binding) {
+        document.getElementById(binding[0]).addEventListener('click', function(event) {
+          state[binding[1]] = !state[binding[1]];
+          event.currentTarget.classList.toggle('active', state[binding[1]]);
+          event.currentTarget.setAttribute('aria-pressed', state[binding[1]] ? 'true' : 'false');
+          drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+        });
+      });
     document.querySelectorAll('[data-v3-cfd-series]').forEach(function(button) {
       button.addEventListener('click', function() {
         state.dashboardV5FocusedSeries = button.dataset.v3CfdSeries;
@@ -2513,6 +2522,7 @@
     var empty = document.getElementById('v3-flow-chart-empty');
     var selection = document.getElementById('v3-flow-selection');
     var measureResult = document.getElementById('v3-cfd-measure-result');
+    var rateResult = document.getElementById('v3-cfd-rate-result');
     var resolution = document.getElementById('v3-cfd-resolution').value;
     var resolutionLabel = resolution === 'day' ? 'giorno' : resolution === 'month' ? 'mese' : 'settimana';
     var resolutionPrompt = resolution === 'week' ? 'una settimana' : 'un ' + resolutionLabel;
@@ -2527,6 +2537,7 @@
       empty.textContent = 'Dati non ancora disponibili per il periodo selezionato.';
       selection.textContent = '';
       measureResult.hidden = true;
+      rateResult.hidden = true;
       return;
     }
     canvas.hidden = false;
@@ -2579,6 +2590,30 @@
     drawBand(keys[1], keys[2], '#c94b4b', 'wipRework');
     drawBand(keys[2], keys[3], '#4f86b5', 'wipNew');
     drawBand(keys[3], keys[4], '#a9bed2', 'future');
+
+    var elapsedWeeks = rows.length > 1 ?
+      (Date.parse(rows[rows.length - 1].sampled_at) - Date.parse(rows[0].sampled_at)) / (7 * 86400000) : 0;
+    var firstBoundaries = rows[0].boundaries[unit];
+    var lastBoundaries = rows[rows.length - 1].boundaries[unit];
+    var entryRate = elapsedWeeks > 0 ?
+      (Number(lastBoundaries.future_work_boundary || 0) - Number(firstBoundaries.future_work_boundary || 0)) / elapsedWeeks : null;
+    var completionRate = elapsedWeeks > 0 ?
+      (Number(lastBoundaries.completed_boundary || 0) - Number(firstBoundaries.completed_boundary || 0)) / elapsedWeeks : null;
+    function drawRateLine(enabled, key, color) {
+      if (!enabled || rows.length < 2) { return; }
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash([8, 5]);
+      ctx.beginPath(); ctx.moveTo(x(0), y(firstBoundaries[key]));
+      ctx.lineTo(x(rows.length - 1), y(lastBoundaries[key])); ctx.stroke(); ctx.setLineDash([]);
+    }
+    drawRateLine(state.dashboardV5EntryRate, 'future_work_boundary', '#1f527a');
+    drawRateLine(state.dashboardV5CompletionRate, 'completed_boundary', '#276749');
+    if (state.dashboardV5EntryRate || state.dashboardV5CompletionRate) {
+      var rateUnit = unit === 'jobs' ? ' lavori/settimana' : ' punti/settimana';
+      var parts = [];
+      if (state.dashboardV5EntryRate) { parts.push('Tasso di ingresso ' + dashboardV3Text_(Math.round(entryRate * 100) / 100, rateUnit)); }
+      if (state.dashboardV5CompletionRate) { parts.push('Tasso di completamento ' + dashboardV3Text_(Math.round(completionRate * 100) / 100, rateUnit)); }
+      rateResult.hidden = false; rateResult.textContent = parts.join(' · ');
+    } else { rateResult.hidden = true; rateResult.textContent = ''; }
 
     // Serie coordinata sul medesimo asse temporale: conteggi di lavori nel
     // bucket, separati dalle bande cumulative per non alterarne il significato.
