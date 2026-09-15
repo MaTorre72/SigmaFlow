@@ -1,6 +1,22 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 6A riconciliazione V2 completata (2026-09-15)
+
+Rieseguite le fixture V2 sull'implementazione finale. La fixture non lineare
+attraversa in cinque bucket `future_work → wip → waiting → future_work → wip`
+con **1 lavoro / 7 punti** e verifica, per entrambi i sistemi di unità, che lo
+spessore di ogni banda coincida con lo stock indipendente e che nessun
+completamento venga inventato. La fixture parziale conserva WIP ereditato,
+cumulative pre-finestra e stock corrente da archivio; quella annuale mantiene
+gli stock con offset comune a tutte le boundary. La fixture 5A conferma inoltre
+**1+1=2 lavori** e **5+8=13 punti** tra WIP nuovo e rework, con alias WIP V2
+invariato. Tutte le identità espongono `validation.passed=true`.
+
+Checkpoint completo: **249/249 test Apps Script** e **40/40 verifiche UI**.
+Nessuna modifica al codice applicativo, nessun push aggiuntivo necessario e
+nessuna scrittura PROD. **Fase 6A DONE**.
+
 ## V5 — Fase 5H pulizia legacy CFD completata su TEST (2026-09-15)
 
 Rimossi da entrambi i CFD l'istogramma permanente Nuovi ingressi/Rientri/
