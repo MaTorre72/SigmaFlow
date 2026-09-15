@@ -1,6 +1,30 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 6D CFD integrato completata (2026-09-15)
+
+Matrice finale dei requisiti Fase 4–5 sul sottoinsieme implementato:
+
+| Requisito | Evidenza | Esito |
+| --- | --- | --- |
+| Asse, griglia, legenda, Lavori/Punti e lettura verticale | UI statica + TEST reale, totali 47 lavori / 357 punti | VERIFICATO |
+| WIP nuovo/rework e ordine blu sopra/rosso sotto | fixture 1+1 lavori, 5+8 punti; identità boundary | VERIFICATO |
+| Giorno/settimana/mese e 9 periodi | bisestile, ISO 53, Q4→Q1, vuoti e Da/A | VERIFICATO |
+| Zoom, pan, reset, sottointervallo, crosshair/touch | dati invariati prima/dopo; desktop e 390×844 | VERIFICATO |
+| Tooltip completo e focus serie | valori backend, cumulative, movimenti; geometria invariata | VERIFICATO |
+| Misura orizzontale Lavori/Punti | fixture 3/4 giorni e incrocio nullo; TEST 222,29/235,58 | VERIFICATO |
+| Rate lines | 8 settimane 0,14/0,41 lavori-settimana; on/off invariato | VERIFICATO |
+| Confronti | precedente, anno precedente, custom vuoto; scala e navigazione comuni | VERIFICATO |
+| Continuità e stock-flow | anno, DST, mese/trimestre, stock ereditati e boundary additive | VERIFICATO |
+| Pulizia legacy | istogramma/legenda/funzioni rimossi; movimenti nel tooltip | VERIFICATO |
+
+Non risultano requisiti Fase 4–5 omessi o bloccati. Il contratto pubblico V2
+resta invariato nelle chiavi top-level; le estensioni CFD sono additive e il
+frontend non classifica episodi né calcola stock/cumulative. Checkpoint:
+**249/249 test Apps Script** e **40/40 verifiche UI**. Nessuna modifica
+applicativa, nessun push aggiuntivo, nessuna scrittura PROD. **Fase 6D DONE**.
+Il collaudo 6E e il gate umano 6F restano ancora aperti a questo punto.
+
 ## V5 — Fase 6C tempi completata (2026-09-15)
 
 Le fixture finali confermano che l'unità di attraversamento parte dal primo
