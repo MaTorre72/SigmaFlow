@@ -78,6 +78,13 @@ function verifyV3Ui() {
       client.includes('elapsedWeeks') && client.includes('future_work_boundary') &&
       client.includes('completed_boundary') && client.includes("' lavori/settimana'") &&
       client.includes("' punti/settimana'") && client.includes('drawRateLine(state.dashboardV5EntryRate')],
+    ['confronto usa due CFD sincronizzati e scala comune',
+      ['Periodo precedente equivalente', 'Stesso periodo anno precedente', 'Periodo personalizzato'].every(label => markup.includes(label)) &&
+      markup.includes('id="v3-flow-comparison-chart"') && markup.includes('Confronto non ancora disponibile per il periodo selezionato.') &&
+      client.includes('dashboardV5ComparisonRows_') && client.includes('concat(comparisonRows.map') &&
+      client.includes('dashboardV5DrawComparison_') && client.includes('dashboardV5ChartWindow') &&
+      style.includes('.v3-cfd-charts.comparing { grid-template-columns: repeat(2') &&
+      style.includes('.v3-cfd-charts.comparing { grid-template-columns: 1fr; }')],
     ['lettura verticale completa con crosshair tooltip e selezione accessibile',
       client.includes("ctx.setLineDash([4, 3])") && client.includes('tooltipLines') &&
       client.includes('dashboardV3ChartSelectedIndex') && markup.includes('id="v3-flow-selection"') &&

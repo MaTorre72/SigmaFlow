@@ -42,6 +42,14 @@ P80 osservati; un incrocio futuro non ancora disponibile resta nullo.
 Le rate lines opzionali mostrano la pendenza fra prima e ultima boundary del
 periodo visibile, normalizzata per la durata reale in settimane. Ingresso e
 completamento sono indipendenti e cambiano unità insieme al CFD.
+
+I confronti CFD possono usare il periodo precedente equivalente, lo stesso
+periodo dell'anno precedente o un intervallo Da/A dedicato. Il browser
+seleziona sempre bucket già calcolati dal backend; non ricostruisce stock,
+flussi o boundary. Il CFD principale e quello di confronto condividono unità,
+massimo dell'asse verticale, finestra di zoom/pan, focus e rate lines. La
+selezione è sincronizzata per posizione relativa, così serie di lunghezza
+diversa restano confrontabili senza forzare date artificialmente uguali.
 I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
 anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
 stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta

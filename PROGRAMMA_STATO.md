@@ -1,6 +1,31 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-15
 
+## V5 — Fase 5G confronti CFD completata su TEST (2026-09-15)
+
+Il CFD offre ora quattro modalità: nessun confronto, periodo precedente
+equivalente, stesso periodo dell'anno precedente e intervallo personalizzato.
+Quando il confronto è attivo vengono disegnati due CFD indipendenti con la
+stessa scala verticale massima, lo stesso ordine delle cinque boundary, la
+stessa unità e la medesima finestra di zoom/pan. La selezione di un bucket è
+sincronizzata per posizione relativa fra le due serie; focus serie e rate
+lines si applicano a entrambi senza ricalcolare dati nel browser.
+
+Collaudo reale: 8 settimane/Settimana, periodo precedente, selezione sul
+**23/08/2026** nel CFD principale e bucket sincronizzato **21/06/2026** nel
+confronto (**Totale 42, WIP 4**). Dopo zoom, pan indietro e passaggio a Punti
+il principale ha selezionato **30/08/2026, Totale 349, WIP 39** e il confronto
+**28/06/2026, Totale 310, WIP 31**. Verificate inoltre la modalità stesso
+periodo anno precedente e la modalità personalizzata **01/01–01/02/2000**,
+che espone “Confronto non ancora disponibile per il periodo selezionato.”.
+Desktop: grafici affiancati; mobile **390×844**: grafici impilati, entrambi
+leggibili e navigabili.
+
+Verifica: **249/249 test Apps Script** e **40/40 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:43:03** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5G DONE**; il gate umano è stato
+registrato come checkpoint secondo la deroga notturna.
+
 ## V5 — Fase 5F rate lines completata su TEST (2026-09-15)
 
 Aggiunte le linee opzionali “Tasso di ingresso” e “Tasso di completamento”.

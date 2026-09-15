@@ -99,6 +99,16 @@
       <label id="v3-cfd-year-wrap" hidden>Anno <select id="v3-cfd-year"></select></label>
       <label id="v3-cfd-from-wrap" hidden>Da <input id="v3-cfd-from" type="date"></label>
       <label id="v3-cfd-to-wrap" hidden>A <input id="v3-cfd-to" type="date"></label>
+      <label>Confronto
+        <select id="v3-cfd-comparison">
+          <option value="none">Nessun confronto</option>
+          <option value="previous">Periodo precedente equivalente</option>
+          <option value="previous_year">Stesso periodo anno precedente</option>
+          <option value="custom">Periodo personalizzato</option>
+        </select>
+      </label>
+      <label id="v3-cfd-comparison-from-wrap" hidden>Confronto da <input id="v3-cfd-comparison-from" type="date"></label>
+      <label id="v3-cfd-comparison-to-wrap" hidden>Confronto a <input id="v3-cfd-comparison-to" type="date"></label>
       <div class="v3-cfd-viewport" role="group" aria-label="Navigazione nel grafico">
         <button id="v3-cfd-zoom-in" type="button" aria-label="Aumenta zoom">Zoom +</button>
         <button id="v3-cfd-zoom-out" type="button" aria-label="Riduci zoom">Zoom −</button>
@@ -111,7 +121,10 @@
         <button id="v3-cfd-reset" type="button">Reset zoom</button>
       </div>
     </div>
-    <div class="v3-chart-wrap"><canvas id="v3-flow-chart" height="430" tabindex="0" aria-describedby="v3-flow-selection" aria-label="Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere le settimane"></canvas></div>
+    <div id="v3-cfd-charts" class="v3-cfd-charts">
+      <section class="v3-cfd-chart-column"><h3 id="v3-cfd-primary-title" hidden>Periodo selezionato</h3><div class="v3-chart-wrap"><canvas id="v3-flow-chart" height="430" tabindex="0" aria-describedby="v3-flow-selection" aria-label="Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere le settimane"></canvas></div></section>
+      <section id="v3-cfd-comparison-panel" class="v3-cfd-chart-column" hidden><h3>Periodo di confronto</h3><div class="v3-chart-wrap"><canvas id="v3-flow-comparison-chart" height="430" tabindex="0" aria-describedby="v3-flow-comparison-selection" aria-label="Andamento del lavoro nel periodo di confronto"></canvas></div><p id="v3-flow-comparison-selection" class="v3-flow-selection" aria-live="polite"></p><div id="v3-flow-comparison-empty" class="chart-empty" hidden>Confronto non ancora disponibile per il periodo selezionato.</div></section>
+    </div>
     <div class="v3-chart-legend" aria-label="Legenda">
       <button type="button" class="v3-legend-completed" data-v3-cfd-series="completed">Completato</button>
       <button type="button" class="v3-legend-waiting" data-v3-cfd-series="waiting">In attesa</button>

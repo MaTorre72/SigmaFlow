@@ -1091,6 +1091,10 @@
 
   .v3-flow-chart-panel { overflow: hidden; }
   .v3-chart-wrap { max-width: 100%; overflow-x: auto; }
+  .v3-cfd-charts { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  .v3-cfd-charts.comparing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v3-cfd-chart-column { min-width: 0; }
+  .v3-cfd-chart-column h3 { font-size: 14px; margin: 8px 0 0; }
   .v3-cfd-navigation { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 4px; }
   .v3-cfd-navigation label { color: var(--muted); display: grid; font-size: 12px; gap: 4px; }
   .v3-cfd-navigation select, .v3-cfd-navigation input { background: #fff; border: 1px solid var(--border); border-radius: 6px; min-height: 36px; padding: 6px 8px; }
@@ -1599,6 +1603,7 @@
     .v3-metric-card,
     .v3-resumed-card { min-height: 138px; }
     .v3-chart-wrap canvas { min-width: 560px; }
+    .v3-cfd-charts.comparing { grid-template-columns: 1fr; }
     .v3-flow-status { padding: 18px; }
   }
 </style>
