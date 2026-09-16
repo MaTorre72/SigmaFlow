@@ -1,5 +1,28 @@
 # Stato SigmaFlow
-Aggiornato: 2026-09-15
+Aggiornato: 2026-09-16
+
+## Correzioni feedback Stato/CFD — pronte localmente (2026-09-16)
+
+Il dettaglio “Come è stata ottenuta questa lettura” distingue ora la finestra
+della capacità osservata da quella più ampia dello storico WIP. Il primo dato
+deriva da `capacity_window_weeks` (**8 settimane** nel TEST corrente);
+`wip_trend_weeks` (**26**) alimenta invece serie e analisi storiche WIP. Il
+blocco “Ritmo di completamento” dispone riferimento, osservato e campione in
+due colonne parallele — Completamenti e Punti — e presenta il periodo come
+date brevi italiane, mantenendo timezone, qualità, soglia effettivamente usata
+dallo stato e settimane con completamenti.
+
+Nel CFD lo zoom a rotella resta disponibile sui display oltre 900 px con
+puntatore fine, mentre su viewport piccoli o dispositivi touch la rotella non
+intercetta più lo scroll della pagina. Il tooltip passa da **11 a 8 righe**, da
+**250×220 a 220×164 px** e da opacità **96% a 84%**; cumulative e movimenti
+sono rimossi soltanto dal riquadro sovrapposto e restano nel riepilogo testuale
+sotto il grafico.
+
+Verifica locale: **249/249 test Apps Script** e **43/43 verifiche UI**. Il
+tentativo di push TEST è stato respinto da Google con `invalid_rapt`: serve
+riautenticare `clasp`. Nessun file è stato inviato e nessuna scrittura PROD è
+avvenuta. Il collaudo reale desktop/mobile resta da eseguire dopo il login.
 
 ## Riepilogo notturno per Marco — STOP al gate 6F (2026-09-15)
 

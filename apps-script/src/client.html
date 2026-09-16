@@ -2201,6 +2201,7 @@
       state.dashboardV5DragStart = null;
     });
     chart.addEventListener('wheel', function(event) {
+      if (window.matchMedia('(max-width: 900px), (pointer: coarse)').matches) { return; }
       event.preventDefault();
       dashboardV5ZoomChart_(event.deltaY < 0 ? 0.5 : 2);
     }, { passive: false });
@@ -2295,6 +2296,40 @@
     return quality === 'sufficient' ? 'Buona' : quality === 'partial' ? 'Parziale' : 'Insufficiente';
   }
 
+  function dashboardV5RenderFlowDetail_(recent, detail, bandText) {
+    var root = document.getElementById('v3-flow-detail');
+    var weeks = recent.window_weeks;
+    var weeksText = weeks === null || weeks === undefined
+      ? 'finestra configurata' : 'ultime ' + dashboardV3Text_(weeks) + ' settimane';
+    var start = recent.window_start ? formatItalianDate(recent.window_start) : 'Dato non disponibile';
+    var end = recent.window_end ? formatItalianDate(recent.window_end) : 'Dato non disponibile';
+    var timezone = recent.timezone || 'timezone non disponibile';
+    root.innerHTML =
+      '<dl class="v3-flow-current">' +
+        '<dt>Lavori attivi adesso</dt><dd>' + escapeHtml(dashboardV3Text_(detail.wip_current)) + '</dd>' +
+        '<dt>Fascia configurata</dt><dd>' + escapeHtml(bandText) + '</dd>' +
+      '</dl>' +
+      '<section class="v3-flow-throughput" aria-labelledby="v3-flow-throughput-title">' +
+        '<h3 id="v3-flow-throughput-title">Ritmo di completamento</h3>' +
+        '<p>Media mobile sulle ' + escapeHtml(weeksText) +
+          '. È la finestra della capacità osservata, distinta dalla finestra più ampia dello storico WIP.</p>' +
+        '<div class="v3-flow-rate-table-wrap"><table class="v3-flow-rate-table">' +
+          '<thead><tr><th scope="col">Lettura</th><th scope="col">Completamenti</th><th scope="col">Punti</th></tr></thead>' +
+          '<tbody>' +
+            '<tr><th scope="row">Riferimento configurato</th><td>' + escapeHtml(dashboardV3Text_(detail.reference_completions_per_week, '/settimana')) + '</td><td>' + escapeHtml(dashboardV3Text_(detail.reference_points_per_week, '/settimana')) + '</td></tr>' +
+            '<tr><th scope="row">Osservato nel periodo</th><td>' + escapeHtml(dashboardV3Text_(recent.visits_per_week, '/settimana')) + '</td><td>' + escapeHtml(dashboardV3Text_(recent.points_per_week, '/settimana')) + '</td></tr>' +
+            '<tr><th scope="row">Campione nel periodo</th><td>' + escapeHtml(dashboardV3Text_(recent.sample_size, ' completamenti')) + '</td><td>' + escapeHtml(dashboardV3Text_(recent.completed_points, ' punti')) + '</td></tr>' +
+          '</tbody>' +
+        '</table></div>' +
+        '<dl class="v3-flow-evidence">' +
+          '<dt>Soglia usata per lo stato</dt><dd>' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')) + '</dd>' +
+          '<dt>Qualità del campione</dt><dd>' + escapeHtml(dashboardV4QualityLabel_(recent.quality)) + '</dd>' +
+          '<dt>Periodo osservato</dt><dd>' + escapeHtml(start + ' — ' + end + ' · ' + timezone) + '</dd>' +
+          '<dt>Settimane con completamenti</dt><dd>' + escapeHtml(dashboardV3Text_(recent.weeks_with_completions) + (weeks ? ' su ' + dashboardV3Text_(weeks) : '')) + '</dd>' +
+        '</dl>' +
+      '</section>';
+  }
+
   // Fase 4a: la precisione di presentazione della home e' intenzionalmente
   // inferiore a quella del contratto backend e dei calcoli diagnostici.
   function dashboardV3FormatHomeEstimate_(value, maximumFractionDigits, suffix) {
@@ -2385,17 +2420,7 @@
     var bandText = detail.wip_target_min === null || detail.wip_target_max === null
       ? 'Taratura non configurata'
       : detail.wip_target_min + '–' + detail.wip_target_max + ' lavori';
-    renderDl('v3-flow-detail', {
-      'Lavori attivi adesso': dashboardV3Text_(detail.wip_current),
-      'Fascia configurata': bandText,
-      'Riferimento configurato': dashboardV3Text_(detail.reference_points_per_week, ' punti/settimana'),
-      'Riferimento completamenti': dashboardV3Text_(detail.reference_completions_per_week, ' completamenti/settimana'),
-      'Soglia di rallentamento': dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana'),
-      'Ritmo recente': dashboardV3Text_(recent.points_per_week, ' punti/settimana'),
-      'Qualità ritmo recente': dashboardV4QualityLabel_(recent.quality),
-      'Finestra ritmo recente': (recent.window_start || 'Dato non disponibile') + ' — ' + (recent.window_end || 'Dato non disponibile') + ' · ' + (recent.timezone || 'timezone non disponibile'),
-      'Campione ritmo recente': dashboardV3Text_(recent.sample_size, ' completamenti · ' + dashboardV3Text_(recent.completed_points, ' punti') + ' · ' + dashboardV3Text_(recent.weeks_with_completions, ' settimane con completamenti'))
-    });
+    dashboardV5RenderFlowDetail_(recent, detail, bandText);
 
     var diagnostic = ((dashboard.diagnostics || {}).summary || {});
     var timingDiagnostic = ((dashboard.diagnostics || {}).timing || {});
@@ -2828,17 +2853,13 @@
     var tooltipLines = [dateLabel, 'Già acquisito  ' + dashboardV3Text_(values.future),
       'WIP nuovo  ' + dashboardV3Text_(values.wipNew), 'WIP rework  ' + dashboardV3Text_(values.wipRework),
       'WIP totale  ' + dashboardV3Text_(values.wip), 'In attesa  ' + dashboardV3Text_(values.waiting),
-      'Completato  ' + dashboardV3Text_(values.completed), 'Totale  ' + dashboardV3Text_(values.total),
-      'Ingressi cumulativi  ' + dashboardV3Text_(values.cumulativeEntries),
-      'Completamenti cumulativi  ' + dashboardV3Text_(values.cumulativeCompleted),
-      'Nuovi / rientri / consegne  ' + dashboardV3Text_(selected.new_work_jobs) + ' / ' +
-        dashboardV3Text_(selected.rework_wip_episodes) + ' / ' + dashboardV3Text_(selected.completed_visits)];
-    var tooltipWidth = 250;
-    var tooltipHeight = 220;
+      'Completato  ' + dashboardV3Text_(values.completed), 'Totale  ' + dashboardV3Text_(values.total)];
+    var tooltipWidth = 220;
+    var tooltipHeight = 164;
     var tooltipX = crossX + 12;
     if (tooltipX + tooltipWidth > width - pad.right) { tooltipX = crossX - tooltipWidth - 12; }
     var tooltipY = 28;
-    ctx.fillStyle = 'rgba(255,255,255,.96)';
+    ctx.fillStyle = 'rgba(255,255,255,.84)';
     ctx.strokeStyle = '#98a2b3';
     ctx.lineWidth = 1;
     ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);

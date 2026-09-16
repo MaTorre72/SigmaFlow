@@ -43,6 +43,18 @@ Le rate lines opzionali mostrano la pendenza fra prima e ultima boundary del
 periodo visibile, normalizzata per la durata reale in settimane. Ingresso e
 completamento sono indipendenti e cambiano unità insieme al CFD.
 
+Nel dettaglio dello Stato del flusso, il ritmo di completamento osservato usa
+`capacity_window_weeks`: è una media mobile distinta dalla finestra
+`wip_trend_weeks` usata per serie e analisi WIP. Riferimento, osservato e
+campione sono presentati in colonne parallele per completamenti e punti; la
+soglia che determina lo stato resta espressa in punti/settimana.
+
+Lo zoom tramite rotella è disattivato sotto 900 px e sui dispositivi con
+puntatore coarse, così il canvas non interrompe lo scorrimento verticale della
+pagina. Il tooltip sovrapposto mostra soltanto stock, composizione e totale;
+cumulative e movimenti del bucket restano nel riepilogo testuale accessibile
+sotto il grafico.
+
 I confronti CFD possono usare il periodo precedente equivalente, lo stesso
 periodo dell'anno precedente o un intervallo Da/A dedicato. Il browser
 seleziona sempre bucket già calcolati dal backend; non ricostruisce stock,

@@ -1050,7 +1050,19 @@
   .v3-status-detail summary,
   .v3-diagnostics summary,
   .legacy-dashboard > summary { cursor: pointer; font-weight: 700; }
-  .v3-status-detail dl { margin-top: 12px; }
+  .v3-flow-detail { margin-top: 14px; }
+  .v3-flow-current { margin-bottom: 16px; }
+  .v3-flow-throughput { border-top: 1px solid var(--line); padding-top: 14px; }
+  .v3-flow-throughput h3 { font-size: 15px; margin: 0 0 4px; }
+  .v3-flow-throughput > p { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+  .v3-flow-rate-table-wrap { max-width: 100%; overflow-x: auto; }
+  .v3-flow-rate-table { font-size: 13px; width: 100%; }
+  .v3-flow-rate-table th,
+  .v3-flow-rate-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: right; }
+  .v3-flow-rate-table th:first-child { padding-left: 0; text-align: left; }
+  .v3-flow-rate-table thead th { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  .v3-flow-rate-table tbody td { font-weight: 700; }
+  .v3-flow-evidence { margin-top: 12px; }
 
   .v3-card-grid {
     display: grid;
@@ -1601,5 +1613,8 @@
     .v3-chart-wrap canvas { min-width: 560px; }
     .v3-cfd-charts.comparing { grid-template-columns: 1fr; }
     .v3-flow-status { padding: 18px; }
+    .v3-flow-rate-table th,
+    .v3-flow-rate-table td { padding: 7px 6px; }
+    .v3-flow-rate-table { font-size: 12px; }
   }
 </style>
