@@ -5959,6 +5959,10 @@ function testDashboardV3FlowStatePrecedenceAndRhythm() {
   var result = dashboardV3FlowState_(input.current, input.capacity, input.config);
   assertEquals_('SLOWING', result.system_flow_status, 'A: ritmo 5,63 sotto la soglia configurata 7,25');
   assertEquals_(7.25, result.system_flow_detail.slowing_threshold_points_per_week, 'A: soglia derivata solo dai parametri CONFIG');
+  assertEquals_(14.5, result.calibration.delivery_reference_points_per_week, 'riferimento esplicito di consegna');
+  input.capacity.active_flow = { points_per_week: 1000, jobs_per_week: 100 };
+  assertEquals_('SLOWING', dashboardV3FlowState_(input.current, input.capacity, input.config).system_flow_status,
+    'turnover WIP alto non modifica SLOWING');
 
   input = dashboardV3FlowTestInputs_(2, null, 'insufficient');
   assertEquals_('UNDERFED', dashboardV3FlowState_(input.current, input.capacity, input.config).system_flow_status,

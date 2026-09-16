@@ -2353,31 +2353,22 @@
     var weeks = recent.window_weeks;
     var weeksText = weeks === null || weeks === undefined
       ? 'finestra configurata' : 'ultime ' + dashboardV3Text_(weeks) + ' settimane ISO complete';
-    var start = recent.window_start ? formatItalianDate(recent.window_start) : 'Dato non disponibile';
-    var end = recent.window_end ? formatItalianDate(recent.window_end) : 'Dato non disponibile';
-    var timezone = recent.timezone || 'timezone non disponibile';
     root.innerHTML =
       '<dl class="v3-flow-current">' +
         '<dt>Lavori attivi adesso</dt><dd>' + escapeHtml(dashboardV3Text_(detail.wip_current)) + '</dd>' +
         '<dt>Fascia configurata</dt><dd>' + escapeHtml(bandText) + '</dd>' +
       '</dl>' +
       '<section class="v3-flow-throughput" aria-labelledby="v3-flow-throughput-title">' +
-        '<h3 id="v3-flow-throughput-title">Ritmo di completamento</h3>' +
-        '<p>Media sulle ' + escapeHtml(weeksText) +
-          '. È la finestra della capacità osservata, distinta dalla finestra più ampia dello storico WIP.</p>' +
+        '<h3 id="v3-flow-throughput-title">Ritmo recente delle consegne</h3>' +
+        '<p>Media sulle ' + escapeHtml(weeksText) + '.</p>' +
         '<div class="v3-flow-rate-table-wrap"><table class="v3-flow-rate-table">' +
           '<thead><tr><th scope="col">Lettura</th><th scope="col">Completamenti</th><th scope="col">Punti</th></tr></thead>' +
           '<tbody>' +
-            '<tr><th scope="row">Riferimento configurato</th><td>' + escapeHtml(dashboardV3Text_(detail.reference_completions_per_week, '/settimana')) + '</td><td>' + escapeHtml(dashboardV3Text_(detail.reference_points_per_week, '/settimana')) + '</td></tr>' +
-            '<tr><th scope="row">Osservato nel periodo</th><td>' + escapeHtml(dashboardV3Text_(recent.visits_per_week, '/settimana')) + '</td><td>' + escapeHtml(dashboardV3Text_(recent.points_per_week, '/settimana')) + '</td></tr>' +
-            '<tr><th scope="row">Campione nel periodo</th><td>' + escapeHtml(dashboardV3Text_(recent.sample_size, ' completamenti')) + '</td><td>' + escapeHtml(dashboardV3Text_(recent.completed_points, ' punti')) + '</td></tr>' +
+            '<tr><th scope="row">Osservato</th><td>' + escapeHtml(dashboardV3Text_(recent.visits_per_week, '/settimana')) + '</td><td>' + escapeHtml(dashboardV3Text_(recent.points_per_week, '/settimana')) + '</td></tr>' +
           '</tbody>' +
         '</table></div>' +
         '<dl class="v3-flow-evidence">' +
-          '<dt>Soglia usata per lo stato</dt><dd>' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')) + '</dd>' +
-          '<dt>Qualità del campione</dt><dd>' + escapeHtml(dashboardV4QualityLabel_(recent.quality)) + '</dd>' +
-          '<dt>Periodo osservato</dt><dd>' + escapeHtml(start + ' — ' + end + ' · ' + timezone) + '</dd>' +
-          '<dt>Settimane con completamenti</dt><dd>' + escapeHtml(dashboardV3Text_(recent.weeks_with_completions) + (weeks ? ' su ' + dashboardV3Text_(weeks) : '')) + '</dd>' +
+          '<dt>Soglia di rallentamento</dt><dd>' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')) + '</dd>' +
         '</dl>' +
       '</section>';
   }

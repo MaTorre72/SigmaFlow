@@ -1027,6 +1027,9 @@ function dashboardV3Calibration_(config) {
     valid: valid,
     wip_target_min_jobs: minimum,
     wip_target_max_jobs: maximum,
+    // Le due chiavi CONFIG storiche sono riferimenti di consegna, non di turnover WIP.
+    delivery_reference_points_per_week: referencePoints,
+    delivery_reference_completions_per_week: referenceCompletions,
     reference_points_per_week: referencePoints,
     reference_completions_per_week: referenceCompletions,
     slow_ratio: slowRatio,
@@ -1043,7 +1046,7 @@ function dashboardV3FlowState_(currentWork, capacity, config) {
   var minimum = calibration.wip_target_min_jobs;
   var maximum = calibration.wip_target_max_jobs;
   var lower = calibration.valid
-    ? round_(calibration.reference_points_per_week * calibration.slow_ratio) : null;
+    ? round_(calibration.delivery_reference_points_per_week * calibration.slow_ratio) : null;
   var recent = capacity.observed || {};
   var recentValue = recent.rolling_capacity_points_per_week;
   var recentReliable = recent.quality === 'sufficient' && recentValue !== null;

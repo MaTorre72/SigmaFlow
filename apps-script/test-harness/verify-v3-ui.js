@@ -39,12 +39,13 @@ function verifyV3Ui() {
     ['mapping dal contratto V2/V3', client.includes('renderDashboardV3_(metrics.dashboardState)')],
     ['stato del flusso limitato alle cinque etichette approvate', ['Sottoalimentato', 'Regolare', 'Rallentato', 'Carico elevato', 'Dati insufficienti'].every(label => client.includes(label))],
     ['classificazione e parametri obsoleti assenti dai sorgenti applicativi', obsoleteFlowTokens.every(token => !applicationSources.includes(token))],
-    ['dettaglio usa solo riferimenti configurati', client.includes('detail.reference_points_per_week') && client.includes('detail.reference_completions_per_week') && client.includes('detail.slowing_threshold_points_per_week')],
+    ['dettaglio stato usa solo i fattori decisionali', client.includes('detail.wip_current') &&
+      client.includes('detail.slowing_threshold_points_per_week') && !client.includes('detail.reference_points_per_week') &&
+      !client.includes('Qualità del campione</dt>')],
     ['dettaglio ritmo esplicita finestra e doppia unità',
-      client.includes('Ritmo di completamento') && client.includes('recent.window_weeks') &&
+      client.includes('Ritmo recente delle consegne') && client.includes('recent.window_weeks') &&
       client.includes('recent.visits_per_week') && client.includes('recent.points_per_week') &&
-      client.includes('distinta dalla finestra più ampia dello storico WIP') &&
-      client.includes('formatItalianDate(recent.window_start)') &&
+      client.includes('settimane ISO complete') &&
       !client.includes('ultime 8 settimane') && style.includes('.v3-flow-rate-table')],
     ['WIP letto dal backend', renderer.includes('current.wip_jobs') && renderer.includes('current.wip_points')],
     ['lavoro futuro letto dal backend', renderer.includes('future.future_work_jobs') && renderer.includes('future.future_work_points')],
@@ -138,7 +139,8 @@ function verifyV3Ui() {
     ['aggiornamento lungo segnalato in modo centrale', markup.includes('id="v3-loading-state"') && markup.includes('Il calcolo può richiedere alcuni secondi.') && client.includes('setDashboardV3Loading_(true)') && client.includes('setDashboardV3Loading_(false)')],
     ['dashboard legacy caricata solo su apertura', client.includes("legacy.addEventListener('toggle'") && client.includes("callApi('getMetrics')")],
     ['vista precedente secondaria', markup.includes('<details class="legacy-dashboard">') && markup.includes('Vista precedente — confronto')],
-    ['riferimento configurato e prova recente separati', client.includes('detail.reference_points_per_week') && client.includes('recent.window_start') && client.includes('recent.weeks_with_completions')],
+    ['riferimento configurato e prova recente separati', client.includes('calibration.reference_points_per_week') &&
+      client.includes('recent.points_per_week') && !client.includes('Riferimento configurato</th>')],
     ['terminologia rientri senza etichette ripresa', markup.includes('Rientri nel lavoro') && !/Episodi di ripresa|Lavori ripresi|Ripresa numero|Data della ripresa/i.test(markup + client)],
     ['drill-down rientri con identificazione umana e provenienza', client.includes("['cliente', 'Cliente'], ['incarico', 'Incarico'], ['numero_rientro', 'Rientro n.'], ['stato_provenienza', 'Stato di provenienza'], ['data_uscita_precedente', 'Data uscita precedente'], ['data_ripresa', 'Data rientro']")],
     ['export completamenti riconciliabile', client.includes('recent_completions') && client.includes("['numero_visita', 'Numero visita']") && client.includes("['consegna_ts', 'Consegna']")],
