@@ -357,7 +357,7 @@ function seedDefaultConfig_(sheet) {
   var descriptions = {
     team_size: 'Numero di persone attive',
     observation_window_days: 'Finestra temporale metriche',
-    wip_trend_weeks: 'Settimane di storico disponibili per serie e analisi WIP',
+    wip_trend_weeks: 'Profondità massima delle serie settimanali operative WIP. Non definisce né la finestra di osservazione né l\'inizio dello storico affidabile per la taratura.',
     capacity_window_weeks: 'Settimane ISO complete concluse nella finestra di osservazione recente',
     history_reliable_from: 'Prima data dalla quale lo storico board è affidabile per taratura e capacità',
     min_samples_capacity: 'Numero minimo di visite completate per stimare la capacita osservata',

@@ -1,6 +1,80 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-16
 
+## V5 — gate umano 6F approvato sul TEST (2026-09-16)
+
+Marco ha dichiarato esplicitamente: **«Approvo il gate 6F della V5 sul TEST»**.
+Il collaudo umano finale della V5 è quindi approvato per l'ambiente TEST,
+dopo la correzione della Fase 5E e il completamento della Fase 7 inclusa 7G.
+Questa approvazione non costituisce autorizzazione a pubblicare o scrivere
+in PROD, né a fare push/merge su `main`: tali azioni richiedono una decisione
+separata. Nessuna azione di deploy è stata eseguita per registrare il gate.
+
+## Fase 7 — hardening v3 su TEST (2026-09-16)
+
+Il suggerimento diagnostico usa ora la **mediana indipendente** delle finestre
+valide di flusso attivo in punti e in lavori/settimana, calcolata senza
+arrotondamenti intermedi. La legge di Little applica rispettivamente queste
+due mediane alla permanenza WIP ponderata per punti e alla permanenza media
+per lavori, non al ritmo delle sole ultime settimane. Il valore TEST grezzo
+di **14,3125 punti/settimana** è visualizzato come **14,31**; la stima è
+**3,8 lavori · 28,85 punti**. La mediana indipendente dei lavori è **1,875
+lavori/settimana**, visualizzata come 1,88 nei dati. La fascia CONFIG resta
+**3–5 lavori**, senza attribuirle un inesistente intervallo di punti. La
+taratura è soltanto proposta e non modifica le soglie operative.
+
+La taratura attraversa tutte le settimane ISO complete a partire dallo
+storico affidabile, indipendentemente dalla profondità della serie WIP
+operativa. Nel TEST: `history_reliable_from` **22/03/2026**, **25 settimane
+complete affidabili**, **18 finestre valide**, **45 episodi WIP chiusi**.
+Le serie operative continuano a rispettare `wip_trend_weeks=26`; la sua
+descrizione in CONFIG TEST e nello schema chiarisce che non limita lo storico
+affidabile della taratura. `capacity_window_weeks=8` resta la lunghezza delle
+finestre e non il numero totale di settimane esaminate.
+
+Audit dei consumatori diretti e transitivi di `wip_trend_weeks`:
+
+- `Model.gs` (`calculateMetrics_`): serie settimanali WIP/flow e derivate
+  legacy, limitate come serie operative; `checkS4WipCoverage_` è diagnostica
+  di copertura, non alimenta la taratura.
+- `DashboardV2.gs` (`dashboardV2Capacity_`): costruzione delle settimane
+  operative e del ritmo consegne recente; la finestra finale resta N
+  settimane configurate. `dashboardV2Flow_` e il CFD derivato conservano la
+  profondità della serie per il grafico.
+- `dashboardV7ActiveFlow_` recente è ancora una misura operativa sulle ultime
+  N settimane della serie; il precedente suggerimento ne ereditava
+  indirettamente il taglio e Little ne assumeva il ritmo. Ora un calendario
+  completo affidabile e lo stesso calcolatore di stock del CFD alimentano
+  mediana e Little, senza secondo algoritmo di ricostruzione dello stock.
+
+Le due anomalie `discontinuous_from` sono state riesaminate sui log TEST:
+`JOB-20260707-OTGC` entra in WIP il **14/08 09:00** e va in attesa il
+**25/08 09:00**; `JOB-20260707-QW1M` entra il **29/07 08:00** e va in
+attesa il **29/07 09:00**. In entrambi i casi il `from` incongruente è
+segnalato, ma la successione ordinata dei `to` determina apertura e chiusura
+dell'episodio: classificazione **deterministico con anomalia**, incluso nei
+45 episodi. Nessuna regola generale della normalizzazione V2 è stata
+modificata e non è stata introdotta un'esclusione arbitraria; i timestamp
+non validi continuano a essere scartati dal normalizzatore.
+
+La Diagnostica ha quattro blocchi: Parametri configurati, Capacità e
+rientri, **Taratura WIP suggerita dai dati** (tre valori primari) e Qualità e
+copertura (campione, intervalli e avvertenze). La nota interpretativa sulla
+capacità compare solo se il flusso attivo recente supera le consegne recenti
+confrontate a precisione piena. Nel browser TEST reale si vedono **16,5**
+contro **5,63 punti/settimana**, nota presente, 14,31, 3,8/28,85 e 3–5
+lavori; la resa stretta del pannello è stata controllata. Home e CFD
+rimangono presenti, ultimo bucket **6/6 identità**, nessuna nuova linea
+turnover. Verifiche automatiche: **259/259 Apps Script**, **47/47 UI**.
+Push al solo progetto TEST e pull isolato con **17/17 file identici**;
+nessuna scrittura PROD, nessun push/merge su `main`.
+
+Il limite sugli episodi WIP aperti permane: la stima può essere ottimistica.
+Il gate umano **6F non era approvato automaticamente** a conclusione di
+questo hardening; l'approvazione esplicita successiva è registrata sopra.
+La precedente cifra 14,32 e la struttura a cinque blocchi qui
+sotto documentano lo stato storico precedente a questo hardening.
+
 ## Fase 7 — miglioramenti metodologici completati su TEST (2026-09-16)
 
 7A–7F sono state implementate in ordine, testate e chiuse in commit separati:

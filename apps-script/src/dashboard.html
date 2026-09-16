@@ -150,12 +150,11 @@
     <details class="v3-diagnostics">
       <summary>Diagnostica e taratura</summary>
       <section class="v7-diagnostic-block"><h3>Parametri configurati</h3><dl id="v7-config-detail"></dl></section>
-      <section class="v7-diagnostic-block"><h3>Capacità e rientri</h3><dl id="v7-capacity-detail"></dl></section>
-      <section class="v7-diagnostic-block"><h3>Taratura suggerita</h3><dl id="v7-suggestion-detail"></dl><p>Intervallo osservato, non intervallo di confidenza. La proposta non modifica CONFIG.</p></section>
-      <section class="v7-diagnostic-block"><h3>WIP suggerito da Little</h3><dl id="v7-little-detail"></dl><p>Controllo informativo: gli episodi ancora aperti sono esclusi e il valore può essere ottimistico.</p></section>
+      <section class="v7-diagnostic-block"><h3>Capacità e rientri</h3><dl id="v7-capacity-detail"></dl><p id="v7-capacity-note" hidden>Il sistema movimenta più lavoro di quanto ne porti a consegna; i rientri descrivono lavoro già transitato nel WIP.</p></section>
+      <section class="v7-diagnostic-block"><h3>Taratura WIP suggerita dai dati</h3><dl id="v7-suggestion-detail"></dl><p>Stima diagnostica, non una nuova soglia operativa. Non modifica CONFIG.</p></section>
       <section class="v7-diagnostic-block"><h3>Qualità e copertura</h3>
         <p id="v3-diagnostics-message">Riepilogo diagnostico in caricamento.</p>
-        <dl id="v7-coverage-detail"></dl><dl id="v3-diagnostics-detail"></dl>
+        <dl id="v7-coverage-detail"></dl><p>Le finestre sovrapposte descrivono un intervallo osservato, non un intervallo di confidenza. Gli episodi WIP ancora aperti sono esclusi dalla permanenza media: il WIP di riferimento può essere ottimistico.</p><dl id="v3-diagnostics-detail"></dl>
         <dl id="v3-performance-detail"></dl><p id="v3-history-message" class="v3-card-detail"></p>
       </section>
     </details>

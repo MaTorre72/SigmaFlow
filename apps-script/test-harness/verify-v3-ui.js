@@ -35,6 +35,8 @@ function verifyV3Ui() {
     client.indexOf("chart.addEventListener('keydown'"),
     client.indexOf("var comparisonChart")
   );
+  const noteFunction = client.match(/function dashboardV7ShouldShowCapacityNote_\([^)]*\) \{[\s\S]*?\n  \}/);
+  const shouldShowNote = noteFunction ? new Function('return (' + noteFunction[0] + ');')() : null;
   const checks = [
     ['mapping dal contratto V2/V3', client.includes('renderDashboardV3_(metrics.dashboardState)')],
     ['stato del flusso limitato alle cinque etichette approvate', ['Sottoalimentato', 'Regolare', 'Rallentato', 'Carico elevato', 'Dati insufficienti'].every(label => client.includes(label))],
@@ -146,11 +148,25 @@ function verifyV3Ui() {
     ['export completamenti riconciliabile', client.includes('recent_completions') && client.includes("['numero_visita', 'Numero visita']") && client.includes("['consegna_ts', 'Consegna']")],
     ['nessuna taratura automatica esposta', !markup.includes('Taratura suggerita dai dati') && !client.includes('included_in_baseline')],
     ['riepilogo diagnostico attivo', renderer.includes('diagnostic.last_cfd_bucket') && markup.includes('v3-diagnostics-detail') && !markup.includes('Controlli diagnostici non ancora attivi')],
-    ['diagnostica Fase 7 in cinque blocchi senza card o linea CFD',
-      ['Parametri configurati', 'Capacità e rientri', 'Taratura suggerita', 'WIP suggerito da Little', 'Qualità e copertura']
+    ['diagnostica Fase 7 in quattro blocchi senza card o linea CFD',
+      ['Parametri configurati', 'Capacità e rientri', 'Taratura WIP suggerita dai dati', 'Qualità e copertura']
         .every(label => markup.includes('<h3>' + label + '</h3>')) &&
-      ['v7-config-detail', 'v7-capacity-detail', 'v7-suggestion-detail', 'v7-little-detail', 'v7-coverage-detail']
+      !markup.includes('id="v7-little-detail"') &&
+      ['v7-config-detail', 'v7-capacity-detail', 'v7-suggestion-detail', 'v7-coverage-detail']
         .every(id => markup.includes('id="' + id + '"') && renderer.includes("renderDl('" + id + "'"))],
+    ['tre valori primari e metadati nel dettaglio secondario',
+      ['Capacità attiva stimata', 'WIP di riferimento suggerito', 'Fascia WIP configurata']
+        .every(label => renderer.slice(renderer.indexOf("renderDl('v7-suggestion-detail'"),
+          renderer.indexOf("renderDl('v7-coverage-detail'")).includes("'" + label + "'")) &&
+      ['Finestre valide', 'Intervallo osservato', 'Periodo coperto', 'Permanenza media nel WIP', 'Permanenza ponderata per punti']
+        .every(label => !renderer.slice(renderer.indexOf("renderDl('v7-suggestion-detail'"),
+          renderer.indexOf("renderDl('v7-coverage-detail'")).includes("'" + label + "'") &&
+          renderer.slice(renderer.indexOf("renderDl('v7-coverage-detail'")).includes("'" + label + "'")) &&
+      !/WIP ottimale|WIP massimo/.test(applicationSources)],
+    ['nota capacità presente solo se turnover osservato maggiore delle consegne',
+      shouldShowNote && !shouldShowNote(2, 2) && !shouldShowNote(1, 2) &&
+      !shouldShowNote(null, 2) && shouldShowNote(3, 2) &&
+      renderer.includes("document.getElementById('v7-capacity-note').hidden = !dashboardV7ShouldShowCapacityNote_")],
     ['ordine mobile preservato dal markup', markup.indexOf('v3-flow-status') < markup.indexOf('v3-wip-jobs') && markup.indexOf('v3-wip-jobs') < markup.indexOf('v3-future-jobs') && markup.indexOf('v3-future-jobs') < markup.indexOf('v3-committed-weeks') && markup.indexOf('v3-committed-weeks') < markup.indexOf('v3-waiting-jobs') && markup.indexOf('v3-waiting-jobs') < markup.indexOf('v3-flow-chart')]
   ];
   const failures = checks.filter(([, passed]) => !passed).map(([name]) => name);
