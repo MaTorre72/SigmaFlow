@@ -1,10 +1,34 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-16
 
-## Fase 7 — avanzamento metodologico (2026-09-16)
+## Fase 7 — miglioramenti metodologici completati su TEST (2026-09-16)
 
-Sottofasi 7A–7C completate in commit separati; la 7D introduce Little sul
-flusso di episodi WIP chiusi. **Limite metodologico noto:** gli episodi ancora
+7A–7F sono state implementate in ordine, testate e chiuse in commit separati:
+`6a8e9d4` settimane ISO complete, `5eca994` turnover WIP backend,
+`eca8fe0` storico affidabile e taratura mediana, `45fc118` Little,
+`7b612d8` Diagnostica in cinque blocchi, `36ca99b` Stato del flusso
+semplificato. 7G: **256/256 test Apps Script** e **45/45 verifiche UI**,
+push sul solo progetto TEST alle **16:55:49**, pull isolato **17/17 file
+identici**. Nel TEST reale la home conserva le card e il CFD: ultimo bucket
+**6/6 identità verificate**, nessuna nuova linea turnover; Stato, card
+Rientri e cinque blocchi diagnostici controllati nel browser. La nuova
+dicitura della card Rientri esplicita le settimane ISO complete. Il test
+deterministico confronta la stessa dashboard il giovedì e la domenica della
+medesima settimana: ritmo consegne, flusso attivo e quota rientri invariati;
+non è stato alterato l'orologio del server reale. Nessun push su `main`,
+nessuna scrittura PROD.
+
+Nel CONFIG del solo database TEST è stata aggiunta la riga
+`history_reliable_from` **vuota** (nessuna data scelta automaticamente), e
+aggiornata la descrizione di `capacity_window_weeks`. I valori di taratura
+approvati nel foglio sono rimasti intatti; nel browser il riferimento di
+consegna è **6 punti/settimana**, la taratura attiva proposta è **14,32
+punti/settimana** e non è applicata alla CONFIG. La riga CONFIG è stata
+verificata via metadati/celle native; la visualizzazione del foglio nel
+browser integrato non era raggiungibile, quindi la verifica visiva del foglio
+non è stata possibile.
+
+**Limite metodologico noto:** gli episodi ancora
 aperti sono esclusi dalla durata media; quelli più lunghi hanno maggiore
 probabilità di essere ancora aperti, perciò il WIP suggerito risulta
 tendenzialmente sottostimato (ottimistico). Nessuna correzione del censoring è
@@ -15,6 +39,9 @@ Audit §35: `flow_reference_points_per_week` e
 **consegna tecnica** (punti e completamenti). Il turnover WIP resta misura e
 suggerimento distinti, senza riferimento CONFIG approvato; non serve rinominare
 o dividere i due parametri esistenti e non è stata migrata la taratura vigente.
+
+Con Fase 5E già DONE e Fase 7 completata su TEST, il gate umano **6F è
+approvabile da Marco**, ma non è dichiarato approvato qui.
 
 ## V5 — Fase 5E riaperta e corretta su TEST (2026-09-16)
 

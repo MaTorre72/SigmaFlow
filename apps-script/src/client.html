@@ -2444,7 +2444,7 @@
       : 'Settimane equivalenti necessarie per assorbire il lavoro già acquisito.';
     document.getElementById('v3-resumed-count').textContent = rework.rework_window_weeks === null || rework.rework_window_weeks === undefined
       ? 'Dato non ancora disponibile'
-      : dashboardV3Text_(rework.rework_wip_entries) + ' nelle ultime ' + dashboardV3Text_(rework.rework_window_weeks) + ' settimane';
+      : dashboardV3Text_(rework.rework_wip_entries) + ' nelle ultime ' + dashboardV3Text_(rework.rework_window_weeks) + ' settimane ISO complete';
     document.getElementById('v3-resumed-share').textContent = rework.rework_share === null || rework.rework_share === undefined
       ? 'Quota non ancora disponibile'
       : Math.round(Number(rework.rework_share) * 100) + '% degli ingressi in lavorazione';

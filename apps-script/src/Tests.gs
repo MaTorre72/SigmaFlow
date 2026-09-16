@@ -5488,6 +5488,16 @@ function testDashboardV7CapacityWindowReconfiguresAllRecentRates() {
   assertEquals_(5, two.capacity.new_work.new_work_capacity_points_per_week, 'nuovi ingressi su due settimane');
   assertEquals_(1, one.rework.rework_window_weeks, 'rientri sulla finestra configurata');
   assertEquals_(2, two.rework.rework_window_weeks, 'rientri riconfigurabili');
+  var sameWeekLater = buildDashboardStateV2_(jobs, visits,
+    dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 3, min_samples_capacity: 1 }),
+    new Date('2026-04-05T22:00:00+02:00'));
+  assertEquals_(two.capacity.observed.rolling_capacity_points_per_week,
+    sameWeekLater.capacity.observed.rolling_capacity_points_per_week,
+    'ritmo consegne invariato cambiando giorno e ora nella stessa settimana ISO');
+  assertEquals_(two.capacity.active_flow.points_per_week, sameWeekLater.capacity.active_flow.points_per_week,
+    'flusso attivo recente invariato nello stesso intervallo consolidato');
+  assertEquals_(two.rework.rework_share, sameWeekLater.rework.rework_share,
+    'quota rientri invariata nello stesso intervallo consolidato');
 }
 
 function testDashboardV2CommittedWeeksIsNullWhenCapacityIsInsufficient() {
