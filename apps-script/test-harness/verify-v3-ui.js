@@ -40,7 +40,8 @@ function verifyV3Ui() {
       client.includes('Ritmo di completamento') && client.includes('recent.window_weeks') &&
       client.includes('recent.visits_per_week') && client.includes('recent.points_per_week') &&
       client.includes('distinta dalla finestra più ampia dello storico WIP') &&
-      client.includes('formatItalianDate(recent.window_start)') && style.includes('.v3-flow-rate-table')],
+      client.includes('formatItalianDate(recent.window_start)') &&
+      !client.includes('ultime 8 settimane') && style.includes('.v3-flow-rate-table')],
     ['WIP letto dal backend', renderer.includes('current.wip_jobs') && renderer.includes('current.wip_points')],
     ['lavoro futuro letto dal backend', renderer.includes('future.future_work_jobs') && renderer.includes('future.future_work_points')],
     ['settimane lette dal backend', renderer.includes('future.committed_weeks')],

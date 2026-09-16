@@ -5,7 +5,8 @@ Aggiornato: 2026-09-16
 
 Il dettaglio “Come è stata ottenuta questa lettura” distingue ora la finestra
 della capacità osservata da quella più ampia dello storico WIP. Il primo dato
-deriva da `capacity_window_weeks` (**8 settimane** nel TEST corrente);
+deriva dinamicamente da `capacity_window_weeks` (**8 settimane** nel TEST
+corrente, non incorporate nel testo dell'interfaccia);
 `wip_trend_weeks` (**26**) alimenta invece serie e analisi storiche WIP. Il
 blocco “Ritmo di completamento” dispone riferimento, osservato e campione in
 due colonne parallele — Completamenti e Punti — e presenta il periodo come
