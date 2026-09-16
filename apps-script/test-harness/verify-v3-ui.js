@@ -144,6 +144,11 @@ function verifyV3Ui() {
     ['export completamenti riconciliabile', client.includes('recent_completions') && client.includes("['numero_visita', 'Numero visita']") && client.includes("['consegna_ts', 'Consegna']")],
     ['nessuna taratura automatica esposta', !markup.includes('Taratura suggerita dai dati') && !client.includes('included_in_baseline')],
     ['riepilogo diagnostico attivo', renderer.includes('diagnostic.last_cfd_bucket') && markup.includes('v3-diagnostics-detail') && !markup.includes('Controlli diagnostici non ancora attivi')],
+    ['diagnostica Fase 7 in cinque blocchi senza card o linea CFD',
+      ['Parametri configurati', 'Capacità e rientri', 'Taratura suggerita', 'WIP suggerito da Little', 'Qualità e copertura']
+        .every(label => markup.includes('<h3>' + label + '</h3>')) &&
+      ['v7-config-detail', 'v7-capacity-detail', 'v7-suggestion-detail', 'v7-little-detail', 'v7-coverage-detail']
+        .every(id => markup.includes('id="' + id + '"') && renderer.includes("renderDl('" + id + "'"))],
     ['ordine mobile preservato dal markup', markup.indexOf('v3-flow-status') < markup.indexOf('v3-wip-jobs') && markup.indexOf('v3-wip-jobs') < markup.indexOf('v3-future-jobs') && markup.indexOf('v3-future-jobs') < markup.indexOf('v3-committed-weeks') && markup.indexOf('v3-committed-weeks') < markup.indexOf('v3-waiting-jobs') && markup.indexOf('v3-waiting-jobs') < markup.indexOf('v3-flow-chart')]
   ];
   const failures = checks.filter(([, passed]) => !passed).map(([name]) => name);

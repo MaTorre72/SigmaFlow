@@ -2340,6 +2340,10 @@
     return shown + (suffix || '');
   }
 
+  function dashboardV7LocalDate_(value) {
+    return value ? new Date(value).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }) : 'Non configurato';
+  }
+
   function dashboardV4QualityLabel_(quality) {
     return quality === 'sufficient' ? 'Buona' : quality === 'partial' ? 'Parziale' : 'Insufficiente';
   }
@@ -2471,6 +2475,51 @@
     dashboardV5RenderFlowDetail_(recent, detail, bandText);
 
     var diagnostic = ((dashboard.diagnostics || {}).summary || {});
+    var suggestion = ((dashboard.diagnostics || {}).calibration_suggestion || {});
+    var little = ((dashboard.diagnostics || {}).little_wip || {});
+    var active = ((dashboard.capacity || {}).active_flow || {});
+    var observed = ((dashboard.capacity || {}).observed || {});
+    var calibration = flow.calibration || {};
+    var reliableDate = suggestion.history_reliable_from
+      ? dashboardV7LocalDate_(suggestion.history_reliable_from) : 'Non configurato';
+    renderDl('v7-config-detail', {
+      'Finestra di osservazione': dashboardV3Text_(recent.window_weeks, ' settimane ISO complete'),
+      'Storico affidabile da': reliableDate,
+      'Fascia WIP configurata': bandText,
+      'Riferimento consegne': dashboardV3Text_(calibration.reference_points_per_week, ' punti/settimana') +
+        ' · ' + dashboardV3Text_(calibration.reference_completions_per_week, ' completamenti/settimana'),
+      'Soglia di rallentamento': dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')
+    });
+    renderDl('v7-capacity-detail', {
+      'Flusso attivo osservato': dashboardV3Text_(active.points_per_week, ' punti/settimana'),
+      'Ritmo di consegna': dashboardV3Text_(observed.rolling_capacity_points_per_week, ' punti/settimana'),
+      'Rientri negli ingressi WIP': rework.rework_share === null || rework.rework_share === undefined
+        ? 'Dato non ancora disponibile' : dashboardV3Text_(100 * rework.rework_share, '%')
+    });
+    renderDl('v7-suggestion-detail', {
+      'Flusso attivo suggerito': dashboardV3Text_(suggestion.suggested_active_flow_points_per_week, ' punti/settimana'),
+      'Finestre valide': dashboardV3Text_(suggestion.valid_window_count),
+      'Intervallo osservato': suggestion.observed_min_points_per_week === null || suggestion.observed_min_points_per_week === undefined
+        ? 'Dato non ancora disponibile' : dashboardV3Text_(suggestion.observed_min_points_per_week) + '–' +
+          dashboardV3Text_(suggestion.observed_max_points_per_week, ' punti/settimana'),
+      'Periodo coperto': suggestion.covered_from
+        ? dashboardV7LocalDate_(suggestion.covered_from) + ' – ' + dashboardV7LocalDate_(suggestion.covered_until)
+        : 'Dato non ancora disponibile'
+    });
+    renderDl('v7-little-detail', {
+      'Permanenza media nel WIP': dashboardV3Text_(little.mean_wip_episode_duration_weeks, ' settimane'),
+      'Permanenza ponderata per punti': dashboardV3Text_(little.weighted_mean_wip_episode_duration_weeks, ' settimane'),
+      'WIP coerente con il flusso osservato': dashboardV3Text_(little.little_wip_jobs, ' lavori') +
+        ' · ' + dashboardV3Text_(little.little_wip_points, ' punti'),
+      'Fascia WIP configurata': bandText
+    });
+    renderDl('v7-coverage-detail', {
+      'Settimane complete affidabili': dashboardV3Text_(suggestion.complete_reliable_weeks),
+      'Finestre valide': dashboardV3Text_(suggestion.valid_window_count),
+      'Episodi WIP utilizzati': dashboardV3Text_(little.sample_size),
+      'Consegne osservate': dashboardV3Text_(observed.sample_size),
+      'Inizio storico affidabile': reliableDate
+    });
     var timingDiagnostic = ((dashboard.diagnostics || {}).timing || {});
     var cfdCheck = diagnostic.last_cfd_bucket || {};
     document.getElementById('v3-diagnostics-message').textContent = diagnostic.scope_note || 'Riepilogo dei controlli implementati.';
