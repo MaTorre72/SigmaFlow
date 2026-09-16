@@ -316,6 +316,8 @@ function runAllTests() {
     testDashboardV2RejectsCapacityWindowLongerThanWipHistory,
     testDashboardV2WipEpisodeTransitions,
     testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes,
+    testDashboardV7CalibrationUsesReliableValidWindowsAndMedian,
+    testDashboardV7ReliableHistoryExcludesRecentCapacityButPreservesHistory,
     testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks,
     testDashboardV2FlowClassificationAndFromIndependence,
     testDashboardV2ISOCalendarAndDST,
@@ -5555,6 +5557,46 @@ function testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes() {
   assertEquals_(12, flow.closed_wip_points, 'taglia corrente contata a ogni uscita');
   assertEquals_(3, flow.jobs_per_week, 'turnover recente in episodi/settimana');
   assertEquals_(12, flow.points_per_week, 'turnover recente in punti/settimana');
+}
+
+function testDashboardV7CalibrationUsesReliableValidWindowsAndMedian() {
+  var starts = ['2026-01-05', '2026-01-12', '2026-01-19', '2026-01-26'];
+  var points = [100, 2, 4, 10];
+  var activeFlow = { weekly: starts.map(function(day, i) {
+    return { period_start: day + 'T00:00:00.000Z', period_end: new Date(Date.parse(day + 'T00:00:00Z') + 7 * 86400000).toISOString(),
+      closed_wip_points: points[i] };
+  }) };
+  var cfd = { weekly: activeFlow.weekly.map(function(row) {
+    return { period_start: row.period_start, avg_wip_jobs: 5 };
+  }) };
+  var config = { capacity_window_weeks: 2, wip_target_min_jobs: 3, history_reliable_from: '2026-01-12' };
+  var before = JSON.stringify(config);
+  var suggestion = dashboardV7CalibrationSuggestion_(activeFlow, cfd, config);
+  assertEquals_(3, suggestion.complete_reliable_weeks, 'settimana precedente resta fuori dalla taratura');
+  assertEquals_(2, suggestion.valid_window_count, 'due finestre affidabili');
+  assertEquals_(5, suggestion.suggested_active_flow_points_per_week, 'mediana delle due finestre 3 e 7');
+  assertEquals_(3, suggestion.observed_min_points_per_week, 'minimo osservato, non intervallo di confidenza');
+  assertEquals_(7, suggestion.observed_max_points_per_week, 'massimo osservato');
+  assertEquals_(before, JSON.stringify(config), 'nessuna autotaratura o scrittura CONFIG');
+  cfd.weekly[2].avg_wip_jobs = 0;
+  assertEquals_(0, dashboardV7CalibrationSuggestion_(activeFlow, cfd, config).valid_window_count,
+    'finestre sottoalimentate escluse');
+  assertEquals_(null, dashboardV7CalibrationSuggestion_(activeFlow, cfd, config).suggested_active_flow_points_per_week,
+    'nessuna stima se non vi sono finestre valide');
+}
+
+function testDashboardV7ReliableHistoryExcludesRecentCapacityButPreservesHistory() {
+  var jobs = [{ job_id: 'J', status: 'backlog', size_points: 4,
+    activity_log_json: JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-01-06T12:00:00+01:00' }]) }];
+  var visits = [{ job_id: 'J', numero_visita: 1, consegna_ts: '2026-01-06T12:00:00+01:00' }];
+  var config = dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 4,
+    min_samples_capacity: 1, history_reliable_from: '2026-01-12' });
+  var state = buildDashboardStateV2_(jobs, visits, config, new Date('2026-01-19T12:00:00+01:00'));
+  assertEquals_(null, state.capacity.observed.rolling_capacity_points_per_week, 'finestra di capacità non interamente affidabile');
+  assertEquals_(null, state.capacity.active_flow.points_per_week, 'turnover recente non usa periodo inaffidabile');
+  assertEquals_(0, state.diagnostics.calibration_suggestion.valid_window_count, 'storico non affidabile escluso dalla taratura');
+  assertTrue_(state.flow.events.some(function(event) { return event.job_id === 'J'; }),
+    'evento antecedente resta nella ricostruzione storica');
 }
 
 function testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks() {

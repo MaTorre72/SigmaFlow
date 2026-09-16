@@ -364,15 +364,26 @@ function dashboardV2Capacity_(jobs, archivedJobs, visits, archivedVisits, config
   var recent = buckets.slice(buckets.length - windowWeeks);
   var since = new Date(recent[0].period_start);
   var until = new Date(recent[recent.length - 1].period_end);
+  var reliableFrom = dashboardV7ReliableFrom_(config);
+  var recentReliable = !reliableFrom || (!isNaN(reliableFrom.getTime()) && since >= reliableFrom);
   var allJobs = jobs.concat(archivedJobs || []);
   var jobsById = indexBy_(allJobs, 'job_id');
   var allVisits = visits.concat(archivedVisits || []);
   var observed = dashboardV2CapacityMetric_(allVisits, jobsById, since, until, windowWeeks, minSamples);
+  if (!recentReliable) {
+    observed.rolling_capacity_points_per_week = null;
+    observed.rolling_capacity_visits_per_week = null;
+    observed.quality = 'insufficient';
+    observed.sample_size = 0;
+    observed.completed_points = 0;
+    observed.weeks_with_completions = 0;
+    observed.completions = [];
+  }
   // Decisione Marco: punti del job contati una sola volta, all'apertura
   // dell'episodio WIP 1. Riprese conteggiate senza replicare la taglia.
   var weekly = dashboardV2Absorption_(episodes, jobsById, buckets, windowWeeks, minSamples);
   var firstCycle = weekly[weekly.length - 1];
-  var newWorkPoints = firstCycle.new_work_capacity_points_per_week;
+  var newWorkPoints = recentReliable ? firstCycle.new_work_capacity_points_per_week : null;
   var committedWeeks = newWorkPoints !== null && newWorkPoints > 0
     ? round_(futureWorkPoints / newWorkPoints)
     : null;
@@ -382,9 +393,9 @@ function dashboardV2Capacity_(jobs, archivedJobs, visits, archivedVisits, config
     observed: observed,
     new_work: {
       new_work_capacity_points_per_week: newWorkPoints,
-      new_work_capacity_jobs_per_week: firstCycle.new_work_capacity_jobs_per_week,
-      quality: firstCycle.quality,
-      sample_size: firstCycle.sample_size,
+      new_work_capacity_jobs_per_week: recentReliable ? firstCycle.new_work_capacity_jobs_per_week : null,
+      quality: recentReliable ? firstCycle.quality : 'insufficient',
+      sample_size: recentReliable ? firstCycle.sample_size : 0,
       window_weeks: windowWeeks,
       first_cycle_definition: 'apertura del primo episodio WIP del job',
       bucket_convention: 'complete_iso_week_start_inclusive_end_exclusive',
@@ -392,7 +403,7 @@ function dashboardV2Capacity_(jobs, archivedJobs, visits, archivedVisits, config
     },
     committed_weeks: committedWeeks,
     committed_weeks_quality: committedWeeks === null ? 'insufficient' : firstCycle.quality,
-    committed_weeks_sample_size: firstCycle.sample_size
+    committed_weeks_sample_size: recentReliable ? firstCycle.sample_size : 0
   };
 }
 
@@ -482,6 +493,66 @@ function dashboardV7ActiveFlow_(episodes, jobsById, weeks, windowWeeks) {
     jobs_per_week: recent.length === windowWeeks ? round_(jobs / windowWeeks) : null,
     points_per_week: recent.length === windowWeeks ? round_(points / windowWeeks) : null,
     weekly: weekly
+  };
+}
+
+function dashboardV7ReliableFrom_(config) {
+  if (!config.history_reliable_from) { return null; }
+  var date = dashboardV2Instant_(config.history_reliable_from);
+  return isNaN(date.getTime()) ? new Date(NaN) : date;
+}
+
+// Una finestra valida richiede N settimane ISO complete affidabili e lavoro
+// attivo sufficiente; la media WIP viene dalla serie CFD backend esistente.
+function dashboardV7CalibrationSuggestion_(activeFlow, cfd, config) {
+  var size = Number(config.capacity_window_weeks);
+  var minimum = dashboardV2OptionalNumber_(config.wip_target_min_jobs);
+  var reliableFrom = dashboardV7ReliableFrom_(config);
+  var validConfig = isFinite(size) && size > 0 && Math.floor(size) === size &&
+    minimum !== null && minimum >= 0 && (!reliableFrom || !isNaN(reliableFrom.getTime()));
+  var cfdByStart = {};
+  ((cfd || {}).weekly || []).forEach(function(row) { cfdByStart[row.period_start] = row; });
+  var weekly = ((activeFlow || {}).weekly || []).filter(function(row) {
+    return !reliableFrom || Date.parse(row.period_start) >= reliableFrom.getTime();
+  });
+  var validWindows = [];
+  if (validConfig) {
+    for (var i = size - 1; i < weekly.length; i++) {
+      var sample = weekly.slice(i + 1 - size, i + 1);
+      var wip = sample.map(function(row) {
+        var cfdRow = cfdByStart[row.period_start];
+        return cfdRow && cfdRow.avg_wip_jobs;
+      });
+      if (wip.some(function(value) { return value === null || value === undefined || !isFinite(Number(value)); })) { continue; }
+      var meanWip = wip.reduce(function(sum, value) { return sum + Number(value); }, 0) / size;
+      if (meanWip < minimum) { continue; }
+      validWindows.push({
+        period_start: sample[0].period_start,
+        period_end: sample[sample.length - 1].period_end,
+        mean_wip_jobs: round_(meanWip),
+        active_flow_points_per_week: round_(sample.reduce(function(sum, row) {
+          return sum + row.closed_wip_points;
+        }, 0) / size)
+      });
+    }
+  }
+  var sorted = validWindows.map(function(row) { return row.active_flow_points_per_week; }).sort(function(a, b) { return a - b; });
+  var middle = Math.floor(sorted.length / 2);
+  var median = !sorted.length ? null : sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  return {
+    history_reliable_from: reliableFrom && !isNaN(reliableFrom.getTime()) ? reliableFrom.toISOString() : null,
+    history_quality: validConfig ? 'valid' : 'invalid_configuration',
+    window_weeks: validConfig ? size : null,
+    minimum_mean_wip_jobs: minimum,
+    complete_reliable_weeks: weekly.length,
+    valid_window_count: validWindows.length,
+    suggested_active_flow_points_per_week: median === null ? null : round_(median),
+    observed_min_points_per_week: sorted.length ? sorted[0] : null,
+    observed_max_points_per_week: sorted.length ? sorted[sorted.length - 1] : null,
+    covered_from: validWindows.length ? validWindows[0].period_start : null,
+    covered_until: validWindows.length ? validWindows[validWindows.length - 1].period_end : null,
+    valid_windows: validWindows,
+    applied_to_config: false
   };
 }
 
@@ -1258,10 +1329,17 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   if (capacity.configuration_quality === 'valid') {
     capacity.active_flow = dashboardV7ActiveFlow_(episodes, indexBy_(allJobs, 'job_id'),
       dashboardV2CompleteIsoWeeks_(now, Number(config.wip_trend_weeks)), Number(config.capacity_window_weeks));
+    var reliableFrom = dashboardV7ReliableFrom_(config);
+    if (reliableFrom && (isNaN(reliableFrom.getTime()) ||
+      Date.parse(capacity.active_flow.window_start) < reliableFrom.getTime())) {
+      capacity.active_flow.jobs_per_week = null;
+      capacity.active_flow.points_per_week = null;
+    }
   }
   var flow = dashboardV2Flow_(normalized, episodes, allJobs, visits.concat(archivedVisits || []), config, now);
   var stockIndex = dashboardV2StockIndex_(normalized, allJobs);
   var cfd = dashboardV2CFD_(normalized, allJobs, flow, now, stockIndex);
+  var calibrationSuggestion = dashboardV7CalibrationSuggestion_(capacity.active_flow, cfd, config);
   var history = dashboardV2History_(normalized, allJobs, flow, now, stockIndex);
   var systemFlow = dashboardV3FlowState_(currentWork, capacity, config);
   var recentRework = dashboardV3RecentRework_(capacity);
@@ -1274,6 +1352,7 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   });
   var diagnostic = dashboardV2DiagnosticContract_();
   diagnostic.diagnostics.summary = dashboardV4Diagnostics_(normalized, visits.concat(archivedVisits || []), allJobs, cfd);
+  diagnostic.diagnostics.calibration_suggestion = calibrationSuggestion;
   diagnostic.diagnostics.timing = {
     interval_method: 'first_operational_entry_to_next_done; intermediate_returns_do_not_reset',
     median_method: 'average_of_middle_values',

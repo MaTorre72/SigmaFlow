@@ -128,6 +128,7 @@ var SIGMAFLOW = {
     // V2.2: finestra e minimo campionario della capacita' osservata.
     // Sono parametri distinti dalla finestra legacy e dallo storico WIP.
     capacity_window_weeks: 8,
+    history_reliable_from: '',
     min_samples_capacity: 5,
     // Taratura operativa: nessun valore implicito o autocalibrato.
     wip_target_min_jobs: '',
