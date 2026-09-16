@@ -325,6 +325,7 @@ function runAllTests() {
     testDashboardV2QuarterlyHistoryAndEmptyStates,
     testDashboardV5DailyCalendarLeapYearAndSelectedPeriod,
     testDashboardV5HorizontalEquivalentTimeKnownDates,
+    testDashboardV5HorizontalEquivalentTimeIntermediateAndClamp,
     testDashboardV2HistoryEmptyAndFromIndependence,
     testDashboardV2DiagnosticsAreExplicitAndIsolated,
     testDashboardV3FlowStatePrecedenceAndRhythm,
@@ -5757,14 +5758,41 @@ function testDashboardV5HorizontalEquivalentTimeKnownDates() {
     row('2026-01-03T00:00:00Z', 1, 3, 5, 15),
     row('2026-01-05T00:00:00Z', 3, 3, 10, 15),
     row('2026-01-07T00:00:00Z', 3, 4, 15, 20)];
-  dashboardV5AttachEquivalentTimes_(rows);
-  assertEquals_('2026-01-04T00:00:00.000Z', rows[0].equivalent_time.jobs.exit_at,
+  var jobs = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 2);
+  var points = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'points', 10);
+  var unfinished = dashboardV5EquivalentTimeAtQuota_(rows, 3, 'jobs', 4);
+  assertEquals_('2026-01-04T00:00:00.000Z', jobs.exit_at,
     'quota lavori 2 incrocia fra i bucket');
-  assertEquals_(3, rows[0].equivalent_time.jobs.duration_calendar_days, 'delta lavori in giorni calendario');
-  assertEquals_('2026-01-05T00:00:00.000Z', rows[0].equivalent_time.points.exit_at,
+  assertEquals_(3, jobs.duration_calendar_days, 'delta lavori in giorni calendario');
+  assertEquals_('2026-01-05T00:00:00.000Z', points.exit_at,
     'quota punti 10 incrocia al bucket noto');
-  assertEquals_(4, rows[0].equivalent_time.points.duration_calendar_days, 'delta punti in giorni calendario');
-  assertEquals_(null, rows[3].equivalent_time.jobs.exit_at, 'quota non completata esplicita');
+  assertEquals_(4, points.duration_calendar_days, 'delta punti in giorni calendario');
+  assertEquals_(null, unfinished.exit_at, 'quota non completata esplicita');
+  dashboardV5AttachEquivalentTimes_(rows);
+  assertEquals_(jobs.exit_at, rows[0].equivalent_time.jobs.exit_at, 'scorciatoia massima coerente con quota libera');
+  assertEquals_(points.exit_at, rows[0].equivalent_time.points.exit_at, 'punti massimi coerenti con quota libera');
+}
+
+function testDashboardV5HorizontalEquivalentTimeIntermediateAndClamp() {
+  function row(at, completed, acquired) {
+    return { sampled_at: at, boundaries: { jobs: {
+      completed_boundary: completed, future_work_boundary: acquired } } };
+  }
+  var rows = [row('2026-01-01T00:00:00Z', 0, 4),
+    row('2026-01-03T00:00:00Z', 1, 4),
+    row('2026-01-05T00:00:00Z', 3, 4),
+    row('2026-01-07T00:00:00Z', 4, 4)];
+  var middle = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 2);
+  var maximum = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 4);
+  assertEquals_(2, middle.quota, 'quota intermedia mantenuta');
+  assertEquals_('2026-01-04T00:00:00.000Z', middle.exit_at, 'incrocio intermedio');
+  assertEquals_(3, middle.duration_calendar_days, 'durata intermedia');
+  assertEquals_(6, maximum.duration_calendar_days, 'durata massima diversa sulla stessa colonna');
+  assertEquals_(maximum.exit_at, dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 99).exit_at,
+    'quota sopra il massimo bloccata al bordo superiore');
+  var below = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', -2);
+  assertEquals_(0, below.quota, 'quota negativa bloccata a zero');
+  assertEquals_(0, below.duration_calendar_days, 'quota gia raggiunta nello stesso bucket');
 }
 
 function testDashboardV2DiagnosticsAreExplicitAndIsolated() {

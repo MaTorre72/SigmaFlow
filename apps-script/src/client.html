@@ -2108,6 +2108,7 @@
         });
         state.dashboardV3ChartUnit = button.dataset.v3ChartUnit;
         state.dashboardV3ChartHoverIndex = null;
+        state.dashboardV5MeasureHover = null;
         drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
       });
     });
@@ -2119,6 +2120,8 @@
         state.dashboardV5ChartWindow = null;
         state.dashboardV3ChartHoverIndex = null;
         state.dashboardV3ChartSelectedIndex = null;
+        state.dashboardV5MeasureHover = null;
+        state.dashboardV5MeasureSelections = {};
         drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
       });
     });
@@ -2136,11 +2139,13 @@
       document.getElementById('v3-cfd-measure').classList.remove('active');
       document.getElementById('v3-cfd-measure').setAttribute('aria-pressed', 'false');
       state.dashboardV5RangeStart = null;
+      state.dashboardV5MeasureHover = null;
       event.currentTarget.classList.toggle('active', state.dashboardV5SelectingRange);
       event.currentTarget.setAttribute('aria-pressed', state.dashboardV5SelectingRange ? 'true' : 'false');
     });
     document.getElementById('v3-cfd-measure').addEventListener('click', function(event) {
       state.dashboardV5Measuring = !state.dashboardV5Measuring;
+      state.dashboardV5MeasureHover = null;
       state.dashboardV5SelectingRange = false;
       document.getElementById('v3-cfd-select-range').classList.remove('active');
       document.getElementById('v3-cfd-select-range').setAttribute('aria-pressed', 'false');
@@ -2185,9 +2190,27 @@
       var ratio = (px - geometry.left) / Math.max(1, geometry.right - geometry.left);
       return Math.max(0, Math.min(geometry.rows - 1, Math.round(ratio * Math.max(1, geometry.rows - 1))));
     }
+    function chartMeasureFromPointer_(event, index) {
+      var geometry = chart._v3ChartGeometry;
+      var rows = chart._v3ChartRows || [];
+      if (!geometry || !rows[index]) { return null; }
+      var rect = chart.getBoundingClientRect();
+      var py = (event.clientY - rect.top) * (geometry.height / rect.height);
+      // Inversa della stessa y(value) usata dal disegno, non una seconda scala.
+      var requested = geometry.maximum * (geometry.bottom - py) / (geometry.bottom - geometry.top);
+      var upper = Number(rows[index].boundaries[state.dashboardV3ChartUnit].future_work_boundary || 0);
+      return { row: rows[index], unit: state.dashboardV3ChartUnit,
+        quota: Math.round(Math.max(0, Math.min(upper, requested)) * 100) / 100 };
+    }
     chart.addEventListener('pointermove', function(event) {
       var index = chartIndexFromPointer_(event);
-      if (index === null || index === state.dashboardV3ChartHoverIndex) { return; }
+      if (index === null) { return; }
+      if (state.dashboardV5Measuring) {
+        var hovered = chartMeasureFromPointer_(event, index);
+        if (hovered && state.dashboardV5MeasureHover && state.dashboardV5MeasureHover.row === hovered.row &&
+            state.dashboardV5MeasureHover.quota === hovered.quota) { return; }
+        state.dashboardV5MeasureHover = hovered;
+      } else if (index === state.dashboardV3ChartHoverIndex) { return; }
       state.dashboardV3ChartHoverIndex = index;
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
@@ -2208,6 +2231,7 @@
     chart.addEventListener('pointerleave', function() {
       if (state.dashboardV3ChartHoverIndex === null || state.dashboardV3ChartHoverIndex === undefined) { return; }
       state.dashboardV3ChartHoverIndex = null;
+      state.dashboardV5MeasureHover = null;
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
     chart.addEventListener('click', function(event) {
@@ -2222,17 +2246,41 @@
         return;
       }
       state.dashboardV3ChartSelectedIndex = clicked;
+      if (state.dashboardV5Measuring) {
+        state.dashboardV5MeasureSelections = state.dashboardV5MeasureSelections || {};
+        state.dashboardV5MeasureSelections[state.dashboardV3ChartUnit] = chartMeasureFromPointer_(event, clicked);
+      }
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
     chart.addEventListener('keydown', function(event) {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') { return; }
+      var horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+      var vertical = state.dashboardV5Measuring &&
+        (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Home' || event.key === 'End');
+      if (!horizontal && !vertical) { return; }
       var rows = chart._v3ChartRows || [];
       if (!rows.length) { return; }
       event.preventDefault();
       var current = state.dashboardV3ChartSelectedIndex;
       if (current === null || current === undefined) { current = rows.length - 1; }
-      state.dashboardV3ChartSelectedIndex = Math.max(0, Math.min(rows.length - 1,
-        current + (event.key === 'ArrowLeft' ? -1 : 1)));
+      if (horizontal) {
+        state.dashboardV3ChartSelectedIndex = Math.max(0, Math.min(rows.length - 1,
+          current + (event.key === 'ArrowLeft' ? -1 : 1)));
+        state.dashboardV3ChartHoverIndex = null;
+        state.dashboardV5MeasureHover = null;
+      } else {
+        var row = rows[current];
+        var unit = state.dashboardV3ChartUnit;
+        var upper = Number(row.boundaries[unit].future_work_boundary || 0);
+        state.dashboardV5MeasureSelections = state.dashboardV5MeasureSelections || {};
+        var saved = state.dashboardV5MeasureSelections[unit];
+        var quota = saved && saved.row === row ? saved.quota : upper;
+        quota = event.key === 'Home' ? 0 : event.key === 'End' ? upper :
+          Math.max(0, Math.min(upper, quota + (event.key === 'ArrowUp' ? 1 : -1)));
+        state.dashboardV3ChartSelectedIndex = current;
+        state.dashboardV5MeasureSelections[unit] = { row: row, unit: unit, quota: quota };
+        state.dashboardV5MeasureHover = null;
+        state.dashboardV3ChartHoverIndex = null;
+      }
       drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
     });
     var comparisonChart = document.getElementById('v3-flow-comparison-chart');
@@ -2660,6 +2708,39 @@
     canvas._v3ChartRows = rows;
   }
 
+  // Stessa interpolazione di dashboardV5EquivalentTimeAtQuota_ sul backend.
+  // Legge soltanto le boundary gia' consegnate: nessuno stock o cumulata viene derivato qui.
+  function dashboardV5EquivalentTimeAtQuota_(rows, entryIndex, unit, requestedQuota) {
+    var row = rows[entryIndex];
+    var maximum = Number(row.boundaries[unit].future_work_boundary || 0);
+    var quota = Math.min(maximum, Math.max(0, Number(requestedQuota)));
+    var completedAtEntry = Number(row.boundaries[unit].completed_boundary || 0);
+    if (!(quota > completedAtEntry)) {
+      return { quota: quota, entry_at: row.sampled_at, exit_at: row.sampled_at,
+        duration_calendar_days: 0, quality: 'same_bucket' };
+    }
+    var exitIndex = entryIndex;
+    while (exitIndex < rows.length && Number(rows[exitIndex].boundaries[unit].completed_boundary || 0) < quota) { exitIndex++; }
+    if (exitIndex >= rows.length) {
+      return { quota: quota, entry_at: row.sampled_at, exit_at: null,
+        duration_calendar_days: null, quality: 'completion_not_yet_observed' };
+    }
+    var exitAt = Date.parse(rows[exitIndex].sampled_at);
+    if (exitIndex > 0) {
+      var previous = rows[exitIndex - 1];
+      var low = Number(previous.boundaries[unit].completed_boundary || 0);
+      var high = Number(rows[exitIndex].boundaries[unit].completed_boundary || 0);
+      if (high > low && quota > low) {
+        exitAt = Date.parse(previous.sampled_at) + (quota - low) / (high - low) *
+          (Date.parse(rows[exitIndex].sampled_at) - Date.parse(previous.sampled_at));
+      }
+    }
+    var entryAt = Date.parse(row.sampled_at);
+    return { quota: quota, entry_at: row.sampled_at, exit_at: new Date(exitAt).toISOString(),
+      duration_calendar_days: Math.round(Math.max(0, exitAt - entryAt) / 86400000 * 100) / 100,
+      quality: 'linear_interpolation_between_backend_buckets' };
+  }
+
   function drawDashboardV3Flow_(dashboard, unit) {
     var canvas = document.getElementById('v3-flow-chart');
     var empty = document.getElementById('v3-flow-chart-empty');
@@ -2694,7 +2775,8 @@
       return;
     }
     canvas.hidden = false;
-    canvas.setAttribute('aria-label', 'Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere ' + resolutionPrompt);
+    canvas.setAttribute('aria-label', 'Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere ' +
+      resolutionPrompt + (state.dashboardV5Measuring ? '; freccia su e giù per cambiare la quota, Inizio e Fine per i limiti' : ''));
     empty.hidden = true;
     var dpr = window.devicePixelRatio || 1;
     var width = Math.max(620, canvas.parentElement.clientWidth || 620);
@@ -2777,7 +2859,8 @@
       ctx.fillText(date.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }), x(index), height - 16);
     });
 
-    canvas._v3ChartGeometry = { width: width, left: pad.left, right: width - pad.right, rows: rows.length };
+    canvas._v3ChartGeometry = { width: width, height: height, left: pad.left, right: width - pad.right,
+      top: pad.top, bottom: plotBottom, maximum: maximum, rows: rows.length };
     canvas._v3ChartRows = rows;
     canvas._v3ChartWindowStart = windowed.start;
     var selectedIndex = state.dashboardV3ChartHoverIndex;
@@ -2787,7 +2870,7 @@
       selection.textContent = 'Sposta il puntatore o tocca il grafico per leggere ' + resolutionPrompt + '.';
       if (state.dashboardV5Measuring) {
         measureResult.hidden = false;
-        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>Seleziona una quota sulla curva degli ingressi.';
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>Tocca o fai clic sul grafico: l’altezza sceglie la quota, la posizione orizzontale sceglie la data. Da tastiera: ←/→ cambia data, ↑/↓ cambia quota, Inizio/Fine sceglie un limite.';
       } else { measureResult.hidden = true; }
       return;
     }
@@ -2816,14 +2899,24 @@
       dashboardV3Text_(selected.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(selected.completed_visits);
 
     if (state.dashboardV5Measuring) {
-      var measure = ((selected.equivalent_time || {})[unit] || {});
+      var history = (dashboard || {}).history || {};
+      var allRows = (resolution === 'day' ? history.daily : resolution === 'month' ? history.monthly : history.weekly) || [];
+      var sourceIndex = allRows.indexOf(selected);
+      var hoverMeasure = state.dashboardV5MeasureHover;
+      var savedMeasure = (state.dashboardV5MeasureSelections || {})[unit];
+      var chosen = hoverMeasure && hoverMeasure.row === selected && hoverMeasure.unit === unit
+        ? hoverMeasure : savedMeasure && savedMeasure.row === selected ? savedMeasure : null;
+      var selectedQuota = chosen ? chosen.quota : Number(boundaries.future_work_boundary || 0);
+      var measure = sourceIndex >= 0
+        ? dashboardV5EquivalentTimeAtQuota_(allRows, sourceIndex, unit, selectedQuota) : {};
+      var quotaLabel = 'Quota selezionata: ' + dashboardV3Text_(measure.quota, unit === 'jobs' ? ' lavori' : ' punti');
       measureResult.hidden = false;
       if (measure.exit_at && measure.duration_calendar_days !== null && measure.duration_calendar_days !== undefined) {
         var entryLabel = new Date(measure.entry_at).toLocaleDateString('it-IT');
         var exitLabel = new Date(measure.exit_at).toLocaleDateString('it-IT');
         var timing = (dashboard || {}).timing || {};
         measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>' +
-          'Data ingresso equivalente: ' + escapeHtml(entryLabel) + ' · Data uscita equivalente: ' + escapeHtml(exitLabel) +
+          escapeHtml(quotaLabel) + ' · Data ingresso equivalente: ' + escapeHtml(entryLabel) + ' · Data uscita equivalente: ' + escapeHtml(exitLabel) +
           ' · Durata: ' + escapeHtml(dashboardV3Text_(measure.duration_calendar_days, ' giorni')) +
           ' · P50 osservato: ' + escapeHtml(dashboardV3Text_(timing.lead_time_median_days, ' giorni')) +
           ' · P80 osservato: ' + escapeHtml(dashboardV3Text_(timing.lead_time_p80_days, ' giorni'));
@@ -2834,12 +2927,14 @@
         }
         if (exitPosition !== null && exitPosition >= selectedIndex) {
           ctx.strokeStyle = '#2f6b9a'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-          ctx.beginPath(); ctx.moveTo(x(selectedIndex), y(boundaries.future_work_boundary));
-          ctx.lineTo(x(exitPosition), y(boundaries.future_work_boundary)); ctx.stroke(); ctx.setLineDash([]);
+          ctx.beginPath(); ctx.moveTo(x(selectedIndex), y(measure.quota));
+          ctx.lineTo(x(exitPosition), y(measure.quota)); ctx.stroke(); ctx.setLineDash([]);
         }
       } else {
-        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>Completamento equivalente non ancora osservato nel periodo disponibile.';
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>' + escapeHtml(quotaLabel) +
+          ' · Completamento equivalente non ancora osservato nello storico disponibile.';
       }
+      ctx.fillStyle = '#2f6b9a'; ctx.beginPath(); ctx.arc(x(selectedIndex), y(measure.quota), 4, 0, Math.PI * 2); ctx.fill();
     } else { measureResult.hidden = true; }
     var crossX = x(selectedIndex);
     ctx.strokeStyle = '#101828';

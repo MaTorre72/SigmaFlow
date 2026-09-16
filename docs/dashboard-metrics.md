@@ -34,10 +34,19 @@ La legenda delle cinque bande può applicare un focus visivo: la serie scelta
 resta piena e le altre sono attenuate. La geometria dello stack non cambia;
 “Mostra tutte” azzera il focus.
 
-La modalità “Misura tempo” usa `equivalent_time.jobs/points`, calcolato dal
-backend mediante l'incrocio orizzontale fra boundary ingressi e completamenti.
-Mostra ingresso equivalente, uscita equivalente e durata, affiancati a P50 e
-P80 osservati; un incrocio futuro non ancora disponibile resta nullo.
+La modalità “Misura tempo” permette di scegliere data e quota cumulativa con
+le coordinate orizzontale e verticale del puntatore. La quota è vincolata fra
+zero e il bordo superiore degli ingressi della colonna selezionata, ed è
+sempre mostrata insieme a ingresso equivalente, uscita equivalente e durata.
+Da tastiera, le frecce orizzontali cambiano data, quelle verticali regolano
+la quota, mentre Inizio/Fine scelgono zero/massimo della colonna.
+L'incrocio usa i `completed_boundary` già prodotti dal backend, anche oltre
+il periodo momentaneamente visibile; il client applica la stessa
+interpolazione lineare del backend senza ricostruire stock o cumulative e
+senza round-trip durante l'interazione. `equivalent_time.jobs/points` resta
+nel contratto backend come esito per la quota massima. Un incrocio non ancora
+osservato resta nullo. P50 e P80 dei tempi effettivi conclusi sono mostrati
+accanto come confronto di plausibilità, non come misure equivalenti.
 
 Le rate lines opzionali mostrano la pendenza fra prima e ultima boundary del
 periodo visibile, normalizzata per la durata reale in settimane. Ingresso e

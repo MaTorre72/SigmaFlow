@@ -1,6 +1,34 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-16
 
+## V5 — Fase 5E riaperta e corretta su TEST (2026-09-16)
+
+Il collaudo umano reale di Marco ha riaperto la Fase 5E: l'aritmetica della
+misura orizzontale era corretta, ma la quota era sempre il bordo superiore
+`future_work_boundary`; il puntatore selezionava soltanto la data. Il
+checkpoint originale del 15/09 resta sotto, come evidenza storica.
+
+Ora posizione orizzontale e verticale scelgono rispettivamente bucket e
+quota cumulativa (fra zero e il massimo di quel bucket). Il pannello mostra
+sempre la quota scelta. Il client interpola sui `completed_boundary` già
+consegnati dal backend, usando lo stesso algoritmo parametrizzato e gli
+stessi casi limite; non ricalcola stock o cumulative e non richiede chiamate
+al backend durante la selezione. La ricerca dell'incrocio usa l'intero
+storico della risoluzione, anche oltre il periodo attualmente visibile.
+Sono disponibili anche ↑/↓ per regolare la quota e Inizio/Fine per i limiti;
+←/→ cambia data senza che il precedente hover del puntatore prevalga.
+
+Collaudo reale TEST, **31/12/2025**: in **Lavori**, quota massima **19 →
+222,29 giorni** (come nel checkpoint originale) e quota intermedia **5 →
+59 giorni**; in **Punti**, **147 → 235,58 giorni** e **117 → 196,99 giorni**.
+P50 **91,9** e P80 **155,28 giorni** restano visibili accanto a ogni misura.
+Le fixture della 5E esercitano la funzione generalizzata con quote esplicite;
+nuove prove coprono quota intermedia, clamp sotto zero/sopra il massimo e
+coerenza con la scorciatoia a quota massima. Verifica finale: **250/250 test
+Apps Script**, **44/44 verifiche UI**, push TEST alle **10:42:41**, pull
+isolato **17/17 file identici**. Nessuna scrittura PROD, nessun push/merge su
+`main`.
+
 ## Correzioni feedback Stato/CFD — pubblicate e collaudate su TEST (2026-09-16)
 
 Il dettaglio “Come è stata ottenuta questa lettura” distingue ora la finestra

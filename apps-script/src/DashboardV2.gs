@@ -611,42 +611,47 @@ function dashboardV2StocksFromIndex_(stockIndex, start, sampledAt, observedUntil
   return result;
 }
 
-// Per ogni quota sulla curva superiore degli ingressi individua il primo
-// incrocio con la cumulata dei completamenti. L'interpolazione e' lineare tra
-// due campioni backend; il client non ricostruisce questa geometria.
+// Individua il primo incrocio della quota richiesta con la cumulata dei
+// completamenti. Il client usa la stessa interpolazione sui campioni gia'
+// consegnati dal backend per consentire la selezione libera senza round-trip;
+// non ricostruisce stock, boundary o cumulative.
+function dashboardV5EquivalentTimeAtQuota_(rows, entryIndex, unit, requestedQuota) {
+  var row = rows[entryIndex];
+  var maximum = Number(row.boundaries[unit].future_work_boundary || 0);
+  var quota = Math.min(maximum, Math.max(0, Number(requestedQuota)));
+  var completedAtEntry = Number(row.boundaries[unit].completed_boundary || 0);
+  if (!(quota > completedAtEntry)) {
+    return { quota: quota, entry_at: row.sampled_at, exit_at: row.sampled_at,
+      duration_calendar_days: 0, quality: 'same_bucket' };
+  }
+  var exitIndex = entryIndex;
+  while (exitIndex < rows.length && Number(rows[exitIndex].boundaries[unit].completed_boundary || 0) < quota) { exitIndex++; }
+  if (exitIndex >= rows.length) {
+    return { quota: quota, entry_at: row.sampled_at, exit_at: null,
+      duration_calendar_days: null, quality: 'completion_not_yet_observed' };
+  }
+  var exitAt = Date.parse(rows[exitIndex].sampled_at);
+  if (exitIndex > 0) {
+    var previous = rows[exitIndex - 1];
+    var low = Number(previous.boundaries[unit].completed_boundary || 0);
+    var high = Number(rows[exitIndex].boundaries[unit].completed_boundary || 0);
+    if (high > low && quota > low) {
+      exitAt = Date.parse(previous.sampled_at) + (quota - low) / (high - low) *
+        (Date.parse(rows[exitIndex].sampled_at) - Date.parse(previous.sampled_at));
+    }
+  }
+  var entryAt = Date.parse(row.sampled_at);
+  return { quota: quota, entry_at: row.sampled_at, exit_at: new Date(exitAt).toISOString(),
+    duration_calendar_days: round_(Math.max(0, exitAt - entryAt) / 86400000),
+    quality: 'linear_interpolation_between_backend_buckets' };
+}
+
 function dashboardV5AttachEquivalentTimes_(rows) {
   ['jobs', 'points'].forEach(function(unit) {
-    var exitIndex = 0;
     rows.forEach(function(row, entryIndex) {
       row.equivalent_time = row.equivalent_time || {};
       var target = Number(row.boundaries[unit].future_work_boundary || 0);
-      var completedAtEntry = Number(row.boundaries[unit].completed_boundary || 0);
-      if (!(target > completedAtEntry)) {
-        row.equivalent_time[unit] = { entry_at: row.sampled_at, exit_at: row.sampled_at,
-          duration_calendar_days: 0, quality: 'same_bucket' };
-        return;
-      }
-      exitIndex = Math.max(exitIndex, entryIndex);
-      while (exitIndex < rows.length && Number(rows[exitIndex].boundaries[unit].completed_boundary || 0) < target) { exitIndex++; }
-      if (exitIndex >= rows.length) {
-        row.equivalent_time[unit] = { entry_at: row.sampled_at, exit_at: null,
-          duration_calendar_days: null, quality: 'completion_not_yet_observed' };
-        return;
-      }
-      var exitAt = Date.parse(rows[exitIndex].sampled_at);
-      if (exitIndex > 0) {
-        var previous = rows[exitIndex - 1];
-        var low = Number(previous.boundaries[unit].completed_boundary || 0);
-        var high = Number(rows[exitIndex].boundaries[unit].completed_boundary || 0);
-        if (high > low && target > low) {
-          exitAt = Date.parse(previous.sampled_at) + (target - low) / (high - low) *
-            (Date.parse(rows[exitIndex].sampled_at) - Date.parse(previous.sampled_at));
-        }
-      }
-      var entryAt = Date.parse(row.sampled_at);
-      row.equivalent_time[unit] = { entry_at: row.sampled_at, exit_at: new Date(exitAt).toISOString(),
-        duration_calendar_days: round_(Math.max(0, exitAt - entryAt) / 86400000),
-        quality: 'linear_interpolation_between_backend_buckets' };
+      row.equivalent_time[unit] = dashboardV5EquivalentTimeAtQuota_(rows, entryIndex, unit, target);
     });
   });
   return rows;

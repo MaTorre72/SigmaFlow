@@ -31,6 +31,10 @@ function verifyV3Ui() {
     client.indexOf("chart.addEventListener('wheel'"),
     client.indexOf("chart.addEventListener('pointerleave'")
   );
+  const chartKeydown = client.slice(
+    client.indexOf("chart.addEventListener('keydown'"),
+    client.indexOf("var comparisonChart")
+  );
   const checks = [
     ['mapping dal contratto V2/V3', client.includes('renderDashboardV3_(metrics.dashboardState)')],
     ['stato del flusso limitato alle cinque etichette approvate', ['Sottoalimentato', 'Regolare', 'Rallentato', 'Carico elevato', 'Dati insufficienti'].every(label => client.includes(label))],
@@ -82,11 +86,21 @@ function verifyV3Ui() {
       markup.includes('data-v3-cfd-series="wipRework"') && markup.includes('id="v3-cfd-show-all"') &&
       markup.includes('Mostra tutte') && client.includes('dashboardV5FocusedSeries') &&
       client.includes('ctx.globalAlpha = state.dashboardV5FocusedSeries') && client.includes('ctx.fill(); ctx.globalAlpha = 1')],
-    ['misura orizzontale usa il risultato backend in Lavori e Punti',
+    ['misura orizzontale interpola le boundary backend in Lavori e Punti',
       markup.includes('id="v3-cfd-measure"') && markup.includes('Tempo equivalente dal CFD') === false &&
-      client.includes("selected.equivalent_time") && client.includes("[unit]") &&
+      client.includes('dashboardV5EquivalentTimeAtQuota_(allRows, sourceIndex, unit, selectedQuota)') &&
+      client.includes('allRows.indexOf(selected)') &&
       client.includes('Data ingresso equivalente') && client.includes('Data uscita equivalente') &&
       client.includes('P50 osservato') && client.includes('P80 osservato')],
+    ['quota CFD selezionata con coordinata verticale e sempre mostrata',
+      client.includes('event.clientY - rect.top') && client.includes('geometry.maximum * (geometry.bottom - py)') &&
+      client.includes('Math.max(0, Math.min(upper, requested))') &&
+      client.includes('Quota selezionata: ') && client.includes('escapeHtml(quotaLabel)') &&
+      client.includes('state.dashboardV5MeasureSelections[state.dashboardV3ChartUnit]') &&
+      client.includes("event.key === 'ArrowUp'") && client.includes("event.key === 'ArrowDown'") &&
+      client.includes("event.key === 'Home'") && client.includes("event.key === 'End'") &&
+      chartKeydown.includes('state.dashboardV3ChartHoverIndex = null;') &&
+      chartKeydown.includes('state.dashboardV5MeasureHover = null;')],
     ['rate lines opzionali coerenti col periodo visibile',
       markup.includes('id="v3-cfd-rate-entry"') && markup.includes('id="v3-cfd-rate-completion"') &&
       client.includes('elapsedWeeks') && client.includes('future_work_boundary') &&
