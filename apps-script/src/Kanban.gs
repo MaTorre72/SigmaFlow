@@ -38,6 +38,7 @@ var SF_READ_ACTIONS_ = {
   getActivityLog: true,
   getArchivio: true,
   getCestino: true,
+  getDashboardMetrics: true,
   getMetrics: true
 };
 
@@ -105,6 +106,7 @@ function routeAction_(params) {
     moveColumn: moveColumn,
     updateOptionList: updateOptionList,
     seedTestData: seedTestData,
+    getDashboardMetrics: getDashboardMetrics,
     getMetrics: getMetrics
   };
 
@@ -210,6 +212,12 @@ function addJob(params) {
   var creationEvent = {
     id: generateActivityEventId_(),
     ts: now,
+    event_ts: now,
+    operation_ts: now,
+    created_operation_ts: now,
+    updated_operation_ts: now,
+    operation_actor: activityOperationActor_(),
+    operation_force: false,
     type: 'move',
     source: 'auto',
     to: targetColumn.id,
@@ -327,6 +335,12 @@ function moveJob(params) {
   var autoEvent = {
     id: generateActivityEventId_(),
     ts: now,
+    event_ts: now,
+    operation_ts: now,
+    created_operation_ts: now,
+    updated_operation_ts: now,
+    operation_actor: activityOperationActor_(),
+    operation_force: false,
     type: 'move',
     source: 'auto',
     to: targetColumn.id,
@@ -630,9 +644,16 @@ function updateJob(params) {
 // Costruisce l'evento candidato solo con i campi effettivamente forniti,
 // per non riempire il log di chiavi vuote/undefined.
 function buildActivityEventCandidate_(params, log) {
+  var operationTs = nowIso_();
   var candidate = {
     id: generateActivityEventId_(),
     ts: params.ts,
+    event_ts: params.ts,
+    operation_ts: operationTs,
+    created_operation_ts: params.created_operation_ts || operationTs,
+    updated_operation_ts: operationTs,
+    operation_actor: activityOperationActor_(),
+    operation_force: coerceBoolean_(params.force),
     type: params.type,
     source: 'manual'
   };
@@ -693,6 +714,10 @@ function addActivityEvent(params) {
 
   log.push(candidate);
   log.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+  // V4: persiste la catena completa, non soltanto il from del candidato.
+  // Lo storico pregresso resta intatto finche' non viene toccato.
+  log = recalculateMoveFrom_(log);
+  candidate = log.filter(function(event) { return event.id === candidate.id; })[0];
 
   // I campi strutturati (arrival_ts/incarico_ts/prep_ts/start_ts/done_ts)
   // sono una cache derivata dal log, non uno stato indipendente: si
@@ -847,6 +872,15 @@ function updateActivityEvent(params) {
   var mergedParams = Object.assign({}, existing, params);
   var candidate = buildActivityEventCandidate_(mergedParams, remaining);
   candidate.id = existing.id;
+  candidate.created_operation_ts = existing.created_operation_ts || existing.operation_ts || candidate.created_operation_ts;
+  candidate.audit_history = (existing.audit_history || []).slice();
+  candidate.audit_history.push({
+    action: 'update',
+    operation_ts: candidate.operation_ts,
+    operation_actor: candidate.operation_actor,
+    force: candidate.operation_force,
+    previous: activityEventAuditSnapshot_(existing)
+  });
 
   var validation = validateSequence_(remaining, candidate);
   if (validation.hardErrors.length) {
@@ -859,6 +893,8 @@ function updateActivityEvent(params) {
 
   remaining.push(candidate);
   remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
+  remaining = recalculateMoveFrom_(remaining);
+  candidate = remaining.filter(function(event) { return event.id === candidate.id; })[0];
 
   applyStructuralAlignment_(job, checkStructuralAlignment_(job, candidate));
   // P5/P5b: ricalcolo finale, dal log intero - vedi recomputeCurrentStatus_/
@@ -903,6 +939,23 @@ function deleteActivityEvent(params) {
 
   // Ricalcola "from" per gli eventi move rimasti, cosi' l'evento successivo
   // a quello cancellato torna a puntare alla colonna di provenienza corretta.
+  var operationTs = nowIso_();
+  remaining.push({
+    id: generateActivityEventId_(),
+    ts: operationTs,
+    event_ts: existing.ts,
+    operation_ts: operationTs,
+    created_operation_ts: operationTs,
+    updated_operation_ts: operationTs,
+    operation_actor: activityOperationActor_(),
+    operation_force: coerceBoolean_(params.force),
+    type: 'audit',
+    source: 'system',
+    action: 'delete',
+    target_event_id: existing.id,
+    previous: activityEventAuditSnapshot_(existing)
+  });
+  remaining.sort(function(a, b) { return compareTs_(a.ts, b.ts); });
   var recalculated = recalculateMoveFrom_(remaining);
 
   // La cancellazione puo' rendere l'ultimo campo strutturato alimentato

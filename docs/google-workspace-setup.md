@@ -16,6 +16,7 @@ Spreadsheet database creato e verificato:
 - Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@19`)
 - Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
 - Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=test>
+- Collaudo HEAD dopo `clasp push`: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzxoi0-mZWD4rRdcQ7fmEI241507eEa6bqJqvOrugg/dev?env=test>
 
 Nota: `clasp create --type sheets` ha creato un nuovo contenitore Google Sheets per il progetto Apps Script. Il codice SigmaFlow usa comunque il database canonico tramite `SIGMAFLOW.DEFAULT_SPREADSHEET_ID`.
 

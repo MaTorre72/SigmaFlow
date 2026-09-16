@@ -1,5 +1,1062 @@
 # Stato SigmaFlow
-Aggiornato: 2026-09-10
+Aggiornato: 2026-09-16
+
+## V5 — gate umano 6F approvato sul TEST (2026-09-16)
+
+Marco ha dichiarato esplicitamente: **«Approvo il gate 6F della V5 sul TEST»**.
+Il collaudo umano finale della V5 è quindi approvato per l'ambiente TEST,
+dopo la correzione della Fase 5E e il completamento della Fase 7 inclusa 7G.
+Questa approvazione non costituisce autorizzazione a pubblicare o scrivere
+in PROD, né a fare push/merge su `main`: tali azioni richiedono una decisione
+separata. Nessuna azione di deploy è stata eseguita per registrare il gate.
+
+## Fase 7 — hardening v3 su TEST (2026-09-16)
+
+Il suggerimento diagnostico usa ora la **mediana indipendente** delle finestre
+valide di flusso attivo in punti e in lavori/settimana, calcolata senza
+arrotondamenti intermedi. La legge di Little applica rispettivamente queste
+due mediane alla permanenza WIP ponderata per punti e alla permanenza media
+per lavori, non al ritmo delle sole ultime settimane. Il valore TEST grezzo
+di **14,3125 punti/settimana** è visualizzato come **14,31**; la stima è
+**3,8 lavori · 28,85 punti**. La mediana indipendente dei lavori è **1,875
+lavori/settimana**, visualizzata come 1,88 nei dati. La fascia CONFIG resta
+**3–5 lavori**, senza attribuirle un inesistente intervallo di punti. La
+taratura è soltanto proposta e non modifica le soglie operative.
+
+La taratura attraversa tutte le settimane ISO complete a partire dallo
+storico affidabile, indipendentemente dalla profondità della serie WIP
+operativa. Nel TEST: `history_reliable_from` **22/03/2026**, **25 settimane
+complete affidabili**, **18 finestre valide**, **45 episodi WIP chiusi**.
+Le serie operative continuano a rispettare `wip_trend_weeks=26`; la sua
+descrizione in CONFIG TEST e nello schema chiarisce che non limita lo storico
+affidabile della taratura. `capacity_window_weeks=8` resta la lunghezza delle
+finestre e non il numero totale di settimane esaminate.
+
+Audit dei consumatori diretti e transitivi di `wip_trend_weeks`:
+
+- `Model.gs` (`calculateMetrics_`): serie settimanali WIP/flow e derivate
+  legacy, limitate come serie operative; `checkS4WipCoverage_` è diagnostica
+  di copertura, non alimenta la taratura.
+- `DashboardV2.gs` (`dashboardV2Capacity_`): costruzione delle settimane
+  operative e del ritmo consegne recente; la finestra finale resta N
+  settimane configurate. `dashboardV2Flow_` e il CFD derivato conservano la
+  profondità della serie per il grafico.
+- `dashboardV7ActiveFlow_` recente è ancora una misura operativa sulle ultime
+  N settimane della serie; il precedente suggerimento ne ereditava
+  indirettamente il taglio e Little ne assumeva il ritmo. Ora un calendario
+  completo affidabile e lo stesso calcolatore di stock del CFD alimentano
+  mediana e Little, senza secondo algoritmo di ricostruzione dello stock.
+
+Le due anomalie `discontinuous_from` sono state riesaminate sui log TEST:
+`JOB-20260707-OTGC` entra in WIP il **14/08 09:00** e va in attesa il
+**25/08 09:00**; `JOB-20260707-QW1M` entra il **29/07 08:00** e va in
+attesa il **29/07 09:00**. In entrambi i casi il `from` incongruente è
+segnalato, ma la successione ordinata dei `to` determina apertura e chiusura
+dell'episodio: classificazione **deterministico con anomalia**, incluso nei
+45 episodi. Nessuna regola generale della normalizzazione V2 è stata
+modificata e non è stata introdotta un'esclusione arbitraria; i timestamp
+non validi continuano a essere scartati dal normalizzatore.
+
+La Diagnostica ha quattro blocchi: Parametri configurati, Capacità e
+rientri, **Taratura WIP suggerita dai dati** (tre valori primari) e Qualità e
+copertura (campione, intervalli e avvertenze). La nota interpretativa sulla
+capacità compare solo se il flusso attivo recente supera le consegne recenti
+confrontate a precisione piena. Nel browser TEST reale si vedono **16,5**
+contro **5,63 punti/settimana**, nota presente, 14,31, 3,8/28,85 e 3–5
+lavori; la resa stretta del pannello è stata controllata. Home e CFD
+rimangono presenti, ultimo bucket **6/6 identità**, nessuna nuova linea
+turnover. Verifiche automatiche: **259/259 Apps Script**, **47/47 UI**.
+Push al solo progetto TEST e pull isolato con **17/17 file identici**;
+nessuna scrittura PROD, nessun push/merge su `main`.
+
+Il limite sugli episodi WIP aperti permane: la stima può essere ottimistica.
+Il gate umano **6F non era approvato automaticamente** a conclusione di
+questo hardening; l'approvazione esplicita successiva è registrata sopra.
+La precedente cifra 14,32 e la struttura a cinque blocchi qui
+sotto documentano lo stato storico precedente a questo hardening.
+
+## Fase 7 — miglioramenti metodologici completati su TEST (2026-09-16)
+
+7A–7F sono state implementate in ordine, testate e chiuse in commit separati:
+`6a8e9d4` settimane ISO complete, `5eca994` turnover WIP backend,
+`eca8fe0` storico affidabile e taratura mediana, `45fc118` Little,
+`7b612d8` Diagnostica in cinque blocchi, `36ca99b` Stato del flusso
+semplificato. 7G: **256/256 test Apps Script** e **45/45 verifiche UI**,
+push sul solo progetto TEST alle **16:55:49**, pull isolato **17/17 file
+identici**. Nel TEST reale la home conserva le card e il CFD: ultimo bucket
+**6/6 identità verificate**, nessuna nuova linea turnover; Stato, card
+Rientri e cinque blocchi diagnostici controllati nel browser. La nuova
+dicitura della card Rientri esplicita le settimane ISO complete. Il test
+deterministico confronta la stessa dashboard il giovedì e la domenica della
+medesima settimana: ritmo consegne, flusso attivo e quota rientri invariati;
+non è stato alterato l'orologio del server reale. Nessun push su `main`,
+nessuna scrittura PROD.
+
+Nel CONFIG del solo database TEST è stata aggiunta la riga
+`history_reliable_from` **vuota** (nessuna data scelta automaticamente), e
+aggiornata la descrizione di `capacity_window_weeks`. I valori di taratura
+approvati nel foglio sono rimasti intatti; nel browser il riferimento di
+consegna è **6 punti/settimana**, la taratura attiva proposta è **14,32
+punti/settimana** e non è applicata alla CONFIG. La riga CONFIG è stata
+verificata via metadati/celle native; la visualizzazione del foglio nel
+browser integrato non era raggiungibile, quindi la verifica visiva del foglio
+non è stata possibile.
+
+**Limite metodologico noto:** gli episodi ancora
+aperti sono esclusi dalla durata media; quelli più lunghi hanno maggiore
+probabilità di essere ancora aperti, perciò il WIP suggerito risulta
+tendenzialmente sottostimato (ottimistico). Nessuna correzione del censoring è
+applicata in questa fase; il risultato è diagnostico e non modifica CONFIG.
+
+Audit §35: `flow_reference_points_per_week` e
+`flow_reference_completions_per_week` rappresentano entrambi il throughput di
+**consegna tecnica** (punti e completamenti). Il turnover WIP resta misura e
+suggerimento distinti, senza riferimento CONFIG approvato; non serve rinominare
+o dividere i due parametri esistenti e non è stata migrata la taratura vigente.
+
+Con Fase 5E già DONE e Fase 7 completata su TEST, il gate umano **6F è
+approvabile da Marco**, ma non è dichiarato approvato qui.
+
+## V5 — Fase 5E riaperta e corretta su TEST (2026-09-16)
+
+Il collaudo umano reale di Marco ha riaperto la Fase 5E: l'aritmetica della
+misura orizzontale era corretta, ma la quota era sempre il bordo superiore
+`future_work_boundary`; il puntatore selezionava soltanto la data. Il
+checkpoint originale del 15/09 resta sotto, come evidenza storica.
+
+Ora posizione orizzontale e verticale scelgono rispettivamente bucket e
+quota cumulativa (fra zero e il massimo di quel bucket). Il pannello mostra
+sempre la quota scelta. Il client interpola sui `completed_boundary` già
+consegnati dal backend, usando lo stesso algoritmo parametrizzato e gli
+stessi casi limite; non ricalcola stock o cumulative e non richiede chiamate
+al backend durante la selezione. La ricerca dell'incrocio usa l'intero
+storico della risoluzione, anche oltre il periodo attualmente visibile.
+Sono disponibili anche ↑/↓ per regolare la quota e Inizio/Fine per i limiti;
+←/→ cambia data senza che il precedente hover del puntatore prevalga.
+
+Collaudo reale TEST, **31/12/2025**: in **Lavori**, quota massima **19 →
+222,29 giorni** (come nel checkpoint originale) e quota intermedia **5 →
+59 giorni**; in **Punti**, **147 → 235,58 giorni** e **117 → 196,99 giorni**.
+P50 **91,9** e P80 **155,28 giorni** restano visibili accanto a ogni misura.
+Le fixture della 5E esercitano la funzione generalizzata con quote esplicite;
+nuove prove coprono quota intermedia, clamp sotto zero/sopra il massimo e
+coerenza con la scorciatoia a quota massima. Verifica finale: **250/250 test
+Apps Script**, **44/44 verifiche UI**, push TEST alle **10:42:41**, pull
+isolato **17/17 file identici**. Nessuna scrittura PROD, nessun push/merge su
+`main`.
+
+## Correzioni feedback Stato/CFD — pubblicate e collaudate su TEST (2026-09-16)
+
+Il dettaglio “Come è stata ottenuta questa lettura” distingue ora la finestra
+della capacità osservata da quella più ampia dello storico WIP. Il primo dato
+deriva dinamicamente da `capacity_window_weeks` (**8 settimane** nel TEST
+corrente, non incorporate nel testo dell'interfaccia);
+`wip_trend_weeks` (**26**) alimenta invece serie e analisi storiche WIP. Il
+blocco “Ritmo di completamento” dispone riferimento, osservato e campione in
+due colonne parallele — Completamenti e Punti — e presenta il periodo come
+date brevi italiane, mantenendo timezone, qualità, soglia effettivamente usata
+dallo stato e settimane con completamenti.
+
+Anche “Rientri nel lavoro … nelle ultime N settimane” non contiene un 8
+fisso: il frontend usa `rework_window_weeks`, calcolato dal backend sulla
+stessa finestra configurata. Una verifica statica impedisce inoltre di
+reintrodurre la stringa letterale “ultime 8 settimane” nel client.
+
+Nel CFD lo zoom a rotella resta disponibile sui display oltre 900 px con
+puntatore fine, mentre su viewport piccoli o dispositivi touch la rotella non
+intercetta più lo scroll della pagina. Il tooltip passa da **11 a 8 righe**, da
+**250×220 a 220×164 px** e da opacità **96% a 84%**; cumulative e movimenti
+sono rimossi soltanto dal riquadro sovrapposto e restano nel riepilogo testuale
+sotto il grafico.
+
+Dopo la riautenticazione `clasp`, push TEST completato alle **08:57:47** e
+pull di controllo isolato: **17/17 file identici**. Verifica automatica:
+**249/249 test Apps Script** e **43/43 verifiche UI**. Nel collaudo reale il
+desktop mostra la tabella a due unità, le date brevi e il tooltip compatto;
+il riepilogo sotto il grafico conserva cumulative e movimenti. A **390×844**
+il dettaglio rimane leggibile e `matchMedia('(max-width: 900px)')` attiva la
+protezione che lascia lo scroll della pagina alla rotella senza applicare lo
+zoom del CFD. Viewport ripristinato al termine. Nessuna scrittura o deploy
+PROD.
+
+## Riepilogo notturno per Marco — STOP al gate 6F (2026-09-15)
+
+- **DONE:** Fase 5A–5H e collaudo integrato 6A–6E, ciascuno con commit
+  separato, suite completa verde e verifiche previste.
+- **BLOCKED:** nessun blocco tecnico incontrato.
+- **Non tentato per dipendenze:** nulla; tutte le dipendenze erano verdi.
+- **Ambiente:** ultimo codice pubblicato soltanto su TEST alle **22:49:09**;
+  pull finale isolato **17/17 file identici**. Nessuna scrittura/deploy PROD.
+- **Qualità finale:** **249/249 test Apps Script**, **40/40 verifiche UI**,
+  collaudo reale desktop e **390×844**.
+- **Punto raggiunto:** Fase 6E completata. **6F non eseguita** come prescritto:
+  V5 non è dichiarata chiusa automaticamente.
+- **Decisione richiesta a Marco:** esaminare il TEST e decidere se approvare il
+  gate umano 6F; solo dopo un'approvazione esplicita valutare chiusura V5 e
+  qualsiasi successiva azione PROD.
+
+## V5 — Fase 6E collaudo desktop/mobile completata (2026-09-15)
+
+Collaudo finale sul deployment TEST reale. La home espone: Stato **Rallentato**,
+WIP **4 / 39 punti**, lavoro acquisito **10 / 71**, attesa **12 / 95**,
+settimane impegnate **10,9**, P50 **92 giorni**, P80 **155 giorni**, **21**
+unità concluse e card Rientri **7 nelle ultime 8 settimane / 58%**.
+
+Desktop, 8 settimane/Settimana: il bucket lavori **23/08/2026** espone Totale
+**46**, WIP nuovo/rework **5/1**, attesa **11**, completato **20** e movimenti
+**0/0/1**. In Punti lo stesso bucket espone Totale **349**, WIP **47+8=55**,
+attesa **87**, completato **144**; focus WIP rework attenua le altre bande e
+le rate lines valgono **1,1 ingressi** e **2,89 completamenti punti/settimana**.
+Dopo zoom e pan il principale seleziona **16/08/2026, Totale 349, WIP 47** e
+il confronto precedente **14/06/2026, Totale 310, WIP 44**, con stessa scala
+Y e rate lines sincronizzate.
+
+Mobile **390×844**: controlli fruibili, i due CFD sono impilati, ciascun canvas
+scorre autonomamente, legenda/riepiloghi restano nel pannello e i valori
+selezionati coincidono col desktop. Viewport ripristinato al termine.
+
+Checkpoint conclusivo: **249/249 test Apps Script**, **40/40 verifiche UI** e
+pull TEST isolato **17/17 file identici**. Nessun nuovo push era necessario
+dopo la 5H, perché 6A–6E hanno prodotto solo evidenze di collaudo. Nessuna
+scrittura PROD. **Fase 6E DONE; STOP a 6F, gate umano finale aperto.**
+
+## V5 — Fase 6D CFD integrato completata (2026-09-15)
+
+Matrice finale dei requisiti Fase 4–5 sul sottoinsieme implementato:
+
+| Requisito | Evidenza | Esito |
+| --- | --- | --- |
+| Asse, griglia, legenda, Lavori/Punti e lettura verticale | UI statica + TEST reale, totali 47 lavori / 357 punti | VERIFICATO |
+| WIP nuovo/rework e ordine blu sopra/rosso sotto | fixture 1+1 lavori, 5+8 punti; identità boundary | VERIFICATO |
+| Giorno/settimana/mese e 9 periodi | bisestile, ISO 53, Q4→Q1, vuoti e Da/A | VERIFICATO |
+| Zoom, pan, reset, sottointervallo, crosshair/touch | dati invariati prima/dopo; desktop e 390×844 | VERIFICATO |
+| Tooltip completo e focus serie | valori backend, cumulative, movimenti; geometria invariata | VERIFICATO |
+| Misura orizzontale Lavori/Punti | fixture 3/4 giorni e incrocio nullo; TEST 222,29/235,58 | VERIFICATO |
+| Rate lines | 8 settimane 0,14/0,41 lavori-settimana; on/off invariato | VERIFICATO |
+| Confronti | precedente, anno precedente, custom vuoto; scala e navigazione comuni | VERIFICATO |
+| Continuità e stock-flow | anno, DST, mese/trimestre, stock ereditati e boundary additive | VERIFICATO |
+| Pulizia legacy | istogramma/legenda/funzioni rimossi; movimenti nel tooltip | VERIFICATO |
+
+Non risultano requisiti Fase 4–5 omessi o bloccati. Il contratto pubblico V2
+resta invariato nelle chiavi top-level; le estensioni CFD sono additive e il
+frontend non classifica episodi né calcola stock/cumulative. Checkpoint:
+**249/249 test Apps Script** e **40/40 verifiche UI**. Nessuna modifica
+applicativa, nessun push aggiuntivo, nessuna scrittura PROD. **Fase 6D DONE**.
+Il collaudo 6E e il gate umano 6F restano ancora aperti a questo punto.
+
+## V5 — Fase 6C tempi completata (2026-09-15)
+
+Le fixture finali confermano che l'unità di attraversamento parte dal primo
+ingresso operativo e termina in `done`. Nel percorso backlog → WIP → attesa →
+preparazione → WIP → done il rientro intermedio produce **una sola unità da
+10 giorni**, con `rientro_intermedio=true`: origine e tempo non vengono
+azzerati. Solo un nuovo ingresso dopo una consegna apre una seconda unità
+(fixture: **2 e 10 giorni**). Sul campione deterministico **[1,2,3,4,10]** il
+backend restituisce P50 **3**, P80 nearest-rank **4**, numerosità **5** e
+qualità sufficient; la disaggregazione XS/S/M/L/XL conserva gli stessi
+valori osservati. La stima M/G/1 resta esplicitamente separata e nulla nella
+home V5.
+
+Confermati sul TEST reale **21 unità concluse**, P50 **91,9 giorni** e P80
+**155,28 giorni**, gli stessi valori già letti nel collaudo 5E. Checkpoint
+completo: **249/249 test Apps Script** e **40/40 verifiche UI**. Nessuna
+modifica applicativa, nessun push aggiuntivo, nessuna scrittura PROD.
+**Fase 6C DONE**.
+
+## V5 — Fase 6B stato e taratura completata (2026-09-15)
+
+Scansione del codice applicativo conclusa: **0 occorrenze** di
+`ACCELERATED`; **0 percorsi** di autotaratura operativa. I cinque valori
+quantitativi (`wip_target_min_jobs`, `wip_target_max_jobs`, riferimenti punti
+e completamenti, `flow_slow_ratio`) hanno default vuoto e vengono letti solo
+da CONFIG. Se uno manca o è invalido lo stato resta `INSUFFICIENT_DATA` con
+“Taratura non configurata.”. Le sole condizioni numeriche di classificazione
+confrontano WIP e ritmo con quei valori configurati; nessuna soglia operativa
+è codificata nel classificatore. Verificata la precedenza HIGH_LOAD,
+UNDERFED, dato recente insufficiente, SLOWING, REGULAR; un ritmo superiore
+resta REGULAR.
+
+Checkpoint completo: **249/249 test Apps Script** e **40/40 verifiche UI**.
+Nessuna modifica al codice applicativo, nessun push aggiuntivo e nessuna
+scrittura PROD. **Fase 6B DONE**.
+
+## V5 — Fase 6A riconciliazione V2 completata (2026-09-15)
+
+Rieseguite le fixture V2 sull'implementazione finale. La fixture non lineare
+attraversa in cinque bucket `future_work → wip → waiting → future_work → wip`
+con **1 lavoro / 7 punti** e verifica, per entrambi i sistemi di unità, che lo
+spessore di ogni banda coincida con lo stock indipendente e che nessun
+completamento venga inventato. La fixture parziale conserva WIP ereditato,
+cumulative pre-finestra e stock corrente da archivio; quella annuale mantiene
+gli stock con offset comune a tutte le boundary. La fixture 5A conferma inoltre
+**1+1=2 lavori** e **5+8=13 punti** tra WIP nuovo e rework, con alias WIP V2
+invariato. Tutte le identità espongono `validation.passed=true`.
+
+Checkpoint completo: **249/249 test Apps Script** e **40/40 verifiche UI**.
+Nessuna modifica al codice applicativo, nessun push aggiuntivo necessario e
+nessuna scrittura PROD. **Fase 6A DONE**.
+
+## V5 — Fase 5H pulizia legacy CFD completata su TEST (2026-09-15)
+
+Rimossi da entrambi i CFD l'istogramma permanente Nuovi ingressi/Rientri/
+Consegne, la relativa legenda, il CSS e tutto il codice di disegno ormai
+sostituito. I canvas passano da **430 a 330 px** di altezza. I tre movimenti
+restano disponibili per singolo bucket nel tooltip/crosshair del grafico
+principale e nel riepilogo accessibile del grafico di confronto; la card
+Rientri resta l'unico riepilogo aggregato della finestra recente.
+
+Collaudo reale desktop: sul **23/08/2026** il tooltip continua a mostrare
+Nuovi/Rientri/Consegne **0/0/1**, senza barre né seconda legenda. Con il
+confronto precedente, il bucket sincronizzato **21/06/2026** espone Totale
+**42**, WIP **4** e movimenti **0/0/0**. A **390×844** i due CFD restano
+impilati, compatti, scrollabili e i movimenti sono leggibili come testo.
+
+Verifica: **249/249 test Apps Script** e **40/40 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:49:09** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5H DONE**. Con 5A–5H verdi, la
+Fase 5 è completa e si passa al collaudo integrato Fase 6A–6E; il gate 6F
+resta umano e non è autorizzato in questa sessione.
+
+## V5 — Fase 5G confronti CFD completata su TEST (2026-09-15)
+
+Il CFD offre ora quattro modalità: nessun confronto, periodo precedente
+equivalente, stesso periodo dell'anno precedente e intervallo personalizzato.
+Quando il confronto è attivo vengono disegnati due CFD indipendenti con la
+stessa scala verticale massima, lo stesso ordine delle cinque boundary, la
+stessa unità e la medesima finestra di zoom/pan. La selezione di un bucket è
+sincronizzata per posizione relativa fra le due serie; focus serie e rate
+lines si applicano a entrambi senza ricalcolare dati nel browser.
+
+Collaudo reale: 8 settimane/Settimana, periodo precedente, selezione sul
+**23/08/2026** nel CFD principale e bucket sincronizzato **21/06/2026** nel
+confronto (**Totale 42, WIP 4**). Dopo zoom, pan indietro e passaggio a Punti
+il principale ha selezionato **30/08/2026, Totale 349, WIP 39** e il confronto
+**28/06/2026, Totale 310, WIP 31**. Verificate inoltre la modalità stesso
+periodo anno precedente e la modalità personalizzata **01/01–01/02/2000**,
+che espone “Confronto non ancora disponibile per il periodo selezionato.”.
+Desktop: grafici affiancati; mobile **390×844**: grafici impilati, entrambi
+leggibili e navigabili.
+
+Verifica: **249/249 test Apps Script** e **40/40 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:43:03** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5G DONE**; il gate umano è stato
+registrato come checkpoint secondo la deroga notturna.
+
+## V5 — Fase 5F rate lines completata su TEST (2026-09-15)
+
+Aggiunte le linee opzionali “Tasso di ingresso” e “Tasso di completamento”.
+La pendenza usa esclusivamente la differenza fra le boundary iniziale/finale
+del periodo visibile divisa per la sua durata reale in settimane; l'unità è
+lavori/settimana o punti/settimana. I due toggle disegnano overlay tratteggiati
+e un riepilogo, senza introdurre stati o soglie.
+
+Collaudo TEST: su 8 settimane/Lavori i valori sono **0,14 ingressi** e **0,41
+completamenti/settimana**; su 3 mesi/Lavori **0,41** e **0,65**; passando a
+Punti sullo stesso periodo **3,83** e **4,72 punti/settimana**. La stringa
+completa del bucket 23 agosto è risultata byte-per-byte uguale prima, durante
+e dopo l'attivazione dei due overlay; allo spegnimento il riepilogo torna
+nascosto.
+
+Verifica: **249/249 test Apps Script** e **39/39 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:35:29** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5F DONE**.
+
+## V5 — Fase 5E misura orizzontale completata su TEST (2026-09-15)
+
+Ogni bucket CFD espone ora `equivalent_time.jobs` e
+`equivalent_time.points`, calcolati nel backend: la quota è la boundary
+cumulativa degli ingressi e l'uscita è il primo incrocio con la boundary dei
+completamenti, interpolato linearmente fra due bucket. Se l'incrocio non è
+ancora osservato l'esito resta esplicitamente nullo. Il frontend non calcola
+stock o cumulative: seleziona una quota e mostra data ingresso equivalente,
+data uscita equivalente e durata in giorni calendario.
+
+Fixture a date note: quota Lavori 2 del **1 gennaio** incrocia il **4 gennaio**
+= **3 giorni**; quota Punti 10 incrocia il **5 gennaio** = **4 giorni**;
+una quota finale non completata restituisce `exit_at=null`.
+
+Gate/checkpoint sul TEST reale, Anno 2025/Mese, quota al 31 dicembre: in
+**Lavori** uscita equivalente **11/08/2026**, durata **222,29 giorni**; in
+**Punti** uscita equivalente **24/08/2026**, durata **235,58 giorni**. Entrambe
+le viste confrontano gli stessi osservati: **P50 91,9 giorni**, **P80 155,28
+giorni**. A **390×844** il controllo “Misura tempo”, il riepilogo e i valori
+sono accessibili; il cambio Lavori/Punti aggiorna l'esito senza cambiare il
+periodo selezionato.
+
+Verifica: **249/249 test Apps Script** e **38/38 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:30:10** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5E DONE**; il gate umano è stato
+registrato come checkpoint secondo la deroga notturna.
+
+## V5 — Fase 5D focus serie completata su TEST (2026-09-15)
+
+Le cinque voci della legenda CFD sono ora controlli accessibili. La selezione
+di Completato, In attesa, WIP rework, WIP nuovo o Già acquisito mantiene la
+banda scelta al 100% e porta le altre al **12% di opacità**; “Mostra tutte”
+ripristina il 100% per tutte. Il focus modifica soltanto `globalAlpha` subito
+prima del `fill` e lo riporta a 1 subito dopo: path, coordinate, scala,
+boundary e ordine matematico non vengono ricostruiti.
+
+Collaudo reale a **390×844**: selezionando WIP rework il controllo espone
+`aria-pressed=true`, la banda rossa resta piena e le altre quattro risultano
+attenuate ma geometricamente nella stessa posizione; “Mostra tutte” riporta
+`aria-pressed=false` e la resa completa. Legenda e comando restano nel
+pannello, su due righe.
+
+Verifica: **248/248 test Apps Script** e **37/37 verifiche statiche UI**. Push
+Apps Script TEST completato alle **22:24:23** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5D DONE**.
+
+## V5 — Fase 5C zoom/pan/crosshair/tooltip completata su TEST (2026-09-15)
+
+Il CFD dispone ora di zoom orizzontale (pulsanti e rotella), pan avanti/
+indietro, reset e selezione di sottointervallo sia con trascinamento sia con
+due estremi successivi. Le operazioni applicano soltanto `slice` alla serie di
+bucket già calcolata dal backend: boundary, cumulative e stock non vengono
+riscritti. Cambio periodo/risoluzione azzera la finestra visiva; frecce da
+tastiera, puntatore e touch operano sui bucket effettivamente visibili.
+
+Il tooltip §17 legge direttamente i campi backend e include data, lavoro già
+acquisito, WIP nuovo/rework/totale, attesa, totale, ingressi cumulativi,
+completamenti cumulativi e movimenti del bucket. Sul TEST reale il bucket
+centrale del **23 agosto 2026** ha restituito, prima dello zoom e dopo reset,
+la stessa stringa: acquisito 9, WIP nuovo 5, rework 1, totale WIP 6, attesa 11,
+completato 20, totale 46, ingressi cumulativi 44 e completamenti cumulativi 20.
+Dopo zoom+pan a sinistra il centro è passato correttamente al **16 agosto**
+(acquisito 10, WIP 4+1, attesa 12, completato 19, totale 46); reset ha
+ripristinato integralmente il 23 agosto.
+
+Collaudo sottointervallo: primo estremo segnala esplicitamente la richiesta
+del secondo, il secondo chiude la modalità (`aria-pressed=false`) e Reset
+ripristina l'intero periodo. Desktop: crosshair e tooltip da **11 righe**
+leggibili. Mobile **390×844**: i 6 comandi si dispongono su due righe, canvas
+scorrevole, tocco sul 23 agosto con gli stessi valori desktop.
+
+Verifica: **248/248 test Apps Script** e **36/36 verifiche statiche UI**. Push
+Apps Script TEST finale completato alle **22:19:49** e pull isolato: **17/17
+file identici**. Nessuna scrittura PROD. **Fase 5C DONE**; il gate umano
+desktop+mobile è stato registrato come checkpoint secondo la deroga notturna.
+
+## V5 — Fase 5B periodi, bucket e navigazione completata su TEST (2026-09-15)
+
+Il backend espone ora lo storico CFD alle tre risoluzioni prescritte:
+`history.daily`, `history.weekly`, `history.monthly`; i bucket giornalieri sono
+giorni civili Europe/Rome e attraversano correttamente DST e anno bisestile.
+Il frontend filtra esclusivamente questi bucket backend, senza ricalcolare
+stock, flussi o boundary.
+
+La home offre **9 periodi** (8 settimane, 3/6/12 mesi, anno corrente, mese,
+trimestre, anno, Da/A) e **3 risoluzioni** (giorno, settimana, mese). Mese,
+trimestre e anno espongono controlli calendario dedicati; Da/A usa estremi
+inclusivi e segnala intervalli invalidi o privi di righe con “Dati non ancora
+disponibili per il periodo selezionato.”. La navigazione da tastiera legge la
+serie effettivamente visualizzata, non più la sola serie settimanale iniziale.
+
+Fixture 5B: dal **28 febbraio al 2 marzo 2024** risultano **4 bucket
+giornalieri**, incluso il 29 febbraio; il bucket vuoto del 29 espone l'empty
+state giornaliero. Restano verdi i test già presenti su Q4→Q1, dicembre/
+gennaio e settimana ISO 53. Sul TEST reale il selettore Anno espone **5 anni
+(2022–2026)**; verificati 3 mesi/Giorno, trimestre **Q3 2026**, Da/A
+01–03/01/2000 con empty state, e 8 settimane/Settimana. A **390×844** i
+controlli vanno su due colonne, il canvas conserva lo scroll orizzontale e le
+legende restano nel pannello.
+
+Verifica: **248/248 test Apps Script** e **34/34 verifiche statiche UI**. Push
+Apps Script TEST finale completato alle **22:11:11** e pull isolato: **17/17
+file identici**. Nessuna scrittura PROD. **Fase 5B DONE**.
+
+## V5 — Fase 5A split WIP nuovo/rework completata su TEST (2026-09-15)
+
+Il CFD conserva il totale V2 e lo scompone, in ogni bucket e in entrambe le
+unità, nei quattro campi prescritti: `wip_new_jobs`, `wip_rework_jobs`,
+`wip_new_points`, `wip_rework_points`. La classificazione deriva dal numero
+dell'episodio WIP osservato nel log: episodio 1 nuovo, episodi successivi
+rework. Le boundary additive sono ora, dal basso: completato, attesa, WIP
+rework, WIP nuovo, lavoro già acquisito; `wip_boundary` resta l'alias totale
+compatibile col contratto V2.
+
+Fixture deterministica 5A: 1 lavoro nuovo da 5 punti e 1 lavoro rientrato da
+8 punti producono **1+1=2 lavori WIP** e **5+8=13 punti WIP**; le due identità
+sono verificate anche dalle boundary, senza variazione del totale precedente.
+La validazione backend controlla **10 identità per bucket** (split e stock in
+Lavori/Punti).
+
+Collaudo sul deployment HEAD TEST: ultimo snapshot operativo invariato a **4
+lavori / 39 punti** in corso. Sul bucket selezionato del **21 giugno 2026** il
+tooltip mostra **WIP nuovo 2**, **WIP rework 2**, **WIP totale 4**, oltre a 13
+già acquisiti, 12 in attesa, 13 completati e totale 42. Desktop: rosso rework
+visivamente sotto il blu nuovo; mobile **390×844**: stesso ordine, legenda su
+due righe e riepilogo leggibile senza uscire dal pannello.
+
+Verifica: **247/247 test Apps Script** e **33/33 verifiche statiche UI**. Push
+Apps Script TEST completato alle **21:58:46** e pull isolato: **17/17 file
+identici**. Nessuna scrittura PROD. **Fase 5A DONE**; il gate umano interno è
+stato registrato come checkpoint secondo la deroga notturna.
+
+## V5 — Fase 1bis consolidamento Stato del flusso completata su TEST (2026-09-15)
+
+Prima dell'intervento sono stati riletti `CLAUDE.md`, questo stato e il design
+V5; non risultavano fasi concorrenti aperte né sviluppi sovrapposti sulle
+funzioni interessate. La Fase 1bis correttiva è stata applicata senza modificare
+stock, lavoro corrente/futuro, attese, episodi WIP, rientri, assorbimento,
+settimane impegnate, completamenti tecnici, tempi, CFD o viste temporali.
+
+Lo Stato del flusso usa ora esclusivamente la taratura esplicita CONFIG:
+`wip_target_min_jobs`, `wip_target_max_jobs`,
+`flow_reference_points_per_week`,
+`flow_reference_completions_per_week` e `flow_slow_ratio`. Tutti sono
+obbligatori e validati; un valore mancante o invalido restituisce
+`INSUFFICIENT_DATA` con “Taratura non configurata.”. La precedenza è
+`HIGH_LOAD` sopra il massimo, `UNDERFED` sotto il minimo, poi qualità del ritmo
+recente, `SLOWING` sotto riferimento-punti × rapporto e altrimenti `REGULAR`.
+Il riferimento completamenti è validato ed esposto, ma non è stato forzato in
+una formula di classificazione non prevista.
+
+Eliminati end-to-end lo stato e la soglia accelerata, la baseline storica
+operativa, le fasce WIP percentile suggerite, il fallback storico del ritmo e
+la serie diagnostica di autotaratura. Eliminate le funzioni
+`dashboardV3HistoricalCapacity_`, `dashboardV3SuggestedWipBand_`,
+`dashboardV3WipBand_`, `dashboardV4Calibration_` e la classificazione WIP
+secondaria di `dashboardV2CurrentWork_`. Rimossi anche i parametri obsoleti
+`flow_accelerated_ratio`, `wip_warning_jobs`, `future_work_warning_weeks` e
+`history_comparison_granularity`; nessuna loro riga resta nel CONFIG TEST.
+
+Il CONFIG TEST reale è stato migrato con una funzione monouso, poi rimossa sia
+dai sorgenti sia dal progetto remoto. Verifica diretta sul foglio: gli otto
+campi approvati di taratura sono presenti e vuoti, compresi i due nuovi
+riferimenti; le quattro righe obsolete sono assenti. Nessun valore reale di
+taratura è stato riportato nel codice o nei default. I valori quantitativi delle
+fixture compaiono soltanto in `Tests.gs`.
+
+Verifica finale: **246/246 test Apps Script** e **32/32 verifiche statiche UI**.
+Sono coperti i casi A–I della prescrizione, la validazione numerica, l'assenza
+dei simboli obsoleti dai sorgenti applicativi e la precisione delle tre card
+home. Push Apps Script TEST finale completato alle **20:33:21** e verificato con
+pull isolato: **17/17 file identici**. Collaudo read-only sul deployment HEAD
+TEST: **Dati insufficienti — Taratura non configurata.**, 4 lavori in corso,
+10,9 settimane impegnate, 92 giorni tipici, 155 giorni P80 e 21 unità con
+qualità Buona. Nessuna scrittura PROD. **Fase 1bis DONE sul TEST**; gate umano
+aperto: Marco inserirà personalmente la taratura reale prima di autorizzare
+qualsiasi fase successiva.
+
+## V5 — Fase 4 CFD evoluto e viste temporali completata su TEST (2026-09-15)
+
+Il gate iniziale è stato verificato prima di scrivere codice: la Fase 3
+risultava **DONE** con collaudo reale sul deployment HEAD TEST (**91,9 giorni**
+di tempo tipico, **155,28 giorni** P80, **21 unità**, qualità **Buona**) e
+push/pull isolato **17/17 file identici**.
+
+La ricognizione browser preliminare sul TEST reale ha verificato uno per uno i
+requisiti del §14. Erano già presenti e funzionanti asse Y, quattro linee di
+griglia, legenda e selettore Lavori/Punti; il selettore ridisegnava realmente
+scala e bande. L'ultimo bucket era coerente con le card: in Lavori 21
+completati + 12 attese + 4 in corso + 10 acquisiti = **47**; in Punti 152 + 95
++ 39 + 71 = **357**. Mancavano invece tooltip, valore delle singole bande,
+totale puntuale, crosshair e selezione persistente/accessibile.
+
+Completata la Fase 4a senza toccare `round_` né il contratto backend. Il solo
+rendering home usa ora al massimo una cifra decimale per `committed_weeks` e
+zero decimali, coerenti fra le due card, per mediana e P80. Sul TEST reale i
+tre valori sono **10,9**, **92 giorni**, **155 giorni**; dettaglio e
+Diagnostica conservano la precisione piena.
+
+Completata la lettura verticale del grafico esistente senza ricostruire il
+CFD: selezione puntuale con puntatore/tocco, crosshair, marker, tooltip con le
+quattro bande e totale, riepilogo testuale `aria-live` e navigazione con
+frecce. La selezione Lavori del 9 agosto verificata sul TEST espone 12 già
+acquisiti + 4 in corso + 11 in attesa + 19 completati = **46**; la stessa
+selezione in Punti espone 99 + 24 + 87 + 139 = **349**.
+
+Aggiunto sotto le bande l'istogramma coordinato sul medesimo asse settimanale:
+**Nuovi ingressi** (`new_work_jobs`), **Rientri**
+(`rework_wip_episodes`) e **Consegne** (`completed_visits`). Sono campi già
+presenti negli stessi bucket del CFD, senza nuovo calcolo di business. Il nome
+visibile resta “Andamento del lavoro”; “CFD” non compare nella home.
+
+`dashboardV2History_` espone ora anche `quarterly`, con bucket Q1–Q4
+calendariali costruiti dallo stesso helper di settimana/mese e senza azzerare
+gli stock al cambio anno. Aggiunti `has_data` ed `empty_state_message` per
+mesi/trimestri senza stock o movimenti: “Dati non ancora disponibili per
+questo mese.” / “Dati non ancora disponibili per questo trimestre.”. I test
+coprono Q4→Q1, inizio a mezzanotte Europe/Rome, trimestre e mese vuoti.
+
+Il primo collaudo mobile ha trovato che lo scroll orizzontale del canvas
+trascinava anche il riepilogo selezionato; corretto prima della chiusura. Sul
+deployment finale a **390×844** scorre soltanto il canvas, mentre legende e
+riepilogo restano fermi e vanno a capo. Il tocco sul 19 luglio ha mostrato 12
+già acquisiti, 8 in corso, 10 in attesa, 15 completati, totale 45, 2 nuovi
+ingressi, 3 rientri e 0 consegne. Il collaudo desktop finale ha confermato il
+primo render, il selettore, tooltip, crosshair, barre e riepilogo.
+
+Verifica finale: **245/245 test Apps Script** e **30/30 verifiche statiche
+UI**, incluso parsing sintattico integrale del client, precisione home,
+lettura verticale, serie sincronizzate, terminologia e contenimento dello
+scroll mobile. Push Apps Script TEST finale completato alle **15:38:39** e
+verificato con pull isolato: **17/17 file identici** tra TEST e
+`apps-script/src`. Nessuna scrittura PROD. **Fase 4 DONE**; fermarsi qui per la
+revisione di Marco prima della Fase 5 (§31).
+
+## V5 — Fasi 0–1 chiuse; gate umano Fase 1 confermato (2026-09-15)
+
+Fase 0 completata sul branch `codex/fase-v2-dashboard-metriche` nel commit
+`476f8ba` (`docs: archivia documenti di fasi chiuse in docs/storico/`): archiviati
+gli 11 documenti della saga dashboard V1→V4 e `DESIGN_fase_U.md`, il cui unico
+riferimento residuo era nella ricognizione V1 archiviata nella stessa operazione.
+Rimosso dal worktree anche `docs/PROGRAMMA_V5_revisione_dashboard.md`, che era
+non tracciato e quindi non poteva produrre una cancellazione nel commit.
+
+Verifica dei restanti documenti candidati: `DESIGN_R_S.md`,
+`DESIGN_R_S_addendum_collaudo.md`, `DESIGN_performance.md`,
+`DESIGN_derivazione_visite.md` e `DESIGN_lock_ambiente.md` restano attivi perché
+citati da codice, test o documentazione tecnica corrente.
+
+Fase 1 implementata localmente secondo il §29 di
+`docs/DESIGN_V5_revisione_nuova_dashboard.md`: la fascia WIP operativa proviene
+ora soltanto da CONFIG; in assenza restituisce `INSUFFICIENT_DATA` con messaggio
+"Taratura non configurata.". Il percentile storico è separato nel ramo
+diagnostico "Taratura suggerita dai dati" e non determina lo stato della home.
+Eliminato `ACCELERATED`: un ritmo sopra il riferimento resta `REGULAR` con
+messaggio "Regolare — ritmo recente superiore al riferimento.". Aggiornata
+anche la descrizione CONFIG di `flow_accelerated_ratio`.
+
+Verifica locale: **239/239 test Apps Script** e **19/19 verifiche statiche UI**.
+Coperti esplicitamente CONFIG assente e WIP 4 nella fascia configurata 3–5 con
+ritmo sopra riferimento (`REGULAR`, nessuno stato elevato autonomo).
+
+Il primo tentativo di push si era fermato prima dell'invio per Google OAuth
+`invalid_grant` / `invalid_rapt`. Riautenticato `clasp` come
+`marco@sigmapiu.it`, il push sul progetto Apps Script TEST è stato completato
+alle **09:31:22** e verificato con pull isolato: **17/17 file identici** tra
+TEST e `apps-script/src`. Nessuna scrittura PROD. Marco ha confermato il gate
+umano sullo snapshot TEST reale il 15 settembre 2026: **Fase 1 DONE**.
+
+## V5 — Fase 2 terminologia e blocco Rientri completata su TEST (2026-09-15)
+
+Completata la Fase 2 del §29 di
+`docs/DESIGN_V5_revisione_nuova_dashboard.md`:
+
+1. **Terminologia UX**: la card e il dettaglio sono ora “Rientri nel lavoro”;
+   nessuna etichetta visibile “Ripresa/Riprese” resta in `dashboard.html` o
+   nelle definizioni del drill-down.
+2. **KPI sulla finestra recente**: il backend aggrega primi ingressi e rientri
+   sugli ultimi `capacity_window_weeks` bucket e calcola la quota come
+   `rientri / (primi ingressi + rientri)`, pesata sui volumi e non come media
+   delle percentuali settimanali. Card e drill-down condividono gli stessi
+   estremi della finestra.
+3. **Drill-down Rientri**: colonne Cliente, Incarico, Rientro n., Stato di
+   provenienza, Data uscita precedente, Data rientro. Gestite le provenienze
+   Attesa cliente/ente/interna, Backlog/preparazione, Dopo consegna e Altro.
+   Il primo rientro è correttamente numerato 1, distinto dall'episodio WIP 2.
+   Dopo il collaudo di Marco, la ricostruzione della provenienza è stata
+   corretta per oltrepassare il passaggio obbligatorio da ToDo e mostrare lo
+   stato significativo precedente; il ToDo resta la provenienza soltanto nel
+   caso reale di rientro diretto WIP → ToDo → WIP.
+4. **Identificazione umana**: Cliente + Incarico sono le prime due colonne in
+   tutti i drill-down operativi, compresi completamenti recenti e rientri.
+5. **Tracciabilità CONFIG**: aggiunti `calibration_date`,
+   `calibration_version`, `calibration_note` ai default e al seed con
+   descrizioni; valori iniziali vuoti, nessun dato illustrativo. Marco ha
+   eseguito `configureTestEnvironment()` e `setupSigmaFlowOnTest()` e ha
+   confermato la presenza delle tre righe vuote nel foglio `config` del
+   database TEST reale.
+
+Verifica locale: **241/241 test Apps Script** e **20/20 verifiche statiche
+UI**. Coperti aggregazione ponderata della finestra, estremi temporali,
+riconciliazione card/drill-down, tutte le provenienze, ordine Cliente+Incarico
+e seed dei tre campi CONFIG. Push Apps Script TEST completato alle **09:43:05**
+e verificato con pull isolato: **17/17 file identici** tra TEST e
+`apps-script/src`. Il follow-up sulla provenienza ha mantenuto **241/241 test
+Apps Script** e **20/20 verifiche statiche UI**; nuovo push TEST completato alle
+**10:08:52** e nuovamente verificato con pull isolato: **17/17 file identici**.
+Le stesse suite sono state ripetute con esito **241/241** e **20/20** dopo la
+verifica reale dei campi CONFIG. Nessuna scrittura PROD. **Fase 2 DONE** dopo
+la verifica reale di Marco; Fase 3 non avviata e subordinata a sua conferma
+esplicita.
+
+## V5 — Fase 3 blocco Tempi completata su TEST (2026-09-15)
+
+Il gate iniziale è stato verificato prima di scrivere codice: Fase 2 risultava
+**DONE**, con **241/241 test Apps Script**, **20/20 verifiche UI** e push TEST
+verificato **17/17 file identici** (più follow-up provenienza confermato con le
+stesse 17 identità).
+
+Il passo preliminare obbligatorio del §10.4/§29 ha dato esito positivo. La
+normalizzazione `normalizeActivityLogForDashboard_` ordina stabilmente gli
+eventi e ricostruisce gli stati esclusivamente dai `to`, senza affidarsi ai
+vecchi `from` potenzialmente incoerenti. Un primo ingresso osservato in
+backlog/preparazione/WIP apre un'unità di attraversamento; attese, stati neutri
+e rientri intermedi non la azzerano; il successivo ingresso in `done` la
+chiude. Solo un nuovo ingresso operativo dopo `done` apre una nuova unità, e
+soltanto ai fini di questa misura.
+
+Verifica manuale read-only sul database TEST reale: job
+`JOB-20260707-0YXL` (Gruppo Selini - VE, “Integrazioni Città Metropolitana di
+Venezia”, taglia M). La cronologia produce deterministicamente due unità:
+
+1. `backlog` 2025-06-15 09:00 → `done` 2025-09-09 09:00 = **86 giorni**;
+2. `todo` 2025-09-15 09:00 → WIP → attesa ente → ToDo/WIP e ulteriori attese/
+   rientri → `done` 2026-08-28 12:29:52+02:00 = **347,14574 giorni**.
+
+La seconda unità mantiene il timestamp del 15 settembre attraverso tutti i
+rientri intermedi: nessun reset al ritorno in ToDo/WIP. La stessa sequenza è
+coperta da una fixture automatica ingresso→WIP→attesa ente→ToDo→WIP→consegna.
+
+Ricognizione della stima teorica: `Model.gs` contiene già `queueMM1_` e
+`queueMG1_`, che calcolano `Wq`/`W` da tassi e tempi di servizio delle visite.
+È una grandezza teorica con popolazione diversa dal lead time storico
+ingresso→consegna; non è stata duplicata né presentata come misura osservata.
+Nel contratto `timing`, `little_estimated_days` resta quindi `null`, mentre la
+distinzione è dichiarata nella Diagnostica e non nella home.
+
+Implementato `dashboardV5Timing_` e il contratto `timing` con
+`lead_time_median_days`, `lead_time_p80_days`, `lead_time_sample_size`,
+`lead_time_quality`, `lead_time_by_size` per XS/S/M/L/XL e
+`little_estimated_days`. La mediana usa la media dei due valori centrali per
+campioni pari; P80 riusa l'helper percentile nearest-rank già esistente. La
+home mostra soltanto “Tempo tipico alla consegna” e “8 pratiche su 10 entro”;
+il dettaglio espone mediana, P80, casi e qualità per taglia. Metodo, esclusioni
+e separazione dalla stima M/G/1 sono confinati alla Diagnostica.
+
+Verifica finale: **244/244 test Apps Script** e **24/24 verifiche statiche UI**.
+Coperti il rientro intermedio senza reset, la nuova unità soltanto dopo una
+consegna, mediana/P80, sample size/qualità, disaggregazione XS–XL e lettura
+frontend esclusivamente dal contratto backend. Push Apps Script TEST completato
+alle **10:40:27** e verificato con pull isolato: **17/17 file identici** tra
+TEST e `apps-script/src`. Collaudo sul deployment HEAD TEST reale: **91,9
+giorni** di tempo tipico, **155,28 giorni** al P80, **21 unità concluse** e
+qualità **Buona**. Il dettaglio mostra tutte le taglie XS/S/M/L/XL con mediana,
+P80, casi e qualità; XL, senza casi, espone correttamente valori non disponibili
+e qualità insufficiente. Nessuna scrittura PROD. **Fase 3 DONE**; Fase 4 non
+avviata e subordinata alla revisione esplicita di Marco.
+
+Follow-up di collaudo della Fase 3 (12:22): Marco ha confermato card e
+drill-down Tempi corretti e ha chiesto un segnale di attesa più evidente.
+La home mostra ora un riquadro centrale “Aggiornamento in corso…” con testo
+più grande, indicazione che il calcolo può richiedere alcuni secondi e spinner;
+il riquadro scompare quando arriva la risposta e il timestamp di aggiornamento
+torna compatto nell'intestazione. Verifica reale sul deployment HEAD TEST:
+riquadro presente durante il calcolo. Suite **244/244** e verifiche statiche UI
+**25/25**; push TEST delle 12:22:40 verificato con pull isolato: **17/17 file
+identici**.
+
+Nella stessa verifica è stato chiarito perché la taratura compilata da Marco
+non compariva: la copia indicata da Marco
+(`1CNoFPeoQKQ2LBmnaldp1Id3_CRtfviep4I4xkKPujtk`) contiene effettivamente
+fascia WIP 3–5, warning 5, rapporto slow 0,5 e rapporto superiore 2, ma
+`configureTestEnvironment()` impostava ancora la property sul vecchio default
+`1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU`. Allineati
+`DEFAULT_TEST_SPREADSHEET_ID` e la documentazione alla copia di collaudo.
+Marco ha rieseguito `configureTestEnvironment()` e ha confermato sullo
+snapshot TEST reale: avviso di caricamento grande e centrale, fascia CONFIG
+riconosciuta e assenza del messaggio “Taratura non configurata”. La prima
+lettura con `min_samples_capacity=5` e fascia 3–5 era correttamente “Dati
+insufficienti”; la taratura poi approvata da Marco usa
+`min_samples_capacity=3`, `wip_target_min_jobs=1` e
+`wip_target_max_jobs=5`, e produce lo stato **Regolare**. Corretto da Marco
+anche `history_comparison_granularity`, da `8` al valore ammesso `week`.
+Nessun dato è stato modificato dalla sessione. **Follow-up chiuso; Fase 4
+resta non avviata.**
+
+## Fase V4 — trasparenza Stato del flusso e debito tecnico (2026-09-14)
+
+Implementazione locale completata sul branch
+`codex/fase-v2-dashboard-metriche`, secondo
+`docs/DESIGN_faseV4_fix_dashboard.md`. Nessuna isteresi introdotta: il design
+la subordina a conferma di Marco e non emerge una necessita' funzionale
+ulteriore rispetto alla correzione del testo.
+
+1. **Messaggio carico elevato**: ora dichiara separatamente WIP vs fascia e
+   ritmo recente vs baseline; rimossi il falso “senza aumento osservato” e
+   ogni implicazione di congestione.
+2. **Prove del ritmo**: esposti finestra ISO/timezone, completamenti, punti,
+   settimane attive e qualita' separate; aggiunti drill-down ed export CSV
+   riconciliabili per job/visita/consegna/punti.
+3. **Riprese**: card rinominata “Episodi di ripresa”, mostra anche i job
+   distinti e il dettaglio include sempre `job_id`.
+4. **Taratura**: export nella vista precedente/confronto e taratura con WIP
+   settimanale medio pesato, selezione settimane e metodo percentile; UI
+   rinominata “Fascia centrale osservata”.
+5. **Diagnostica**: attivato riepilogo minimo dei sei controlli richiesti,
+   con avvertenza esplicita sul perimetro.
+6. **`visite`**: confermato dal codice che e' una materializzazione live e
+   che dashboard legacy, tempi, attese, capacita' e rilavorazione la assumono
+   aggiornata. Aggiunti confronti read-only TEST/PROD per misurare i casi
+   fuori sync senza toccare `computeVisiteFromLog_`. Il controllo reale ha
+   verificato su entrambi gli ambienti 56 job e 102 visite: zero job fuori
+   sync, zero visite orfane e nessun mismatch. I dati correnti, compresi i
+   casi noti, sono quindi coerenti; lo snapshot attuale non consente di
+   attribuire con certezza l'eventuale divergenza storica segnalata.
+7. **Writer `from`**: add/update riallineano ora l'intera sequenza come delete;
+   nessun backfill dello storico eseguito.
+8. **Audit in avanti**: separati `event_ts` e `operation_ts`, registrati autore
+   best-effort/force/versione precedente; le cancellazioni lasciano tombstone.
+   Nessuna ricostruzione retroattiva.
+
+Verifica locale: **239/239 test Apps Script** e **19/19 verifiche statiche
+UI**. Dopo l'autorizzazione esplicita di Marco, push sul progetto Apps Script
+TEST completato alle 20:57 e verificato con pull isolato: **17/17 file
+identici** tra TEST e `apps-script/src`. Collaudo sul deployment HEAD TEST
+superato su desktop e viewport mobile 390x844: stato, prove del ritmo,
+drill-down consegne e riprese, diagnostica, export CSV e taratura risultano
+presenti e leggibili; le tabelle complete restano accessibili su mobile con
+scorrimento orizzontale. I controlli TEST/PROD sono stati esclusivamente in
+sola lettura: nessuna scrittura PROD, nessun backfill, PR o merge eseguiti.
+
+## Revisione indipendente V3 acquisita — miglioramenti proposti (2026-09-14)
+
+Confrontati in sola lettura la verifica indipendente e i quattro CSV forniti
+da Marco con il codice corrente e la dashboard HEAD TEST. Stock correnti,
+settimane impegnate e CFD a stock riconciliano. Restano da riconciliare
+riprese (41 nella verifica, 43 in V3) e ritmo recente (4,625 su settimane di
+calendario contro 5,63 sulla finestra mobile V3). La classificazione "Carico
+elevato" scatta per 4 lavori contro una fascia osservata 1–3,89, ma il testo
+"senza aumento osservato" non è sostenuto dal ritmo recente mostrato; anche
+"Affidabilità buona" richiede campione, copertura e qualità storica visibili.
+Nessuna modifica applicativa o dati eseguita. Analisi e priorità in
+`docs/VERIFICA_indipendente_dashboard_V3_confronto.md`.
+
+## V3 — nuova dashboard operativa pubblicata sul progetto TEST (2026-09-14)
+
+Realizzata la nuova vista principale della sezione Situazione secondo
+`docs/DESIGN_faseV3_nuova_dashboard.md`: diagnosi "Stato del flusso",
+quattro card operative, grafico degli stock, lavori ripresi e drill-down.
+La dashboard precedente resta chiusa in "Vista precedente — confronto e
+taratura" e non determina più la gerarchia della home.
+
+Il contratto `dashboardState` conserva le metriche V2 validate e aggiunge:
+attese correnti, righe di dettaglio già classificate dal backend, capacità
+storica osservata nelle settimane sufficientemente cariche, ritmo atteso,
+ritmo recente distinto e classificazione deterministica a plateau. Precedenza
+verificata: carico elevato, sottoalimentato, dati insufficienti, rallentato,
+ritmo elevato, regolare. Le tolleranze sono configurabili solo nel backend;
+i test coprono il caso 80%/120%, mentre valori assenti producono esplicitamente
+"Dati insufficienti". Nessun fallback sostituisce un ritmo recente mancante.
+Aggiunta anche la misura del tempo complessivo di calcolo e
+confermata una sola richiesta backend per apertura della dashboard.
+
+Suite locale: **234/234** test Apps Script e **12/12** verifiche statiche UI.
+Collaudo browser locale desktop eseguito su markup reale: stato, gerarchia,
+grafico Lavori/Punti e modale Lavori in corso funzionanti; nessun errore o
+warning JavaScript. Verifica a larghezza mobile reale eseguita: ordine DOM,
+card a colonna, grafico scorrevole, legenda e sezioni secondarie leggibili.
+Push forzato del codice sul progetto Apps Script TEST eseguito alle 14:21 e
+verificato con pull isolato: **17/17 file identici** tra TEST e
+`apps-script/src`. Nessun nuovo deployment TEST e nessuna scrittura PROD.
+Nel primo push le soglie WIP e le tolleranze vuote producevano "Dati
+insufficienti"; il collaudo TEST ha mostrato che questo rendeva inutilizzabile
+la diagnosi anche con storico reale disponibile. Comportamento corretto nel
+follow-up seguente.
+
+Follow-up prestazioni/diagnosi alle 15:02: la home usa ora l'endpoint rapido
+`getDashboardMetrics`, che non calcola la vista legacy chiusa; quest'ultima
+viene caricata solo alla sua apertura. Gli intervalli storici sono indicizzati
+una volta sola invece di riconvertire gli stessi timestamp per ogni bucket.
+Se la fascia WIP non è configurata, il backend ricava e dichiara la fascia
+abituale centrale (25°-75° percentile) dalle sole settimane complete con WIP
+positivo; anche il confronto del ritmo usa finestre storiche della stessa
+durata, senza rapporti di fallback. Con storico insufficiente resta
+`INSUFFICIENT_DATA`. Suite **236/236**, verifiche UI **14/14**; benchmark
+sintetico 56 lavori/247 settimane: 755 ms. Nuovo push TEST verificato:
+**17/17 file identici**. Collaudo sul deployment HEAD del progetto TEST:
+backend **6.211 ms**, una sola richiesta; **12,7 s** complessivi dal clic al
+risultato nel browser, contro circa 30 s segnalati prima della correzione.
+Diagnosi reale: **Carico elevato**, affidabilità buona, fascia abituale
+**1–3,89 lavori** ricavata dallo storico, 4 lavori attivi, ritmo storico
+**1,87 punti/settimana**, ritmo recente **5,63 punti/settimana**. Nessuna
+scrittura PROD.
+
+## V2 — validazione finale eseguita; gate finale in attesa (2026-09-14)
+
+Nuova lettura read-only TEST alle 07:28 Europe/Rome: 56 job, 50 visite,
+archivi vuoti. Suite **230/230 in UTC e Europe/Rome**, pull isolato
+TEST **17/17 file identici** senza nuovo push. Controlli indipendenti:
+**1.608 identita' stock/CFD su tutto lo storico**, 156 su finestra
+operativa, 294 dopo ribasamento annuale; 26 finestre di assorbimento
+e 26 finestre di capacita' osservata. Episodi 36 primi + 42 riprese,
+44 ritorni dall'attesa (popolazione distinta). Nessun duplicato di
+job/visita, visita orfana o job privo di size_points positivo.
+
+Capacita' nuovo lavoro 6,5 punti/settimana, 71 punti futuri, 10,92
+settimane impegnate. Capacita' osservata **null**: 2 consegne valide
+nelle ultime 8 settimane, meno del minimo 5. Il vecchio log da 58
+cronologie non e' la stessa fotografia e non va usato come attuale.
+15 incoerenze from restano debito tecnico non bloccante.
+
+Checklist §35 e limiti: docs/VALIDAZIONE_finale_V2.md. La verifica
+riguarda codice locale su dati TEST letti, non esecuzione GAS remota
+o interfaccia V3. Nessun cambiamento al codice applicativo/dati/PROD.
+Esito: pronto nel perimetro backend con limiti dichiarati. Rinvio
+riaperture accolto con il passaggio alla validazione; **chiusura V2 e
+apertura V3 ancora soggette al gate umano finale**.
+
+## V2.6 — predisposizione verificata; esito spike al gate umano (2026-09-14)
+
+Implementati issues[] e metadati diagnostici con stato structure_only:
+nessun rilevatore/soglia/flag persistente, anomalie storiche invariate.
+Modello ufficiale plateau invariato; confronto sperimentale dichiarato
+non implementato, non falsamente validato. Spike sulle riaperture:
+updateJob puo' scrivere/svuotare la chiusura senza evento; moveJob e
+ricalcoli possono perderne il valore precedente. Conteggio completo
+non ricostruibile con certezza, quindi post_closure_reopenings NON
+implementato, nessun falso zero. Evidenze in docs/NOTE_V2_diagnostica.md.
+
+Suite **230/230**, push TEST/pull isolato **17/17 file identici**.
+Nessuna modifica dati o PROD, Kanban.gs/ActivityLog.gs invariati.
+Gate umano sull'esito dello spike ancora da acquisire; nessun futuro
+conteggio da introdurre senza conferma. Restano rilevatori e confronto
+sperimentale opzionali differiti, piu' validazione finale V2 prima di V3.
+
+## V2.5 — DONE; gate V2.4 confermato (2026-09-13)
+
+Marco conferma V2.4 e richiede V2.5. Implementati history mensile e
+settimanale sull'intero storico, anni disponibili/copertura e vista
+CFD annuale mensile con punto a t0 e offset comune per unita'. Nessun
+azzeramento degli stock ereditati o delle cumulative originali.
+Confronti robusti non certificati: comparable_years vuoto, qualita'
+insufficient esplicita, nessuna statistica avanzata inventata.
+
+Suite **229/229 in UTC e Europe/Rome**; push TEST/pull isolato:
+**17/17 file identici**. Sullo snapshot TEST congelato del gate V2.4:
+**51 mesi, 216 settimane, 294 identita' annuali esatte**, riconciliazione
+totali mensili/settimanali e invarianza dal from. A gennaio 2026 restano
+visibili futuro 7/47, WIP 1/5, attesa 10/87 (job/punti).
+Documentazione: docs/NOTE_V2_storico.md. Nessuna modifica dati/PROD.
+Prossimo passo V2.6 non bloccante (spike riaperture prima di eventuale
+implementazione), poi checklist finale V2 e gate prima di V3.
+
+## V2.4 — implementata e verificata; gate umano prima di V2.5 (2026-09-13)
+
+CFD a stock effettivi e cumulative eventi separate. Medie WIP pesate
+sulla durata osservata, fotografie a fine bucket esclusivo / now per
+quello corrente. Nessun uso del from grezzo nei calcoli operativi.
+Suite **226/226 sia UTC sia Europe/Rome**. Push TEST/pull isolato:
+**17/17 file identici**. ActivityLog.gs e Kanban.gs invariati.
+
+Snapshot TEST letto via connettore alle 22:15 Europe/Rome: **56 job,
+50 visite, archivi vuoti**. Verifica locale del codice reale sullo
+snapshot: **156/156 identita' CFD esatte su 26 settimane**, piu'
+**156/156 confronti indipendenti degli stock contro i to grezzi**.
+Invarianza di flussi/CFD/episodi/capacita' alterando tutti i from.
+Stock: WIP **5/47**, futuro **10/71**, attesa **11/87** (job/punti).
+Campione JOB-20260707-0YXL verificato WIP -> attesa -> prep -> WIP.
+Dettagli delle identita' e convenzioni: docs/NOTE_V2_flussi_CFD.md.
+Snapshot diverso dal precedente registro da 58 cronologie; nessuna
+equivalenza presunta. Nessuna scrittura dati TEST/PROD, nessun deploy PROD.
+
+**V2.5 NON avviata**: il prompt richiede conferma di Marco del gate
+CFD prima del ribasamento annuale e confronto storico. V2 complessiva
+non ancora conclusa. Diagnostica TEST estesa con cfdValidation,
+cfdCurrent e cfdSample per l'eventuale verifica dall'editor GAS.
+
+## V2.3 — DONE; V2.2 confermata da Marco (2026-09-13)
+
+Marco autorizza lo sviluppo successivo: il gate V2.2 e' chiuso. Le
+incoerenze from sono debito tecnico medio-alto, non blocker V2; i calcoli
+usano le destinazioni della sequenza ricostruita. Implementati quattro
+flussi e bucket ISO Europe/Rome, inclusi archivio, settimana 53, DST e
+settimane vuote. Riprese WIP e ritorni dall'attesa restano distinti;
+nessuna ponderazione artificiale in punti degli episodi successivi.
+Suite **224/224**. Push TEST/pull isolato: **17/17 file identici**.
+Dettagli: docs/NOTE_V2_flussi_CFD.md. Prosegue V2.4; resta obbligatorio
+il gate sulle identita' CFD prima di V2.5. Nessuna scrittura PROD.
+
+## Gate V2.2 — nuovo snapshot TEST acquisito, conferma numeri in attesa (2026-09-13)
+
+Registro fornito da Marco, esecuzione 21:37:59–21:38:02. Capacita'
+di assorbimento da primi episodi WIP: **6,5 punti/settimana**, 5 job
+in 8 settimane (52 punti; 0,625 job/settimana). Lavoro futuro **71 punti**
+(63 backlog + 8 prep), **10 job**. Settimane impegnate **10,92**:
+71 / 6,5 = 10,9230769, arrotondato a due decimali. Campione sufficiente
+secondo il minimo configurato di 5, esattamente sulla soglia.
+Output tecnico separato: **5,63 punti/settimana**, 6 consegne in 8
+settimane, 0,75 visite/settimana; nessuna visita esclusa per job mancante.
+WIP corrente: **5 job / 47 punti**.
+
+Su tutto lo storico disponibile: **38 primi episodi + 44 riprese = 82
+episodi**, quota riprese **53,66%** (44/82), non una quota di punti o ore.
+58 cronologie normalizzate, nessuna senza move significativi; restano
+13 anomalie su 8 job, non trattate come richiesto. Il registro permette
+la riconciliazione degli aggregati, non un audit evento per evento.
+Numeri riferiti al dataset TEST; non costituiscono una nuova lettura PROD.
+Gate umano V2.2 ancora aperto per conferma di Marco; V2.3 non avviata.
+
+## V2.2 — episodi WIP isolati e assorbimento all'ingresso (2026-09-13)
+
+Implementata la definizione confermata da Marco: episodio 1 al primo
+ingresso WIP; ogni uscita termina l'episodio, ogni nuovo ingresso apre
+una ripresa. `numero_visita` legacy e `computeVisiteFromLog_` invariati.
+Capacita' nuovo lavoro da punti dei job al primo ingresso WIP, media
+mobile con settimane a zero incluse. Riprese misurate in episodi e quota,
+senza replicare punti. Consegne tecniche mantenute separate. Gestione
+anomalie invariata. Dettagli e convenzioni temporali in
+[NOTE_V2_episodi_WIP.md](docs/NOTE_V2_episodi_WIP.md).
+Suite completa: **221/221**. Push TEST e pull isolato verificati: **17/17
+file identici**. Gate V2.2 in attesa del nuovo snapshot TEST;
+i risultati precedenti basati su visite 1 consegnate sono superati.
+
+## Gate V2.2 — snapshot TEST ricevuto, definizione primo ciclo da confermare (2026-09-13)
+
+Log fornito da Marco, esecuzione 21:00:42–21:00:46: WIP 5 job / 47
+punti; lavoro futuro 10 job / 71 punti (backlog 9 / 63, prep 1 / 8).
+Capacita' osservata su 8 settimane: 5,63 punti/settimana e 0,75
+visite/settimana, 6 campioni, nessuna visita esclusa per job mancante.
+Primi cicli con `numero_visita === 1` consegnati nella finestra: 0;
+capacita' nuovo lavoro e settimane impegnate entrambe null, qualita'
+insufficiente. Cronologie normalizzate: 58, nessuna senza move
+significativi; 13 anomalie `discontinuous_from` su 8 job.
+
+Verifica del codice stabilizzato: un passaggio da stand_by a backlog/prep
+apre una nuova visita anche senza consegna precedente. Quindi una prima
+consegna tecnica puo' appartenere a numero_visita > 1; lo zero osservato
+non dimostra assenza di prime consegne. Il log aggregato non consente
+di distinguere questo caso dalle consegne di revisioni. Prima di V2.3
+va confermato il significato desiderato di primo ciclo: prima visita
+materializzata oppure prima consegna tecnica del job, anche dopo attese.
+Nessuna modifica automatica della definizione; gate V2.2 ancora aperto.
+
+## Aggiornamento V2 — autenticazione ripristinata e diagnostica visibile nel registro (2026-09-13)
+
+Il blocco di autenticazione descritto sotto e' risolto. Push TEST e pull
+isolato verificati: **17/17 file identici**. `clasp run` non consente
+l'esecuzione remota sul progetto; la diagnostica
+`checkDashboardV2MetricsOnTest()` ora stampa il risultato con `Logger.log`
+e si avvia dall'editor TEST con **Esegui**, senza debugger o breakpoint.
+Suite completa dopo la correzione: **219/219**; nuovo push/pull TEST:
+**17/17 file identici**. Restano da acquisire e verificare i numeri del
+dataset TEST e la loro provenienza per il gate V2.2; V2.3 non avviata.
+
+## Fase V2 — V2.1/V2.2 implementate localmente, NON DONE: autenticazione TEST scaduta (2026-09-13)
+
+Avviata sul branch dedicato `codex/fase-v2-dashboard-metriche` la
+rifondazione descritta in `docs/DESIGN_faseV2_nuova_dashboard.md`.
+Implementati in un percorso parallelo (`DashboardV2.gs`) la
+normalizzazione non distruttiva della cronologia, le popolazioni correnti
+WIP (`role=wip`) e lavoro futuro (`backlog+prep`), i completamenti tecnici
+da `visita.consegna_ts`, la capacita' osservata, la capacita' per nuovo
+lavoro e le settimane impegnate. `computeVisiteFromLog_` non e' stata
+modificata. La definizione implementata di primo ciclo e':
+`numero_visita === 1`, misurato al relativo `consegna_ts`.
+
+Verifica locale: baseline **213/213**; dopo 6 test V2 dedicati, suite
+completa **219/219**. Coperti: `WIP -> WIP -> WIP`, salto
+`backlog -> wip` senza stato `prep` inventato, esclusione di `stand_by`
+dal WIP e di `wip` dal lavoro futuro, separazione fra `consegna_ts` e
+`done_ts`, primo ciclo, denominatore insufficiente e distinzione fra
+`observation_window_days`, `wip_trend_weeks` e
+`capacity_window_weeks`.
+
+**Criterio di Definition of Done non soddisfatto**: il comando di push e
+verifica su TEST (`push-and-verify.sh`) si e' fermato prima del push con
+`invalid_grant`, `invalid_rapt` (riautenticazione Google richiesta).
+Di conseguenza non esiste ancora il pull isolato con diff 0 e non e'
+possibile estrarre dal deployment TEST i numeri reali richiesti dal gate
+V2.2. V2.1 e V2.2 restano esplicitamente **NON DONE**; V2.3 non e' stata
+iniziata. Per riprendere: riautenticare `clasp`, rieseguire push + verifica,
+poi eseguire la diagnostica read-only `checkDashboardV2MetricsOnTest()` e
+presentare a Marco capacita' osservata, capacita' per nuovo lavoro e
+settimane impegnate prima di V2.3.
+
+---
 
 ## Fase U — DONE: duplicati ripuliti e lock rilasciato in PROD (2026-09-10)
 
@@ -4590,3 +5647,6 @@ operativa.
 - Metriche dashboard: [docs/dashboard-metrics.md](docs/dashboard-metrics.md)
 - Testing e sicurezza: [docs/testing-and-security.md](docs/testing-and-security.md)
 - Setup Google Workspace: [docs/google-workspace-setup.md](docs/google-workspace-setup.md)
+vuote nei default, insieme alle tolleranze del confronto: finché non sono
+configurate su TEST, lo Stato del flusso mostra correttamente "Dati
+insufficienti" invece di inventare una diagnosi.

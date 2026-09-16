@@ -344,7 +344,11 @@ function readConfig_(ss) {
 
   readTable_(sheet).forEach(function(row) {
     var numeric = Number(row.value);
-    config[row.key] = isNaN(numeric) ? row.value : numeric;
+    // Una cella vuota e' "non configurata", non il numero zero.
+    // Number('') === 0 trasformava silenziosamente le nuove soglie
+    // opzionali in valori attivi quando la relativa riga era presente.
+    config[row.key] = row.value === '' || row.value === null || row.value === undefined
+      ? '' : (isNaN(numeric) ? row.value : numeric);
   });
 
   return config;

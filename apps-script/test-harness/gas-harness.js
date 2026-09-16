@@ -30,6 +30,15 @@ function isoWeekInfo_(date) {
 }
 
 function formatDate(date, tz, pattern) {
+  // Percorso V2 calendario: conversione reale del fuso, senza cambiare i
+  // pattern legacy del mock e le loro fixture gia' stabilizzate.
+  if (pattern === "yyyy-MM-dd'T'HH:mm:ss") {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(date).map(p => [p.type, p.value]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+  }
   // Implementazione semplificata: ignora la vera conversione di timezone
   // (sufficiente per verificare la logica, non la resa visuale esatta).
   const y = date.getFullYear(), mo = date.getMonth() + 1, d = date.getDate();
@@ -348,7 +357,7 @@ function createHarness() {
   };
   vm.createContext(context);
 
-  const files = ['Constants.gs', 'Schema.gs', 'Utils.gs', 'ActivityLog.gs', 'Model.gs', 'Kanban.gs', 'Backup.gs', 'Tests.gs'];
+  const files = ['Constants.gs', 'Schema.gs', 'Utils.gs', 'ActivityLog.gs', 'Model.gs', 'DashboardV2.gs', 'Kanban.gs', 'Backup.gs', 'Tests.gs'];
   files.forEach(file => {
     const code = fs.readFileSync(path.join(SRC_DIR, file), 'utf8');
     vm.runInContext(code, context, { filename: file });

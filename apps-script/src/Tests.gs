@@ -306,6 +306,52 @@ function runAllTests() {
     testEditableOptions,
     testDynamicColumnsAndOptions,
     testMetrics,
+    testDashboardV2NormalizationCompressesConsecutiveSelfMoves,
+    testDashboardV2NormalizationAcceptsSkippedPrepWithoutInventingState,
+    testDashboardV2CurrentWorkUsesExactOperationalPopulations,
+    testDashboardV2CapacityUsesTechnicalCompletionsAndFirstCycles,
+    testDashboardV7CompleteIsoWeeksExcludeCurrentAndStayStable,
+    testDashboardV7CapacityWindowReconfiguresAllRecentRates,
+    testDashboardV2CommittedWeeksIsNullWhenCapacityIsInsufficient,
+    testDashboardV2RejectsCapacityWindowLongerThanWipHistory,
+    testDashboardV2WipEpisodeTransitions,
+    testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes,
+    testDashboardV7CalibrationUsesReliableValidWindowsAndMedian,
+    testDashboardV7CalibrationUsesFullPrecisionAndIndependentJobMedian,
+    testDashboardV7CalibrationIgnoresOperationalTrendDepth,
+    testDashboardV7ReliableHistoryExcludesRecentCapacityButPreservesHistory,
+    testDashboardV7LittleUsesEpisodeDurationsAndPointWeights,
+    testDashboardV7DiscontinuousFromStillHasDeterministicEpisodeBoundaries,
+    testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks,
+    testDashboardV2FlowClassificationAndFromIndependence,
+    testDashboardV2ISOCalendarAndDST,
+    testDashboardV2FlowBucketsAndArchive,
+    testDashboardV2CFDNonlinearStocksAndCumulatives,
+    testDashboardV5CFDSplitsNewAndReworkWip,
+    testDashboardV2CFDPartialWeekAndInheritedWork,
+    testDashboardV2AnnualRebasePreservesStocks,
+    testDashboardV2HistoryCoverageAndCalendar,
+    testDashboardV2QuarterlyHistoryAndEmptyStates,
+    testDashboardV5DailyCalendarLeapYearAndSelectedPeriod,
+    testDashboardV5HorizontalEquivalentTimeKnownDates,
+    testDashboardV5HorizontalEquivalentTimeIntermediateAndClamp,
+    testDashboardV2HistoryEmptyAndFromIndependence,
+    testDashboardV2DiagnosticsAreExplicitAndIsolated,
+    testDashboardV3FlowStatePrecedenceAndRhythm,
+    testDashboardV3FlowStateHandlesMissingEvidence,
+    testDashboardV3FlowStateIgnoresHistoricalShapes,
+    testDashboardV3RecentReworkAggregatesConfiguredWindow,
+    testDashboardV5TimingKeepsIntermediateReturnInOneInterval,
+    testDashboardV5TimingBuildsNewUnitOnlyAfterDelivery,
+    testDashboardV5TimingAggregatesMedianP80AndSizes,
+    testDashboardV3FastEndpointDefersLegacyMetrics,
+    testDashboardV3OperationalDetailsComeFromBackend,
+    testDashboardV3ContractExposesOperationalFields,
+    testDashboardV5CalibrationTraceabilityConfig,
+    testDashboardV5CalibrationRejectsInvalidValues,
+    testDashboardV4TransparencyCalibrationAndDiagnostics,
+    testDashboardV4WriterRealignsFromAndAuditsForward,
+    testCheckVisiteSyncV4DetectsMismatchReadOnly,
     testGetMetricsUsesVisiteNotJobFields,
     testWorkloadAndPointsStayOnJobsEvenWithEmptyVisite,
     testSystemStateInsufficientData,
@@ -1802,7 +1848,7 @@ function testApiTakesLockOnlyForWriteActions() {
     created = addJob({ title: 'P2 lock lettura/scrittura', size_class: 'S' }).data;
   });
 
-  var reads = ['getBoard', 'getActivityLog', 'getArchivio', 'getCestino', 'getMetrics'];
+  var reads = ['getBoard', 'getActivityLog', 'getArchivio', 'getCestino', 'getDashboardMetrics', 'getMetrics'];
   reads.forEach(function(action) {
     var payload = { env: 'test' };
     if (action === 'getActivityLog') { payload.job_id = created.job_id; }
@@ -4387,7 +4433,10 @@ function testDeleteActivityEventManual() {
 
     assertTrue_(del.success, 'delete dovrebbe riuscire');
     var log = getActivityLog({ job_id: jobId }).data.log;
-    assertEquals_(3, log.length, 'evento di creazione + due move rimasti dopo la cancellazione');
+    assertEquals_(4, log.length, 'evento di creazione + due move rimasti + audit della cancellazione');
+    var deletionAudit = log.filter(function(e) { return e.type === 'audit' && e.action === 'delete'; })[0];
+    assertTrue_(Boolean(deletionAudit), 'la cancellazione conserva un record di audit');
+    assertEquals_(e2.data.event.id, deletionAudit.target_event_id, 'audit collegato all evento eliminato');
     var remaining3 = log.filter(function(e) { return e.id === e3.data.event.id; })[0];
     assertEquals_(todoCol.id, remaining3.from, 'from dell\'evento successivo ricalcolato dopo la cancellazione');
 
@@ -5318,6 +5367,1009 @@ function testEseguiBackupGiornalieroProdKeepsBackupWhenPruneFails() {
   } finally {
     ensureBackupFolder_ = originalEnsureBackupFolder;
   }
+}
+
+// --- Fase V2.1-V2.2: contratto dati della nuova dashboard ---
+
+function dashboardV2TestColumnMap_() {
+  var map = {};
+  SIGMAFLOW.DEFAULT_COLUMNS.forEach(function(column) { map[column.id] = column; });
+  return map;
+}
+
+function dashboardV2TestConfig_(overrides) {
+  var config = {};
+  Object.keys(SIGMAFLOW.DEFAULT_CONFIG).forEach(function(key) { config[key] = SIGMAFLOW.DEFAULT_CONFIG[key]; });
+  Object.keys(overrides || {}).forEach(function(key) { config[key] = overrides[key]; });
+  config.columns_json = JSON.stringify(SIGMAFLOW.DEFAULT_COLUMNS);
+  return config;
+}
+
+function testDashboardV2NormalizationCompressesConsecutiveSelfMoves() {
+  var job = {
+    job_id: 'V2-DUP',
+    activity_log_json: JSON.stringify([
+      { id: 'e1', ts: '2026-01-01T09:00:00+01:00', type: 'move', from: null, to: 'backlog' },
+      { id: 'e2', ts: '2026-01-02T09:00:00+01:00', type: 'move', from: 'backlog', to: 'wip' },
+      { id: 'e3', ts: '2026-01-03T09:00:00+01:00', type: 'move', from: 'wip', to: 'wip' },
+      { id: 'e4', ts: '2026-01-04T09:00:00+01:00', type: 'move', from: 'wip', to: 'wip' }
+    ])
+  };
+  var result = normalizeActivityLogForDashboard_(job, dashboardV2TestColumnMap_(), new Date('2026-01-05T09:00:00+01:00'));
+  assertEquals_(2, result.logical_states.length, 'backlog e una sola permanenza continua in WIP');
+  assertEquals_(2, result.significant_events.length, 'i self-move WIP non generano eventi produttivi');
+  assertEquals_(2, result.compressed_duplicates.length, 'entrambi i self-move WIP restano tracciati come duplicati compressi');
+  assertEquals_('2026-01-02T09:00:00+01:00', result.logical_states[1].entered_at, 'il WIP conserva il primo timestamp di ingresso');
+  assertEquals_(3, result.logical_states[1].original_event_refs.length, 'la permanenza conserva i riferimenti a tutti gli eventi originali');
+}
+
+function testDashboardV2NormalizationAcceptsSkippedPrepWithoutInventingState() {
+  var job = {
+    job_id: 'V2-SKIP',
+    activity_log_json: JSON.stringify([
+      { id: 'e1', ts: '2026-01-01T09:00:00+01:00', type: 'move', from: null, to: 'backlog' },
+      { id: 'e2', ts: '2026-01-02T09:00:00+01:00', type: 'move', from: 'backlog', to: 'wip' }
+    ])
+  };
+  var result = normalizeActivityLogForDashboard_(job, dashboardV2TestColumnMap_(), new Date('2026-01-03T09:00:00+01:00'));
+  assertEquals_(2, result.logical_states.length, 'nessuno stato prep fittizio inserito');
+  assertEquals_('wip', result.logical_states[1].role, 'backlog -> wip e un ingresso valido in lavorazione');
+  assertEquals_(1, result.skipped_states.length, 'il salto logico resta segnalato');
+  assertEquals_('prep', result.skipped_states[0].skipped_roles[0], 'prep identificato come saltato senza timestamp inventato');
+}
+
+function testDashboardV2CurrentWorkUsesExactOperationalPopulations() {
+  var jobs = [
+    { job_id: 'B', status: 'backlog', size_points: 5 },
+    { job_id: 'P', status: 'todo', size_points: 8 },
+    { job_id: 'W', status: 'wip', size_points: 13 },
+    { job_id: 'S', status: 'wait_client', size_points: 20 },
+    { job_id: 'D', status: 'done', size_points: 3 }
+  ];
+  var result = dashboardV2CurrentWork_(jobs, dashboardV2TestColumnMap_());
+  assertEquals_(1, result.wip_jobs, 'solo role=wip conta nel WIP');
+  assertEquals_(13, result.wip_points, 'i punti WIP escludono prep e stand_by');
+  assertEquals_(2, result.future_work_jobs, 'solo backlog+prep contano nel lavoro futuro');
+  assertEquals_(13, result.future_work_points, 'punti futuri = backlog+prep');
+  assertEquals_(1, result.prep_jobs, 'prep ha un nome e una popolazione espliciti');
+  assertEquals_(undefined, result.wip_status, 'nessuna classificazione WIP secondaria nel contratto');
+}
+
+function testDashboardV2CapacityUsesTechnicalCompletionsAndFirstCycles() {
+  var now = new Date('2026-02-16T12:00:00+01:00');
+  var jobs = [
+    { job_id: 'J1', status: 'backlog', size_points: 5 },
+    { job_id: 'J2', status: 'todo', size_points: 8 },
+    { job_id: 'J3', status: 'wip', size_points: 13 },
+    { job_id: 'ADMIN-ONLY', status: 'done', size_points: 20, done_ts: '2026-02-14T12:00:00+01:00' }
+  ];
+  var visits = [
+    { job_id: 'J1', numero_visita: 1, consegna_ts: '2026-02-10T12:00:00+01:00' },
+    { job_id: 'J2', numero_visita: 1, consegna_ts: '2026-02-11T12:00:00+01:00' },
+    { job_id: 'J3', numero_visita: 2, consegna_ts: '2026-02-12T12:00:00+01:00' }
+  ];
+  var config = dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 6, min_samples_capacity: 1 });
+  jobs[0].activity_log_json = JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-02-10T12:00:00+01:00' }]);
+  jobs[1].activity_log_json = JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-02-11T12:00:00+01:00' }]);
+  var state = buildDashboardStateV2_(jobs, visits, config, now);
+  assertEquals_(13, state.capacity.observed.rolling_capacity_points_per_week, 'capacita osservata = punti delle visite consegnate / finestra');
+  assertEquals_(1.5, state.capacity.observed.rolling_capacity_visits_per_week, 'capacita osservata conta visite, non job amministrativamente done');
+  assertEquals_(6.5, state.capacity.new_work.new_work_capacity_points_per_week, 'capacita nuovo lavoro usa le prime aperture WIP');
+  assertEquals_(1, state.capacity.new_work.new_work_capacity_jobs_per_week, 'ritmo primi cicli per settimana');
+  assertEquals_(2, state.futureWork.committed_weeks, 'settimane impegnate = backlog+prep / capacita primi cicli');
+  assertEquals_(2, state.capacity.new_work.sample_size, 'campione primi cicli separato dal campione complessivo');
+  assertEquals_(3, state.capacity.observed.sample_size, 'done_ts senza consegna_ts non crea completamenti tecnici');
+}
+
+function testDashboardV7CompleteIsoWeeksExcludeCurrentAndStayStable() {
+  var tuesday = new Date('2026-03-31T13:00:00+02:00');
+  var friday = new Date('2026-04-03T21:00:00+02:00');
+  var first = dashboardV2CompleteIsoWeeks_(tuesday, 2);
+  var second = dashboardV2CompleteIsoWeeks_(friday, 2);
+  assertEquals_(JSON.stringify(first), JSON.stringify(second), 'finestra completa invariata nella stessa settimana');
+  assertEquals_('2026-03-16T00:00:00', dashboardV2WallClock_(new Date(first[0].period_start)), 'inizio lunedi locale');
+  assertEquals_('2026-03-30T00:00:00', dashboardV2WallClock_(new Date(first[1].period_end)), 'fine lunedi locale, settimana corrente esclusa');
+  assertEquals_(167, (Date.parse(first[1].period_end) - Date.parse(first[1].period_start)) / 3600000, 'DST non trasformato in una finestra mobile di 168 ore');
+  assertEquals_(false, first[1].is_partial, 'settimana ISO conclusa');
+}
+
+function testDashboardV7CapacityWindowReconfiguresAllRecentRates() {
+  var jobs = [{ job_id: 'J', status: 'backlog', size_points: 10,
+    activity_log_json: JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-03-24T12:00:00+01:00' }]) }];
+  var visits = [
+    { job_id: 'J', numero_visita: 1, consegna_ts: '2026-03-24T12:00:00+01:00' },
+    { job_id: 'J', numero_visita: 2, consegna_ts: '2026-03-31T12:00:00+02:00' }
+  ];
+  var now = new Date('2026-04-02T12:00:00+02:00');
+  var one = buildDashboardStateV2_(jobs, visits,
+    dashboardV2TestConfig_({ capacity_window_weeks: 1, wip_trend_weeks: 3, min_samples_capacity: 1 }), now);
+  var two = buildDashboardStateV2_(jobs, visits,
+    dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 3, min_samples_capacity: 1 }), now);
+  assertEquals_(10, one.capacity.observed.rolling_capacity_points_per_week, 'settimana corrente ignorata');
+  assertEquals_(5, two.capacity.observed.rolling_capacity_points_per_week, 'rate consegne riconfigurato');
+  assertEquals_(10, one.capacity.new_work.new_work_capacity_points_per_week, 'nuovi ingressi su una settimana');
+  assertEquals_(5, two.capacity.new_work.new_work_capacity_points_per_week, 'nuovi ingressi su due settimane');
+  assertEquals_(1, one.rework.rework_window_weeks, 'rientri sulla finestra configurata');
+  assertEquals_(2, two.rework.rework_window_weeks, 'rientri riconfigurabili');
+  var sameWeekLater = buildDashboardStateV2_(jobs, visits,
+    dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 3, min_samples_capacity: 1 }),
+    new Date('2026-04-05T22:00:00+02:00'));
+  assertEquals_(two.capacity.observed.rolling_capacity_points_per_week,
+    sameWeekLater.capacity.observed.rolling_capacity_points_per_week,
+    'ritmo consegne invariato cambiando giorno e ora nella stessa settimana ISO');
+  assertEquals_(two.capacity.active_flow.points_per_week, sameWeekLater.capacity.active_flow.points_per_week,
+    'flusso attivo recente invariato nello stesso intervallo consolidato');
+  assertEquals_(two.rework.rework_share, sameWeekLater.rework.rework_share,
+    'quota rientri invariata nello stesso intervallo consolidato');
+}
+
+function testDashboardV2CommittedWeeksIsNullWhenCapacityIsInsufficient() {
+  var jobs = [{ job_id: 'J1', status: 'backlog', size_points: 5 }];
+  jobs[0].activity_log_json = JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-02-10T12:00:00+01:00' }]);
+  var visits = [{ job_id: 'J1', numero_visita: 1, consegna_ts: '2026-02-10T12:00:00+01:00' }];
+  var config = dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 6, min_samples_capacity: 2 });
+  var state = buildDashboardStateV2_(jobs, visits, config, new Date('2026-02-16T12:00:00+01:00'));
+  assertEquals_(null, state.capacity.new_work.new_work_capacity_points_per_week, 'capacita nuovo lavoro nulla sotto il minimo campionario');
+  assertEquals_(null, state.futureWork.committed_weeks, 'nessun fallback numerico per settimane impegnate');
+  assertEquals_('insufficient', state.futureWork.committed_weeks_quality, 'qualita insufficiente restituita insieme al null');
+  assertEquals_(1, state.futureWork.committed_weeks_sample_size, 'dimensione del campione sempre esplicita');
+}
+
+function testDashboardV2RejectsCapacityWindowLongerThanWipHistory() {
+  var config = dashboardV2TestConfig_({
+    observation_window_days: 1,
+    capacity_window_weeks: 4,
+    wip_trend_weeks: 3,
+    min_samples_capacity: 1
+  });
+  var state = buildDashboardStateV2_([], [], config, new Date('2026-02-15T12:00:00+01:00'));
+  assertEquals_('invalid', state.capacity.configuration_quality, 'vincolo tra storico WIP e finestra capacita verificato esplicitamente');
+  assertEquals_(null, state.capacity.observed.rolling_capacity_points_per_week, 'configurazione incoerente non produce stime');
+  assertEquals_(4, state.capacity.observed.window_weeks, 'capacity_window_weeks resta distinto da observation_window_days e wip_trend_weeks');
+}
+
+function testDashboardV2WipEpisodeTransitions() {
+  var map = dashboardV2TestColumnMap_();
+  map.wip_other = { id: 'wip_other', role: 'wip' };
+  [
+    { path: ['wip', 'wait_client', 'wip'], count: 2, closeDay: 2 },
+    { path: ['wip', 'wait_authority', 'todo', 'wip'], count: 2, closeDay: 2 },
+    { path: ['wip', 'wip'], count: 1 },
+    { path: ['wip', 'wip_other', 'wip'], count: 1 },
+    { path: ['backlog', 'wait_client', 'todo', 'wip'], count: 1 },
+    { path: ['wip', 'backlog', 'wip'], count: 2, closeDay: 2 }
+  ].forEach(function(testCase) {
+    var job = { job_id: 'E', incarico_chiuso_ts: '2026-01-05T00:00:00Z', activity_log_json: JSON.stringify(testCase.path.map(function(to, i) {
+      return { type: 'move', to: to, ts: new Date(Date.UTC(2026, 0, i + 1)).toISOString() };
+    })) };
+    var original = JSON.stringify(job);
+    var episodes = dashboardV2WipEpisodes_([normalizeActivityLogForDashboard_(job, map, new Date('2026-01-10T00:00:00Z'))], new Date('2026-01-10T00:00:00Z'));
+    assertEquals_(testCase.count, episodes.length, testCase.path.join(' -> '));
+    assertEquals_(testCase.count - 1, episodes.filter(function(e) { return e.wip_episode_number > 1; }).length, 'riprese indipendenti dalle consegne');
+    if (testCase.closeDay) { assertEquals_('2026-01-02T00:00:00.000Z', episodes[0].closed_at, 'chiusura alla vera uscita WIP'); }
+    assertEquals_(null, episodes[episodes.length - 1].closed_at, 'episodio ancora WIP non chiuso da now o chiusura amministrativa');
+    assertEquals_(original, JSON.stringify(job), 'nessuna mutazione della cronologia');
+  });
+}
+
+function testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes() {
+  var now = new Date('2026-01-12T12:00:00+01:00');
+  var events = [
+    ['2026-01-05T09:00:00+01:00', 'wip'],
+    ['2026-01-05T10:00:00+01:00', 'wip'],
+    ['2026-01-06T09:00:00+01:00', 'waiting'],
+    ['2026-01-07T09:00:00+01:00', 'wip'],
+    ['2026-01-08T09:00:00+01:00', 'done'],
+    ['2026-01-09T09:00:00+01:00', 'wip'],
+    ['2026-01-10T09:00:00+01:00', 'prep']
+  ].map(function(row) { return { at: row[0], to_role: row[1] }; });
+  var episodes = dashboardV2WipEpisodes_([{ job_id: 'J', significant_events: events }], now);
+  var flow = dashboardV7ActiveFlow_(episodes, { J: { job_id: 'J', size_points: 4 } },
+    dashboardV2CompleteIsoWeeks_(now, 2), 1);
+  assertEquals_(3, episodes.length, 'WIP→WIP non apre ne chiude un episodio');
+  assertEquals_(3, flow.closed_wip_episodes, 'attesa, done e prep chiudono episodi');
+  assertEquals_(12, flow.closed_wip_points, 'taglia corrente contata a ogni uscita');
+  assertEquals_(3, flow.jobs_per_week, 'turnover recente in episodi/settimana');
+  assertEquals_(12, flow.points_per_week, 'turnover recente in punti/settimana');
+}
+
+function testDashboardV7CalibrationUsesReliableValidWindowsAndMedian() {
+  var starts = ['2026-01-05', '2026-01-12', '2026-01-19', '2026-01-26'];
+  var points = [100, 2, 4, 10];
+  var jobs = [20, 1, 5, 1];
+  var activeFlow = { weekly: starts.map(function(day, i) {
+    return { period_start: day + 'T00:00:00.000Z', period_end: new Date(Date.parse(day + 'T00:00:00Z') + 7 * 86400000).toISOString(),
+      closed_wip_points: points[i], closed_wip_episodes: jobs[i] };
+  }) };
+  var cfd = { weekly: activeFlow.weekly.map(function(row) {
+    return { period_start: row.period_start, avg_wip_jobs: 5 };
+  }) };
+  var config = { capacity_window_weeks: 2, wip_target_min_jobs: 3, history_reliable_from: '2026-01-12' };
+  var before = JSON.stringify(config);
+  var suggestion = dashboardV7CalibrationSuggestion_(activeFlow, cfd, config);
+  assertEquals_(3, suggestion.complete_reliable_weeks, 'settimana precedente resta fuori dalla taratura');
+  assertEquals_(2, suggestion.valid_window_count, 'due finestre affidabili');
+  assertEquals_(5, suggestion.suggested_active_flow_points_per_week, 'mediana delle due finestre 3 e 7');
+  assertEquals_(3, suggestion.suggested_active_flow_jobs_per_week, 'mediana indipendente dei lavori, non punti/taglia media');
+  assertEquals_(3, suggestion.observed_min_points_per_week, 'minimo osservato, non intervallo di confidenza');
+  assertEquals_(7, suggestion.observed_max_points_per_week, 'massimo osservato');
+  assertEquals_(before, JSON.stringify(config), 'nessuna autotaratura o scrittura CONFIG');
+  cfd.weekly[2].avg_wip_jobs = 0;
+  assertEquals_(0, dashboardV7CalibrationSuggestion_(activeFlow, cfd, config).valid_window_count,
+    'finestre sottoalimentate escluse');
+  assertEquals_(null, dashboardV7CalibrationSuggestion_(activeFlow, cfd, config).suggested_active_flow_points_per_week,
+    'nessuna stima se non vi sono finestre valide');
+}
+
+function testDashboardV7CalibrationUsesFullPrecisionAndIndependentJobMedian() {
+  var weekly = [
+    { period_start: '2026-01-05T00:00:00Z', period_end: '2026-01-12T00:00:00Z', closed_wip_points: 14.125, closed_wip_episodes: 1 },
+    { period_start: '2026-01-12T00:00:00Z', period_end: '2026-01-19T00:00:00Z', closed_wip_points: 14.5, closed_wip_episodes: 2 }
+  ];
+  var cfd = { weekly: weekly.map(function(row) { return { period_start: row.period_start, avg_wip_jobs: 3 }; }) };
+  var config = { capacity_window_weeks: 1, wip_target_min_jobs: 3, history_reliable_from: '' };
+  var suggestion = dashboardV7CalibrationSuggestion_({ weekly: weekly }, cfd, config);
+  assertEquals_(14.3125, suggestion.suggested_active_flow_points_per_week_exact,
+    'mediana dei tassi non arrotondati');
+  assertEquals_(14.31, suggestion.suggested_active_flow_points_per_week,
+    '14,3125 si presenta come 14,31, non 14,32');
+  assertEquals_(1.5, suggestion.suggested_active_flow_jobs_per_week_exact,
+    'mediana lavori calcolata indipendentemente dai punti');
+  var episode = [{ job_id: 'J', opened_at: '2026-01-05T00:00:00Z', closed_at: '2026-01-19T00:00:00Z' }];
+  var little = dashboardV7LittleWip_(episode, { J: { size_points: 1 } }, suggestion, config);
+  assertEquals_(28.63, little.little_wip_points, 'Little usa 14,3125 e non il campo UI 14,31');
+  assertEquals_(3, little.little_wip_jobs, 'Little lavori usa la mediana indipendente 1,5');
+}
+
+function testDashboardV7CalibrationIgnoresOperationalTrendDepth() {
+  var now = new Date('2026-02-09T12:00:00+01:00');
+  var dates = [['2026-01-05', 4], ['2026-01-19', 8], ['2026-02-02', 12]];
+  var jobs = dates.map(function(entry, i) {
+    return { job_id: 'FULL-' + i, status: 'wait_client', size_points: entry[1],
+      activity_log_json: JSON.stringify([
+        { type: 'move', to: 'wip', ts: entry[0] + 'T00:00:00+01:00' },
+        { type: 'move', from: 'wip', to: 'wait_client', ts: new Date(Date.parse(entry[0] + 'T00:00:00+01:00') + 7 * 86400000 - 60000).toISOString() }
+      ]) };
+  });
+  function state(trend) {
+    return buildDashboardStateV2_(jobs, [], dashboardV2TestConfig_({
+      capacity_window_weeks: 1, wip_trend_weeks: trend, wip_target_min_jobs: 0.5,
+      history_reliable_from: '2026-01-05'
+    }), now, [], []);
+  }
+  var short = state(2);
+  var long = state(6);
+  assertEquals_(2, short.capacity.active_flow.weekly.length, 'serie operativa limitata a due settimane');
+  assertEquals_(6, long.capacity.active_flow.weekly.length, 'serie operativa estesa a sei settimane');
+  assertEquals_(3, short.diagnostics.calibration_suggestion.valid_window_count,
+    'tutte e tre le finestre affidabili entrano nonostante trend corto');
+  assertEquals_(8, short.diagnostics.calibration_suggestion.suggested_active_flow_points_per_week,
+    'mediana di 4, 8 e 12 sullo storico affidabile completo');
+  assertEquals_(8, long.diagnostics.calibration_suggestion.suggested_active_flow_points_per_week,
+    'profondita operativa diversa non cambia la taratura');
+  assertEquals_(short.diagnostics.little_wip.little_wip_points, long.diagnostics.little_wip.little_wip_points,
+    'Little non eredita la profondita operativa');
+  assertEquals_(12, short.capacity.active_flow.points_per_week, 'recente osservato resta distinto dal suggerito');
+}
+
+function testDashboardV7ReliableHistoryExcludesRecentCapacityButPreservesHistory() {
+  var jobs = [{ job_id: 'J', status: 'backlog', size_points: 4,
+    activity_log_json: JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-01-06T12:00:00+01:00' }]) }];
+  var visits = [{ job_id: 'J', numero_visita: 1, consegna_ts: '2026-01-06T12:00:00+01:00' }];
+  var config = dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 4,
+    min_samples_capacity: 1, history_reliable_from: '2026-01-12' });
+  var state = buildDashboardStateV2_(jobs, visits, config, new Date('2026-01-19T12:00:00+01:00'));
+  assertEquals_(null, state.capacity.observed.rolling_capacity_points_per_week, 'finestra di capacità non interamente affidabile');
+  assertEquals_(null, state.capacity.active_flow.points_per_week, 'turnover recente non usa periodo inaffidabile');
+  assertEquals_(0, state.diagnostics.calibration_suggestion.valid_window_count, 'storico non affidabile escluso dalla taratura');
+  assertTrue_(state.flow.events.some(function(event) { return event.job_id === 'J'; }),
+    'evento antecedente resta nella ricostruzione storica');
+}
+
+function testDashboardV7LittleUsesEpisodeDurationsAndPointWeights() {
+  var episodes = [
+    { job_id: 'A', opened_at: '2026-01-05T00:00:00Z', closed_at: '2026-01-12T00:00:00Z' },
+    { job_id: 'B', opened_at: '2026-01-05T00:00:00Z', closed_at: '2026-01-26T00:00:00Z' },
+    { job_id: 'C', opened_at: '2026-01-05T00:00:00Z', closed_at: null }
+  ];
+  var jobs = { A: { size_points: 2 }, B: { size_points: 6 }, C: { size_points: 100 } };
+  var suggestion = { suggested_active_flow_jobs_per_week_exact: 2,
+    suggested_active_flow_points_per_week_exact: 8 };
+  var result = dashboardV7LittleWip_(episodes, jobs, suggestion, { history_reliable_from: '' });
+  assertEquals_(2, result.sample_size, 'solo episodi conclusi');
+  assertEquals_(1, result.excluded_open_episodes, 'episodi aperti esplicitamente segnalati');
+  assertEquals_(2, result.mean_wip_episode_duration_weeks, 'durata media in settimane');
+  assertEquals_(2.5, result.weighted_mean_wip_episode_duration_weeks, 'durata ponderata per i punti');
+  assertEquals_(4, result.little_wip_jobs, 'Little lavori = 2 × 2');
+  assertEquals_(20, result.little_wip_points, 'Little punti = 8 × 2,5');
+  var changed = dashboardV7LittleWip_(episodes, jobs, {
+    suggested_active_flow_jobs_per_week_exact: 3,
+    suggested_active_flow_points_per_week_exact: 12,
+    jobs_per_week: 100, points_per_week: 1000
+  }, { history_reliable_from: '' });
+  assertEquals_(6, changed.little_wip_jobs, 'Little cambia con il solo suggerito in lavori');
+  assertEquals_(30, changed.little_wip_points, 'Little cambia con il solo suggerito in punti');
+  suggestion.jobs_per_week = 100;
+  suggestion.points_per_week = 1000;
+  assertEquals_(JSON.stringify(result), JSON.stringify(dashboardV7LittleWip_(episodes, jobs, suggestion,
+    { history_reliable_from: '' })), 'Little ignora il solo flusso recente osservato');
+  var reliable = dashboardV7LittleWip_(episodes, jobs, suggestion, { history_reliable_from: '2026-01-12' });
+  assertEquals_(0, reliable.sample_size, 'episodi aperti prima dello storico affidabile esclusi');
+  assertEquals_(null, reliable.little_wip_jobs, 'nessuna durata inventata');
+}
+
+function testDashboardV7DiscontinuousFromStillHasDeterministicEpisodeBoundaries() {
+  var map = dashboardV2TestColumnMap_();
+  [
+    { id: 'OTGC', moves: [
+      ['2026-04-22T09:00:00Z', null, 'backlog'],
+      ['2026-08-13T09:00:00Z', 'todo', 'todo'],
+      ['2026-08-14T09:00:00Z', 'todo', 'wip'],
+      ['2026-08-25T09:00:00Z', 'todo', 'wait_client']
+    ], open: '2026-08-14T09:00:00Z', close: '2026-08-25T09:00:00Z' },
+    { id: 'QW1M', moves: [
+      ['2026-07-28T09:00:00Z', 'wait_authority', 'todo'],
+      ['2026-07-29T08:00:00Z', 'todo', 'wip'],
+      ['2026-07-29T09:00:00Z', 'todo', 'wait_client']
+    ], open: '2026-07-29T08:00:00Z', close: '2026-07-29T09:00:00Z' }
+  ].forEach(function(testCase) {
+    var job = { job_id: testCase.id, activity_log_json: JSON.stringify(testCase.moves.map(function(row) {
+      return { type: 'move', ts: row[0], from: row[1], to: row[2] };
+    })) };
+    var normalized = normalizeActivityLogForDashboard_(job, map, new Date('2026-09-16T12:00:00Z'));
+    var episodes = dashboardV2WipEpisodes_([normalized], new Date('2026-09-16T12:00:00Z'));
+    var finalEpisode = episodes[episodes.length - 1];
+    assertEquals_('discontinuous_from', normalized.anomalies[normalized.anomalies.length - 1].type,
+      testCase.id + ': from incongruente segnalato');
+    assertEquals_(testCase.open, finalEpisode.opened_at, testCase.id + ': apertura ricostruita da to');
+    assertEquals_(testCase.close, finalEpisode.closed_at, testCase.id + ': chiusura ricostruita da to');
+    assertEquals_(1, dashboardV7LittleWip_(episodes, { OTGC: { size_points: 8 }, QW1M: { size_points: 8 } },
+      { suggested_active_flow_jobs_per_week_exact: 1, suggested_active_flow_points_per_week_exact: 8 },
+      { history_reliable_from: '2026-07-01' }).sample_size,
+      testCase.id + ': episodio deterministico con warning conservato');
+  });
+}
+
+function testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks() {
+  var now = new Date('2026-02-16T12:00:00Z');
+  var config = dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 4, min_samples_capacity: 1 });
+  function job(id, points, dates, roles) {
+    return { job_id: id, status: 'backlog', size_points: points, activity_log_json: JSON.stringify(dates.map(function(ts, i) {
+      return { type: 'move', to: roles[i], ts: ts };
+    })) };
+  }
+  var jobs = [job('NEW', 5, ['2026-02-03T12:00:00Z'], ['wip'])];
+  var archive = [job('OLD', 20, ['2026-01-01T12:00:00Z', '2026-01-02T12:00:00Z', '2026-02-10T12:00:00Z'], ['wip', 'wait_client', 'wip'])];
+  var state = buildDashboardStateV2_(jobs, [], config, now, archive, []);
+  var weekly = state.capacity.new_work.weekly;
+  assertEquals_(2.5, state.capacity.new_work.new_work_capacity_points_per_week, '5 punti su due settimane, inclusa settimana a zero');
+  assertEquals_(0, weekly[3].new_work_absorbed_points_week, 'ripresa non replica i punti del job');
+  assertEquals_(1, weekly[3].rework_wip_episodes, 'ripresa di job con primo ingresso fuori finestra');
+  assertEquals_(2, state.futureWork.committed_weeks, 'settimane da assorbimento anche senza consegne');
+  assertEquals_(3, state.wipEpisodes.total_wip_episodes, 'archivio incluso nello storico');
+  assertEquals_(1 / 3, state.wipEpisodes.rework_episode_share, 'quota sul totale episodi');
+  var changed = buildDashboardStateV2_(jobs, [{job_id:'NEW', numero_visita:99, consegna_ts:'2026-02-14T12:00:00Z'}], config, now, archive, []);
+  assertEquals_(state.capacity.new_work.new_work_capacity_points_per_week, changed.capacity.new_work.new_work_capacity_points_per_week, 'visite e consegne non cambiano assorbimento');
+}
+
+function dashboardV2PathFixture_(id, path, dates, points) {
+  return { job_id: id, status: path[path.length - 1], size_points: points,
+    activity_log_json: JSON.stringify(path.map(function(to, i) {
+      return { id: id + '-' + i, type: 'move', from: 'incorrect', to: to, ts: dates[i] };
+    })) };
+}
+
+function testDashboardV2FlowClassificationAndFromIndependence() {
+  var job = dashboardV2PathFixture_('FLOW', ['notes', 'backlog', 'todo', 'wip', 'wip', 'wait_client', 'todo', 'wip', 'wait_authority', 'wip'],
+    ['2025-12-01', '2025-12-02', '2025-12-03', '2025-12-04', '2025-12-05', '2025-12-06', '2025-12-07', '2025-12-08', '2025-12-09', '2025-12-10'], 8);
+  var now = new Date('2025-12-15T12:00:00Z');
+  var config = dashboardV2TestConfig_({ wip_trend_weeks: 4 });
+  var state = buildDashboardStateV2_([job], [], config, now, [], []);
+  var totals = dashboardV2FlowTotals_(state.flow.events);
+  assertEquals_(1, totals.new_work_jobs, 'una sola acquisizione');
+  assertEquals_(8, totals.new_work_points, 'taglia una sola volta');
+  assertEquals_(2, totals.returns_after_wait_events, 'rientro via prep e diretto');
+  assertEquals_(3, totals.started_wip_episodes, 'avvii reali senza duplicato');
+  assertEquals_(2, totals.rework_wip_episodes, 'riprese WIP');
+  assertEquals_(8, totals.new_work_absorbed_points, 'nessuna replica della taglia');
+  assertEquals_(0, totals.completed_visits, 'attesa non inventa consegna');
+  var log = JSON.parse(job.activity_log_json);
+  log.forEach(function(e, i) { e.from = i ? log[i - 1].to : null; });
+  job.activity_log_json = JSON.stringify(log);
+  var corrected = buildDashboardStateV2_([job], [], config, now, [], []);
+  assertEquals_(JSON.stringify(state.flow), JSON.stringify(corrected.flow), 'from grezzo non influenza flussi');
+  assertEquals_(JSON.stringify(state.wipEpisodes), JSON.stringify(corrected.wipEpisodes), 'from grezzo non influenza episodi');
+}
+
+function testDashboardV2ISOCalendarAndDST() {
+  var bucket = dashboardV2CalendarWeeks_(new Date('2021-01-01T12:00:00Z'), 1)[0];
+  assertEquals_(2020, bucket.iso_week_year, 'primo gennaio appartiene anno ISO precedente');
+  assertEquals_(53, bucket.iso_week, 'settimana 53');
+  assertEquals_('2020-12-27T23:00:00.000Z', bucket.period_start, 'lunedi locale');
+  assertEquals_(2020, bucket.calendar_year, 'anno della data di inizio locale');
+  assertEquals_(1, dashboardV2CalendarWeeks_(new Date('2021-01-04T12:00:00Z'), 1)[0].iso_week, 'nuovo anno ISO');
+  var spring = dashboardV2CalendarWeeks_(new Date('2026-03-29T12:00:00Z'), 1)[0];
+  var autumn = dashboardV2CalendarWeeks_(new Date('2026-10-25T12:00:00Z'), 1)[0];
+  assertEquals_(167, (Date.parse(spring.period_end) - Date.parse(spring.period_start)) / 3600000, 'settimana cambio ora primaverile');
+  assertEquals_(169, (Date.parse(autumn.period_end) - Date.parse(autumn.period_start)) / 3600000, 'settimana cambio ora autunnale');
+  assertEquals_('2026-07-05T22:00:00.000Z', dashboardV2Instant_('2026-07-06T00:00').toISOString(), 'timestamp senza offset interpretato in Roma');
+}
+
+function testDashboardV2FlowBucketsAndArchive() {
+  var job = dashboardV2PathFixture_('ARCH', ['notes', 'wip', 'done'],
+    ['2020-12-20T12:00:00Z', '2020-12-28T00:00:00+01:00', '2021-01-04T00:00:00+01:00'], 5);
+  var visits = [{ job_id: 'ARCH', numero_visita: 9, consegna_ts: '2021-01-04T00:00:00+01:00' },
+    { job_id: 'ARCH', numero_visita: 10, done_ts: '2021-01-05T00:00:00+01:00' }];
+  var now = new Date('2021-01-06T12:00:00Z');
+  var state = buildDashboardStateV2_([], [], dashboardV2TestConfig_({ wip_trend_weeks: 3 }), now, [job], visits);
+  assertEquals_(0, state.flow.weekly[0].new_work_jobs, 'settimana vuota presente');
+  assertEquals_(1, state.flow.weekly[1].new_work_jobs, 'acquisizione al bordo incluso, backlog saltato');
+  assertEquals_(0, state.flow.weekly[1].completed_visits, 'fine esclusiva');
+  assertEquals_(1, state.flow.weekly[2].completed_visits, 'consegna al bordo nuovo bucket');
+  assertEquals_(5, state.flow.weekly[2].completed_points, 'punti output separati');
+  var incomplete = dashboardV2PathFixture_('WAIT', ['wait_client', 'todo', 'wip'], ['2021-01-01', '2021-01-02', '2021-01-03'], 3);
+  var partial = buildDashboardStateV2_([incomplete], [], dashboardV2TestConfig_(), now, [], []);
+  assertEquals_(0, dashboardV2FlowTotals_(partial.flow.events).new_work_jobs, 'storico che inizia in attesa non inventa acquisizione');
+}
+
+function testDashboardV2CFDNonlinearStocksAndCumulatives() {
+  var dates = ['2026-01-05T00:00:00+01:00', '2026-01-12T00:00:00+01:00', '2026-01-19T00:00:00+01:00', '2026-01-26T00:00:00+01:00', '2026-02-02T00:00:00+01:00'];
+  var job = dashboardV2PathFixture_('CFD', ['backlog', 'wip', 'wait_client', 'todo', 'wip'], dates, 7);
+  var config = dashboardV2TestConfig_({ wip_trend_weeks: 5 });
+  var now = new Date('2026-02-04T12:00:00Z');
+  var state = buildDashboardStateV2_([job], [], config, now, [], []);
+  var rows = state.cfd.weekly;
+  var roles = ['future_work', 'wip', 'waiting', 'future_work', 'wip'];
+  rows.forEach(function(row, i) {
+    ['future_work', 'wip', 'waiting'].forEach(function(role) {
+      assertEquals_(role === roles[i] ? 1 : 0, row[role + '_stock_jobs'], 'stock atteso indipendente: ' + i + '/' + role);
+      assertEquals_(role === roles[i] ? 7 : 0, row[role + '_stock_points'], 'punti stock attesi');
+    });
+    ['jobs', 'points'].forEach(function(unit) {
+      var b = row.boundaries[unit];
+      assertEquals_(row.waiting_stock_jobs * (unit === 'jobs' ? 1 : 7), b.waiting_boundary - b.completed_boundary, 'banda attesa');
+      assertEquals_(row.wip_stock_jobs * (unit === 'jobs' ? 1 : 7), b.wip_boundary - b.waiting_boundary, 'banda WIP');
+      assertEquals_(row.future_work_stock_jobs * (unit === 'jobs' ? 1 : 7), b.future_work_boundary - b.wip_boundary, 'banda futuro');
+      assertEquals_(0, b.completed_boundary, 'nessuna consegna inventata');
+    });
+  });
+  assertEquals_(2, rows[4].cumulative.cum_started_wip_episodes, 'cumulata avvii diversa da stock WIP');
+  assertEquals_(1, rows[4].wip_stock_jobs, 'stock non differenza avvii-consegne');
+  var before = JSON.stringify(state.cfd);
+  var log = JSON.parse(job.activity_log_json);
+  log.forEach(function(event) { event.from = 'another_wrong_from'; });
+  job.activity_log_json = JSON.stringify(log);
+  assertEquals_(before, JSON.stringify(buildDashboardStateV2_([job], [], config, now, [], []).cfd), 'CFD indipendente dal from');
+  var direct = dashboardV2PathFixture_('DIRECT', ['wip', 'wait_client', 'wip'], dates.slice(0, 3), 4);
+  var directState = buildDashboardStateV2_([direct], [], config, now, [], []);
+  assertEquals_(0, directState.cfd.weekly[1].wip_stock_jobs, 'uscita WIP diretta');
+  assertEquals_(1, directState.cfd.weekly[2].wip_stock_jobs, 'ripresa WIP diretta');
+}
+
+function testDashboardV2CFDPartialWeekAndInheritedWork() {
+  var job = dashboardV2PathFixture_('OLD', ['wip', 'wait_authority'], ['2025-12-01T00:00:00+01:00', '2026-01-07T00:00:00+01:00'], 10);
+  var visits = [{ job_id: 'OLD', numero_visita: 1, consegna_ts: '2025-12-15T00:00:00+01:00' }];
+  var now = new Date('2026-01-09T00:00:00+01:00');
+  var state = buildDashboardStateV2_([], [], dashboardV2TestConfig_({ wip_trend_weeks: 2 }), now, [job], visits);
+  assertEquals_(1, state.cfd.weekly[0].wip_stock_jobs, 'WIP ereditato dall anno precedente');
+  assertEquals_(1, state.cfd.weekly[0].cumulative.cum_completed_visits, 'cumulata include pre-finestra');
+  assertEquals_(0, state.flow.weekly[0].completed_visits, 'incrementale non include pre-finestra');
+  assertEquals_(0.5, state.cfd.weekly[1].avg_wip_jobs, 'due giorni WIP su quattro osservati');
+  assertEquals_(5, state.cfd.weekly[1].avg_wip_points, 'media punti pesata durata');
+  assertEquals_(1, state.cfd.current.waiting_stock_jobs, 'stato corrente da archivio/log');
+  assertEquals_(true, state.cfd.validation.passed, 'identita validate');
+}
+
+function testDashboardV5CFDSplitsNewAndReworkWip() {
+  var dates = ['2026-01-05T00:00:00+01:00', '2026-01-12T00:00:00+01:00',
+    '2026-01-19T00:00:00+01:00', '2026-01-26T00:00:00+01:00'];
+  var first = dashboardV2PathFixture_('NEW', ['backlog', 'wip'], dates.slice(0, 2), 5);
+  var returned = dashboardV2PathFixture_('REWORK', ['wip', 'wait_client', 'wip'], dates.slice(0, 3), 8);
+  var state = buildDashboardStateV2_([first, returned], [],
+    dashboardV2TestConfig_({ wip_trend_weeks: 4 }), new Date('2026-02-01T12:00:00Z'), [], []);
+  var row = state.cfd.weekly[state.cfd.weekly.length - 1];
+  assertEquals_(1, row.wip_new_jobs, 'episodio WIP 1 classificato nuovo');
+  assertEquals_(1, row.wip_rework_jobs, 'episodio WIP successivo classificato rework');
+  assertEquals_(5, row.wip_new_points, 'punti WIP nuovo');
+  assertEquals_(8, row.wip_rework_points, 'punti WIP rework');
+  assertEquals_(row.wip_stock_jobs, row.wip_new_jobs + row.wip_rework_jobs, 'totale lavori WIP invariato');
+  assertEquals_(row.wip_stock_points, row.wip_new_points + row.wip_rework_points, 'totale punti WIP invariato');
+  ['jobs', 'points'].forEach(function(unit) {
+    var boundaries = row.boundaries[unit];
+    assertEquals_(row['wip_rework_' + unit], boundaries.wip_rework_boundary - boundaries.waiting_boundary,
+      'rework rosso sotto');
+    assertEquals_(row['wip_new_' + unit], boundaries.wip_new_boundary - boundaries.wip_rework_boundary,
+      'nuovo blu sopra');
+    assertEquals_(boundaries.wip_boundary, boundaries.wip_new_boundary, 'alias WIP V2 invariato');
+  });
+  assertEquals_(true, state.cfd.validation.passed, 'identita split verificate');
+}
+
+function testDashboardV2AnnualRebasePreservesStocks() {
+  var job = dashboardV2PathFixture_('YEAR', ['wip', 'wait_client', 'wip'],
+    ['2025-11-01T00:00:00+01:00', '2026-01-10T00:00:00+01:00', '2026-02-01T00:00:00+01:00'], 8);
+  var visits = [{ job_id: 'YEAR', numero_visita: 1, consegna_ts: '2025-12-01T00:00:00+01:00' },
+    { job_id: 'YEAR', numero_visita: 2, consegna_ts: '2026-01-01T00:00:00+01:00' }];
+  var original = JSON.stringify([job, visits]);
+  var state = buildDashboardStateV2_([job], visits, dashboardV2TestConfig_({wip_trend_weeks: 2}), new Date('2026-02-10T12:00:00Z'), [], []);
+  var annual = state.history.annual_cfd.filter(function(view) { return view.calendar_year === 2026; })[0];
+  assertEquals_(2, annual.offset.jobs, 'offset comprende consegna esattamente a t0');
+  assertEquals_(16, annual.offset.points, 'offset punti');
+  var anchor = annual.points[0];
+  assertEquals_(0, anchor.rebased_boundaries.jobs.completed_boundary, 'base grafica zero a t0');
+  assertEquals_(1, anchor.rebased_boundaries.jobs.wip_boundary, 'WIP ereditato visibile');
+  assertEquals_(8, anchor.rebased_boundaries.points.wip_boundary, 'punti ereditati');
+  annual.points.forEach(function(row) {
+    ['jobs', 'points'].forEach(function(unit) {
+      var b = row.rebased_boundaries[unit], originalBoundary = row.original_boundaries[unit];
+      Object.keys(b).forEach(function(key) { assertEquals_(annual.offset[unit], originalBoundary[key] - b[key], 'offset comune per tutte le boundary'); });
+      assertEquals_(row.waiting_stock_jobs * (unit === 'jobs' ? 1 : 8), b.waiting_boundary - b.completed_boundary, 'banda attesa invariata');
+      assertEquals_(row.wip_stock_jobs * (unit === 'jobs' ? 1 : 8), b.wip_boundary - b.waiting_boundary, 'banda WIP invariata');
+      assertEquals_(row.future_work_stock_jobs * (unit === 'jobs' ? 1 : 8), b.future_work_boundary - b.wip_boundary, 'banda futuro invariata');
+    });
+  });
+  assertEquals_(2, state.cfd.weekly[0].cumulative.cum_completed_visits, 'cumulata operativa non azzerata');
+  assertEquals_(original, JSON.stringify([job, visits]), 'nessuna mutazione input');
+}
+
+function testDashboardV2HistoryCoverageAndCalendar() {
+  var job = dashboardV2PathFixture_('HISTORY', ['backlog', 'wip'], ['2020-12-01T00:00:00+01:00', '2021-01-04T00:00:00+01:00'], 5);
+  var state = buildDashboardStateV2_([], [], dashboardV2TestConfig_({wip_trend_weeks: 2}), new Date('2022-02-10T12:00:00Z'), [job], []);
+  var history = state.history;
+  assertEquals_('2020,2021,2022', history.available_years.join(','), 'archivio incluso, anni separati');
+  assertEquals_('2021', history.fully_observed_calendar_years.join(','), 'solo anno calendariale coperto per intero');
+  assertEquals_(0, history.comparable_years.length, 'non certifica confronti senza prova completezza');
+  assertEquals_('insufficient', history.comparison_quality, 'qualita dichiarata');
+  assertEquals_(15, history.monthly.length, 'storia completa indipendente dalla finestra due settimane');
+  assertEquals_(6, history.quarterly.length, 'trimestri completi dallo storico al trimestre corrente');
+  assertEquals_(4, history.quarterly[0].quarter, 'primo bucket trimestrale allineato al calendario');
+  assertEquals_(1, history.quarterly[1].quarter, 'passaggio anno Q4 -> Q1');
+  var week53 = history.weekly.filter(function(row) { return row.iso_week_year === 2020 && row.iso_week === 53; })[0];
+  assertEquals_(1, week53.future_work_stock_jobs, 'stock al bordo anno ISO');
+  assertEquals_(0, history.monthly[1].new_work_jobs, 'acquisizione non ricontata al cambio anno');
+  assertEquals_(1, history.monthly[1].started_wip_episodes, 'avvio gennaio');
+  assertEquals_('in_progress', history.monthly[14].temporal_coverage, 'mese corrente parziale');
+  assertEquals_('insufficient_start_coverage', history.annual_cfd[0].quality, 'non inventa stock a gennaio prima dello storico');
+}
+
+function testDashboardV2QuarterlyHistoryAndEmptyStates() {
+  var job = dashboardV2PathFixture_('QUARTER', ['backlog', 'wip', 'done'],
+    ['2026-01-10T09:00:00+01:00', '2026-01-12T09:00:00+01:00', '2026-01-20T09:00:00+01:00'], 5);
+  var visits = [{ job_id: 'QUARTER', numero_visita: 1, consegna_ts: '2026-01-20T09:00:00+01:00' }];
+  var history = buildDashboardStateV2_([job], visits, dashboardV2TestConfig_(),
+    new Date('2026-08-10T12:00:00+02:00'), [], []).history;
+  assertEquals_(3, history.quarterly.length, 'Q1-Q3 presenti nello stesso anno');
+  assertEquals_('2025-12-31T23:00:00.000Z', history.quarterly[0].period_start, 'Q1 inizia a mezzanotte locale');
+  assertEquals_(true, history.quarterly[0].has_data, 'Q1 contiene gli eventi osservati');
+  assertEquals_(false, history.quarterly[1].has_data, 'Q2 senza stock o flussi e riconosciuto vuoto');
+  assertEquals_('Dati non ancora disponibili per questo trimestre.', history.quarterly[1].empty_state_message,
+    'empty state trimestrale esplicito');
+  var emptyMonth = history.monthly.filter(function(row) { return row.calendar_year === 2026 && row.month === 2; })[0];
+  assertEquals_(false, emptyMonth.has_data, 'mese senza stock o flussi riconosciuto vuoto');
+  assertEquals_('Dati non ancora disponibili per questo mese.', emptyMonth.empty_state_message,
+    'empty state mensile esplicito');
+}
+
+function testDashboardV2HistoryEmptyAndFromIndependence() {
+  var now = new Date('2026-03-01T12:00:00Z'), config = dashboardV2TestConfig_();
+  var empty = buildDashboardStateV2_([], [], config, now, [], []).history;
+  assertEquals_(null, empty.history_start, 'storico assente');
+  assertEquals_(0, empty.monthly.length, 'nessuna serie inventata');
+  var job = dashboardV2PathFixture_('INV', ['backlog', 'wip'], ['2025-12-01', '2026-01-02'], 3);
+  var first = buildDashboardStateV2_([job], [], config, now, [], []).history;
+  var log = JSON.parse(job.activity_log_json); log.forEach(function(e) { e.from = 'changed'; }); job.activity_log_json = JSON.stringify(log);
+  assertEquals_(JSON.stringify(first), JSON.stringify(buildDashboardStateV2_([job], [], config, now, [], []).history), 'history indipendente dal from');
+}
+
+function testDashboardV5DailyCalendarLeapYearAndSelectedPeriod() {
+  var job = dashboardV2PathFixture_('LEAP', ['backlog', 'done'],
+    ['2024-02-28T09:00:00+01:00', '2024-02-28T10:00:00+01:00'], 3);
+  var history = buildDashboardStateV2_([job], [], dashboardV2TestConfig_(),
+    new Date('2024-03-02T12:00:00+01:00'), [], []).history;
+  assertEquals_(4, history.daily.length, '28/29 febbraio e 1/2 marzo presenti');
+  assertEquals_('2024-02-29T23:00:00.000Z', history.daily[2].period_start,
+    'giorno dopo il bisestile allineato a mezzanotte Roma');
+  assertEquals_(false, history.daily[1].has_data, '29 febbraio vuoto riconosciuto');
+  assertEquals_('Dati non ancora disponibili per questo giorno.', history.daily[1].empty_state_message,
+    'empty state giornaliero esplicito');
+  assertEquals_('Dati non ancora disponibili per il periodo selezionato.',
+    history.empty_state_messages.selected_period, 'empty state Da/A esplicito');
+}
+
+function testDashboardV5HorizontalEquivalentTimeKnownDates() {
+  function row(at, completedJobs, arrivalsJobs, completedPoints, arrivalsPoints) {
+    return { sampled_at: at, boundaries: {
+      jobs: { completed_boundary: completedJobs, future_work_boundary: arrivalsJobs },
+      points: { completed_boundary: completedPoints, future_work_boundary: arrivalsPoints }
+    } };
+  }
+  var rows = [row('2026-01-01T00:00:00Z', 0, 2, 0, 10),
+    row('2026-01-03T00:00:00Z', 1, 3, 5, 15),
+    row('2026-01-05T00:00:00Z', 3, 3, 10, 15),
+    row('2026-01-07T00:00:00Z', 3, 4, 15, 20)];
+  var jobs = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 2);
+  var points = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'points', 10);
+  var unfinished = dashboardV5EquivalentTimeAtQuota_(rows, 3, 'jobs', 4);
+  assertEquals_('2026-01-04T00:00:00.000Z', jobs.exit_at,
+    'quota lavori 2 incrocia fra i bucket');
+  assertEquals_(3, jobs.duration_calendar_days, 'delta lavori in giorni calendario');
+  assertEquals_('2026-01-05T00:00:00.000Z', points.exit_at,
+    'quota punti 10 incrocia al bucket noto');
+  assertEquals_(4, points.duration_calendar_days, 'delta punti in giorni calendario');
+  assertEquals_(null, unfinished.exit_at, 'quota non completata esplicita');
+  dashboardV5AttachEquivalentTimes_(rows);
+  assertEquals_(jobs.exit_at, rows[0].equivalent_time.jobs.exit_at, 'scorciatoia massima coerente con quota libera');
+  assertEquals_(points.exit_at, rows[0].equivalent_time.points.exit_at, 'punti massimi coerenti con quota libera');
+}
+
+function testDashboardV5HorizontalEquivalentTimeIntermediateAndClamp() {
+  function row(at, completed, acquired) {
+    return { sampled_at: at, boundaries: { jobs: {
+      completed_boundary: completed, future_work_boundary: acquired } } };
+  }
+  var rows = [row('2026-01-01T00:00:00Z', 0, 4),
+    row('2026-01-03T00:00:00Z', 1, 4),
+    row('2026-01-05T00:00:00Z', 3, 4),
+    row('2026-01-07T00:00:00Z', 4, 4)];
+  var middle = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 2);
+  var maximum = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 4);
+  assertEquals_(2, middle.quota, 'quota intermedia mantenuta');
+  assertEquals_('2026-01-04T00:00:00.000Z', middle.exit_at, 'incrocio intermedio');
+  assertEquals_(3, middle.duration_calendar_days, 'durata intermedia');
+  assertEquals_(6, maximum.duration_calendar_days, 'durata massima diversa sulla stessa colonna');
+  assertEquals_(maximum.exit_at, dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', 99).exit_at,
+    'quota sopra il massimo bloccata al bordo superiore');
+  var below = dashboardV5EquivalentTimeAtQuota_(rows, 0, 'jobs', -2);
+  assertEquals_(0, below.quota, 'quota negativa bloccata a zero');
+  assertEquals_(0, below.duration_calendar_days, 'quota gia raggiunta nello stesso bucket');
+}
+
+function testDashboardV2DiagnosticsAreExplicitAndIsolated() {
+  var now = new Date('2026-02-01T12:00:00Z');
+  var job = dashboardV2PathFixture_('DIAG', ['wip', 'wait_client', 'wip'], ['2026-01-01', '2026-01-02', '2026-01-03'], 5);
+  var original = JSON.stringify(job);
+  var state = buildDashboardStateV2_([job], [], dashboardV2TestConfig_(), now, [], []);
+  assertEquals_(0, state.issues.length, 'struttura vuota senza rilevatori inventati');
+  assertEquals_('structure_only', state.diagnostics.issue_detection.status, 'lista vuota non certifica assenza problemi');
+  assertEquals_(8, state.diagnostics.issue_detection.supported_categories.length, 'categorie del design');
+  assertEquals_(false, state.diagnostics.closure_history.count_available, 'nessun conteggio non dimostrabile');
+  assertEquals_(undefined, state.post_closure_reopenings, 'nessun falso zero riaperture');
+  assertEquals_('plateau', state.diagnostics.experimental_congestion.official_model, 'modello ufficiale invariato');
+  assertEquals_(false, state.diagnostics.experimental_congestion.affects_operational_metrics, 'diagnostica separata');
+  assertTrue_(state.dataQuality.anomalies.length > 0, 'anomalie preesistenti ancora visibili');
+  assertEquals_(2, state.wipEpisodes.total_wip_episodes, 'episodi invariati');
+  state.issues.push({ type: 'example' });
+  assertEquals_(0, buildDashboardStateV2_([job], [], dashboardV2TestConfig_(), now, [], []).issues.length, 'nessun flag persistente o array condiviso');
+  assertEquals_(original, JSON.stringify(job), 'nessuna modifica dati');
+}
+
+function dashboardV3FlowTestInputs_(wipJobs, recentPoints, recentQuality) {
+  return {
+    current: { wip_jobs: wipJobs },
+    capacity: { observed: {
+      rolling_capacity_points_per_week: recentPoints,
+      rolling_capacity_visits_per_week: recentPoints === null ? null : 1,
+      quality: recentQuality,
+      sample_size: recentQuality === 'sufficient' ? 6 : 0,
+      window_weeks: 2
+    } },
+    config: dashboardV2TestConfig_({
+      wip_target_min_jobs: 3,
+      wip_target_max_jobs: 5,
+      flow_reference_points_per_week: 14.5,
+      flow_reference_completions_per_week: 1.9,
+      flow_slow_ratio: 0.5,
+      min_samples_capacity: 5
+    })
+  };
+}
+
+function testDashboardV3FlowStatePrecedenceAndRhythm() {
+  var input = dashboardV3FlowTestInputs_(4, 5.63, 'sufficient');
+  var result = dashboardV3FlowState_(input.current, input.capacity, input.config);
+  assertEquals_('SLOWING', result.system_flow_status, 'A: ritmo 5,63 sotto la soglia configurata 7,25');
+  assertEquals_(7.25, result.system_flow_detail.slowing_threshold_points_per_week, 'A: soglia derivata solo dai parametri CONFIG');
+  assertEquals_(14.5, result.calibration.delivery_reference_points_per_week, 'riferimento esplicito di consegna');
+  input.capacity.active_flow = { points_per_week: 1000, jobs_per_week: 100 };
+  assertEquals_('SLOWING', dashboardV3FlowState_(input.current, input.capacity, input.config).system_flow_status,
+    'turnover WIP alto non modifica SLOWING');
+
+  input = dashboardV3FlowTestInputs_(2, null, 'insufficient');
+  assertEquals_('UNDERFED', dashboardV3FlowState_(input.current, input.capacity, input.config).system_flow_status,
+    'B: WIP sotto il minimo prevale sulla qualita del ritmo recente');
+
+  input = dashboardV3FlowTestInputs_(6, null, 'insufficient');
+  assertEquals_('HIGH_LOAD', dashboardV3FlowState_(input.current, input.capacity, input.config).system_flow_status,
+    'C: WIP sopra il massimo prevale sulla qualita del ritmo recente');
+
+  input = dashboardV3FlowTestInputs_(4, 7.26, 'sufficient');
+  assertEquals_('REGULAR', dashboardV3FlowState_(input.current, input.capacity, input.config).system_flow_status,
+    'D: ritmo sopra la soglia e regolare');
+
+  input.capacity.observed.rolling_capacity_points_per_week = 145;
+  assertEquals_('REGULAR', dashboardV3FlowState_(input.current, input.capacity, input.config).system_flow_status,
+    'E: un ritmo molto alto resta regolare e non introduce un sesto stato');
+}
+
+function testDashboardV3FlowStateHandlesMissingEvidence() {
+  var input = dashboardV3FlowTestInputs_(4, 8, 'sufficient');
+  input.config.flow_reference_points_per_week = '';
+  var insufficient = dashboardV3FlowState_(input.current, input.capacity, input.config);
+  assertEquals_('INSUFFICIENT_DATA', insufficient.system_flow_status, 'F: riferimento mancante non attiva fallback');
+  assertEquals_('Taratura non configurata.', insufficient.system_flow_message, 'F: messaggio di taratura mancante');
+
+  input = dashboardV3FlowTestInputs_(4, 8, 'sufficient');
+  input.config.wip_target_min_jobs = '';
+  input.config.wip_target_max_jobs = '';
+  var unconfigured = dashboardV3FlowState_(input.current, input.capacity, input.config);
+  assertEquals_('INSUFFICIENT_DATA', unconfigured.system_flow_status, 'G: fascia mancante non attiva percentili storici');
+  assertEquals_(null, unconfigured.system_flow_detail.wip_target_min, 'G: nessuna soglia WIP inventata');
+}
+
+function testDashboardV3FlowStateIgnoresHistoricalShapes() {
+  var input = dashboardV3FlowTestInputs_(4, 5.63, 'sufficient');
+  var first = dashboardV3FlowState_(input.current, input.capacity, input.config);
+  assertEquals_(3, dashboardV3FlowState_.length, 'H: lo storico non fa parte della firma di classificazione');
+  input.config.history = { weekly: [{ avg_wip_jobs: 99, completed_points: 999 }] };
+  var second = dashboardV3FlowState_(input.current, input.capacity, input.config);
+  assertEquals_(first.system_flow_status, second.system_flow_status,
+    'H: una storia artificiale non puo cambiare la classificazione configurata');
+  assertEquals_(JSON.stringify(first), JSON.stringify(second),
+    'H: il contratto dello stato non contiene una seconda baseline automatica');
+}
+
+function testDashboardV3RecentReworkAggregatesConfiguredWindow() {
+  var capacity = { new_work: { window_weeks: 2, weekly: [
+    { period_start: '2026-01-01T00:00:00Z', period_end: '2026-01-08T00:00:00Z',
+      first_wip_episodes: 20, rework_wip_episodes: 0, rework_episode_share: 0 },
+    { period_start: '2026-01-08T00:00:00Z', period_end: '2026-01-15T00:00:00Z',
+      first_wip_episodes: 1, rework_wip_episodes: 1, rework_episode_share: 0.5 },
+    { period_start: '2026-01-15T00:00:00Z', period_end: '2026-01-22T00:00:00Z',
+      first_wip_episodes: 0, rework_wip_episodes: 1, rework_episode_share: 1 }
+  ] } };
+  var result = dashboardV3RecentRework_(capacity);
+  assertEquals_(1, result.first_wip_entries, 'somma primi ingressi nella sola finestra configurata');
+  assertEquals_(2, result.rework_wip_entries, 'somma rientri nella sola finestra configurata');
+  assertEquals_(3, result.total_wip_entries, 'denominatore aggregato della finestra');
+  assertEquals_(2 / 3, result.rework_share, 'quota pesata sui volumi, non media delle percentuali dei bucket');
+  assertEquals_(2, result.rework_window_weeks, 'ampiezza finestra esplicita');
+  assertEquals_('2026-01-08T00:00:00Z', result.rework_window_start, 'inizio finestra riconciliabile');
+  assertEquals_('2026-01-22T00:00:00Z', result.rework_window_end, 'fine finestra riconciliabile');
+
+  var columnMap = dashboardV2TestColumnMap_();
+  function originFor(path) {
+    var job = dashboardV2PathFixture_('ORIGIN-' + path[1], path,
+      path.map(function(value, index) { return new Date(Date.UTC(2026, 0, index + 1)).toISOString(); }), 5);
+    var normalized = normalizeActivityLogForDashboard_(job, columnMap, new Date('2026-01-10T00:00:00Z'));
+    var episodes = dashboardV2WipEpisodes_([normalized], new Date('2026-01-10T00:00:00Z'));
+    return dashboardV3ReworkOrigin_(normalized, episodes[1]);
+  }
+  assertEquals_('Attesa cliente', originFor(['wip', 'wait_client', 'todo', 'wip']), 'provenienza attesa cliente oltre ToDo');
+  assertEquals_('Attesa ente', originFor(['wip', 'wait_authority', 'todo', 'wip']), 'provenienza attesa ente oltre ToDo');
+  assertEquals_('Attesa interna', originFor(['wip', 'wait_internal', 'todo', 'wip']), 'provenienza attesa interna oltre ToDo');
+  assertEquals_('Backlog/preparazione', originFor(['wip', 'todo', 'wip']), 'provenienza preparazione');
+  assertEquals_('Backlog/preparazione', originFor(['wip', 'backlog', 'todo', 'wip']), 'provenienza backlog oltre ToDo');
+  assertEquals_('Dopo consegna', originFor(['wip', 'done', 'todo', 'wip']), 'provenienza dopo consegna oltre ToDo');
+  assertEquals_('Altro', originFor(['wip', 'notes', 'todo', 'wip']), 'provenienza non riconducibile oltre ToDo');
+}
+
+function testDashboardV5TimingKeepsIntermediateReturnInOneInterval() {
+  var job = dashboardV2PathFixture_('TIMING-RETURN',
+    ['backlog', 'wip', 'wait_authority', 'todo', 'wip', 'done'],
+    ['2026-01-01T09:00:00Z', '2026-01-02T09:00:00Z', '2026-01-03T09:00:00Z',
+      '2026-01-06T09:00:00Z', '2026-01-07T09:00:00Z', '2026-01-11T09:00:00Z'], 5);
+  job.title = 'Caso con rientro intermedio';
+  job.client = 'Cliente tempi';
+  job.size_class = 'M';
+  var normalized = normalizeActivityLogForDashboard_(job, dashboardV2TestColumnMap_(), new Date('2026-01-12T00:00:00Z'));
+  var timing = dashboardV5Timing_([normalized], [job]);
+  assertEquals_(1, timing.units.length, 'attesa e rientro non spezzano l unita di attraversamento');
+  assertEquals_('2026-01-01T09:00:00.000Z', timing.units[0].ingresso_ts, 'inizio al primo ingresso operativo');
+  assertEquals_('2026-01-11T09:00:00.000Z', timing.units[0].consegna_ts, 'fine alla consegna');
+  assertEquals_(10, timing.units[0].lead_time_days, 'intero intervallo incluso, senza reset al rientro');
+  assertEquals_(true, timing.units[0].rientro_intermedio, 'rientro intermedio esplicito nella prova');
+}
+
+function testDashboardV5TimingBuildsNewUnitOnlyAfterDelivery() {
+  var job = dashboardV2PathFixture_('TIMING-TWO',
+    ['backlog', 'wip', 'done', 'todo', 'wip', 'done'],
+    ['2026-01-01T09:00:00Z', '2026-01-02T09:00:00Z', '2026-01-03T09:00:00Z',
+      '2026-01-10T09:00:00Z', '2026-01-11T09:00:00Z', '2026-01-20T09:00:00Z'], 3);
+  var normalized = normalizeActivityLogForDashboard_(job, dashboardV2TestColumnMap_(), new Date('2026-01-21T00:00:00Z'));
+  var timing = dashboardV5Timing_([normalized], [job]);
+  assertEquals_(2, timing.units.length, 'una nuova fase post-consegna crea una seconda unita');
+  assertEquals_(2, timing.units[0].lead_time_days, 'prima unita indipendente');
+  assertEquals_(10, timing.units[1].lead_time_days, 'seconda unita parte dal primo ingresso dopo done');
+  assertEquals_(1, timing.units[0].unita_attraversamento, 'numerazione prima unita');
+  assertEquals_(2, timing.units[1].unita_attraversamento, 'numerazione seconda unita');
+}
+
+function testDashboardV5TimingAggregatesMedianP80AndSizes() {
+  var jobs = [];
+  var normalized = [];
+  var durations = [1, 2, 3, 4, 10];
+  var sizes = ['XS', 'S', 'M', 'L', 'XL'];
+  durations.forEach(function(days, index) {
+    var job = dashboardV2PathFixture_('TIMING-' + sizes[index], ['backlog', 'done'],
+      ['2026-01-01T00:00:00Z', new Date(Date.UTC(2026, 0, 1 + days)).toISOString()], 1);
+    job.size_class = sizes[index];
+    jobs.push(job);
+    normalized.push(normalizeActivityLogForDashboard_(job, dashboardV2TestColumnMap_(), new Date('2026-02-01T00:00:00Z')));
+  });
+  var timing = dashboardV5Timing_(normalized, jobs);
+  assertEquals_(3, timing.lead_time_median_days, 'mediana robusta sul campione completo');
+  assertEquals_(4, timing.lead_time_p80_days, 'P80 nearest-rank sul campione completo');
+  assertEquals_(5, timing.lead_time_sample_size, 'numero unita complete');
+  assertEquals_('sufficient', timing.lead_time_quality, 'cinque casi rendono il campione sufficiente');
+  sizes.forEach(function(size, index) {
+    assertEquals_(1, timing.lead_time_by_size[size].sample_size, 'campione per taglia ' + size);
+    assertEquals_(durations[index], timing.lead_time_by_size[size].median_days, 'mediana per taglia ' + size);
+    assertEquals_(durations[index], timing.lead_time_by_size[size].p80_days, 'P80 per taglia ' + size);
+  });
+  assertEquals_(null, timing.little_estimated_days, 'la stima teorica M/G/1 non sostituisce il lead time osservato');
+
+  var state = buildDashboardStateV2_(jobs, [], dashboardV2TestConfig_(), new Date('2026-02-01T00:00:00Z'), [], []);
+  assertEquals_(3, state.timing.lead_time_median_days, 'contratto timing espone la mediana backend');
+  assertEquals_(5, state.details.timing.length, 'dettaglio espone sempre XS-S-M-L-XL');
+  assertEquals_('XS', state.details.timing[0].taglia, 'ordine taglie stabile');
+}
+
+function testDashboardV3FastEndpointDefersLegacyMetrics() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    addJob({ title: 'Percorso rapido V3', size_class: 'S' });
+    var result = getDashboardMetrics();
+    assertTrue_(result.success, 'endpoint rapido V3 disponibile');
+    assertTrue_(Boolean(result.data.dashboardState), 'contratto dashboardState restituito');
+    assertEquals_(undefined, result.data.systemState, 'dashboard legacy non calcolata nella richiesta iniziale');
+    assertEquals_(true, result.data.dashboardState.performance.legacy_dashboard_deferred, 'rinvio legacy dichiarato');
+    assertEquals_(1, result.data.dashboardState.performance.backend_requests_for_dashboard, 'una sola richiesta iniziale');
+  });
+}
+
+function testDashboardV3OperationalDetailsComeFromBackend() {
+  var now = new Date('2026-02-10T12:00:00Z');
+  var jobs = [
+    dashboardV2PathFixture_('ACTIVE', ['backlog', 'wip'], ['2026-02-01T12:00:00Z', '2026-02-05T12:00:00Z'], 8),
+    dashboardV2PathFixture_('FUTURE', ['backlog'], ['2026-01-20T12:00:00Z'], 5),
+    dashboardV2PathFixture_('WAIT', ['wip', 'wait_client'], ['2026-01-10T12:00:00Z', '2026-02-02T12:00:00Z'], 13),
+    dashboardV2PathFixture_('RESUMED', ['wip', 'wait_internal', 'todo', 'wip'], ['2026-01-01T12:00:00Z', '2026-01-04T12:00:00Z', '2026-01-07T12:00:00Z', '2026-01-08T12:00:00Z'], 3)
+  ];
+  jobs[0].title = 'Pratica attiva';
+  jobs[1].title = 'Pratica futura';
+  jobs[2].title = 'Pratica in attesa'; jobs[2].client = 'Cliente prova';
+  jobs[3].title = 'Pratica rientrata'; jobs[3].client = 'Cliente rientro';
+  var state = buildDashboardStateV2_(jobs, [], dashboardV2TestConfig_({ wip_target_min_jobs: 1, wip_target_max_jobs: 5 }), now, [], []);
+  assertEquals_(2, state.details.wip.length, 'righe WIP gia selezionate dal backend');
+  assertEquals_(1, state.details.future_work.length, 'righe lavoro futuro gia selezionate dal backend');
+  assertEquals_(1, state.details.waiting.length, 'righe attesa gia selezionate dal backend');
+  assertEquals_('Cliente', state.details.waiting[0].tipo_attesa, 'tipo attesa tradotto nel contratto UI');
+  assertEquals_(1, state.details.resumed.length, 'rientri dagli episodi WIP nella finestra recente');
+  assertEquals_('Cliente rientro', state.details.resumed[0].cliente, 'cliente prima identificazione umana');
+  assertEquals_('Pratica rientrata', state.details.resumed[0].incarico, 'incarico seconda identificazione umana');
+  assertEquals_(1, state.details.resumed[0].numero_rientro, 'primo rientro distinto dal secondo episodio WIP');
+  assertEquals_('Attesa interna', state.details.resumed[0].stato_provenienza, 'provenienza tradotta dalla mappa attese');
+  assertEquals_('2026-01-04T12:00:00Z', state.details.resumed[0].data_uscita_precedente, 'uscita precedente associata al rientro corretto');
+  assertEquals_('2026-01-08T12:00:00Z', state.details.resumed[0].data_ripresa, 'data rientro esposta');
+  assertEquals_(1, state.rework.rework_wip_entries, 'card e drill-down condividono la finestra recente');
+  assertEquals_(3, state.rework.first_wip_entries, 'primi ingressi aggregati sulla finestra');
+  assertEquals_(1 / 4, state.rework.rework_share, 'quota rientri sul totale ingressi in lavorazione');
+}
+
+function testDashboardV3ContractExposesOperationalFields() {
+  var state = buildDashboardStateV2_([], [], dashboardV2TestConfig_(), new Date('2026-02-10T12:00:00Z'), [], []);
+  assertTrue_(Boolean(state.systemFlow), 'blocco Stato del flusso presente');
+  assertEquals_('INSUFFICIENT_DATA', state.systemFlow.system_flow_status, 'contratto vuoto esplicito');
+  assertEquals_(0, state.currentWork.waiting_jobs, 'attese correnti esposte senza derivazione client');
+  assertTrue_(Array.isArray(state.details.wip), 'drill-down WIP presente anche vuoto');
+  assertTrue_(Array.isArray(state.details.future_work), 'drill-down lavoro futuro presente anche vuoto');
+  assertTrue_(Array.isArray(state.details.waiting), 'drill-down attese presente anche vuoto');
+  assertTrue_(Array.isArray(state.details.resumed), 'drill-down riprese presente anche vuoto');
+}
+
+function testDashboardV5CalibrationTraceabilityConfig() {
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.wip_target_min_jobs, 'minimo WIP senza valore operativo incorporato');
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.wip_target_max_jobs, 'massimo WIP senza valore operativo incorporato');
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.flow_reference_points_per_week, 'riferimento punti senza valore operativo incorporato');
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.flow_reference_completions_per_week, 'riferimento completamenti senza valore operativo incorporato');
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.flow_slow_ratio, 'rapporto di rallentamento senza valore operativo incorporato');
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.calibration_date, 'data taratura senza valore illustrativo');
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.calibration_version, 'versione taratura senza valore illustrativo');
+  assertEquals_('', SIGMAFLOW.DEFAULT_CONFIG.calibration_note, 'nota taratura senza valore illustrativo');
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    setupSigmaFlow();
+    var rows = readTable_(ss.getSheetByName(SIGMAFLOW.SHEETS.CONFIG));
+    var byKey = indexBy_(rows, 'key');
+    ['wip_target_min_jobs', 'wip_target_max_jobs', 'flow_reference_points_per_week',
+      'flow_reference_completions_per_week', 'flow_slow_ratio',
+      'calibration_date', 'calibration_version', 'calibration_note'].forEach(function(key) {
+      assertTrue_(Boolean(byKey[key]), key + ' aggiunta al foglio CONFIG');
+      assertEquals_('', byKey[key].value, key + ' resta vuota dopo il seed');
+      assertTrue_(Boolean(byKey[key].description), key + ' ha una descrizione leggibile');
+    });
+  });
+}
+
+function testDashboardV5CalibrationRejectsInvalidValues() {
+  var base = dashboardV3FlowTestInputs_(4, 8, 'sufficient');
+  [
+    { wip_target_min_jobs: -1 },
+    { wip_target_min_jobs: 6, wip_target_max_jobs: 5 },
+    { flow_reference_points_per_week: 0 },
+    { flow_reference_completions_per_week: 0 },
+    { flow_slow_ratio: 0 },
+    { flow_slow_ratio: 1.01 }
+  ].forEach(function(overrides) {
+    var config = Object.assign({}, base.config, overrides);
+    var result = dashboardV3FlowState_(base.current, base.capacity, config);
+    assertEquals_('INSUFFICIENT_DATA', result.system_flow_status, 'taratura numericamente invalida rifiutata');
+    assertEquals_('Taratura non configurata.', result.system_flow_message, 'errore di taratura uniforme');
+  });
+}
+
+function testDashboardV4TransparencyCalibrationAndDiagnostics() {
+  var now = new Date('2026-02-10T12:00:00Z');
+  var completedAt = '2026-02-05T10:00:00Z';
+  var job = dashboardV2PathFixture_('DONE-V4', ['backlog', 'wip', 'done'],
+    ['2026-01-20T12:00:00Z', '2026-01-25T12:00:00Z', completedAt], 8);
+  job.title = 'Pratica V4';
+  var visit = { job_id: job.job_id, numero_visita: 2, consegna_ts: completedAt };
+  var config = dashboardV2TestConfig_({ capacity_window_weeks: 8, wip_trend_weeks: 12, min_samples_capacity: 1 });
+  var state = buildDashboardStateV2_([job], [visit], config, now, [], []);
+  var recent = state.systemFlow.recent_completion_throughput;
+  assertTrue_(Boolean(recent.window_start && recent.window_end), 'finestra recente espone estremi');
+  assertEquals_(SIGMAFLOW.TZ, recent.timezone, 'timezone recente esplicita');
+  assertEquals_(1, recent.sample_size, 'completamenti inclusi espliciti');
+  assertEquals_(8, recent.completed_points, 'punti inclusi espliciti');
+  assertEquals_(1, state.details.recent_completions.length, 'drill-down riconciliabile');
+  assertEquals_(2, state.details.recent_completions[0].numero_visita, 'numero visita nell export');
+  assertEquals_(undefined, state.calibration, 'nessun modello automatico di taratura nel contratto');
+  assertTrue_(Boolean(state.diagnostics.summary), 'riepilogo diagnostico attivo');
+  assertEquals_(0, state.diagnostics.summary.visits_without_matching_job, 'join visite-job verificato');
+}
+
+function testDashboardV4WriterRealignsFromAndAuditsForward() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var jobId = testAddJobWithPastArrival_({ title: 'Writer V4', size_class: 'M' });
+    var columns = readColumns_();
+    var wip = columns.filter(function(c) { return c.role === 'wip'; })[0];
+    var prep = columns.filter(function(c) { return c.role === 'prep'; })[0];
+    var first = addActivityEvent({ job_id: jobId, type: 'move', ts: testTsMinutesAgo_(60), to: wip.id });
+    var second = addActivityEvent({ job_id: jobId, type: 'move', ts: testTsMinutesAgo_(30), to: prep.id });
+    assertTrue_(first.data.ok && second.data.ok, 'scritture V4 riuscite');
+    var persisted = getActivityLog({ job_id: jobId }).data.log;
+    var secondPersisted = persisted.filter(function(event) { return event.id === second.data.event.id; })[0];
+    assertEquals_(wip.id, secondPersisted.from, 'from successivo riallineato deterministicamente');
+    assertEquals_(secondPersisted.ts, secondPersisted.event_ts, 'event_ts separato e invariato');
+    assertTrue_(Boolean(secondPersisted.operation_ts), 'operation_ts registrato');
+
+    var updated = updateActivityEvent({ job_id: jobId, event_id: second.data.event.id, note: 'nota audit' });
+    assertEquals_(1, updated.data.event.audit_history.length, 'versione precedente conservata su update');
+    assertEquals_('update', updated.data.event.audit_history[0].action, 'azione update dichiarata');
+    deleteActivityEvent({ job_id: jobId, event_id: updated.data.event.id });
+    persisted = getActivityLog({ job_id: jobId }).data.log;
+    var audit = persisted.filter(function(event) { return event.type === 'audit' && event.action === 'delete'; })[0];
+    assertTrue_(Boolean(audit && audit.previous), 'delete conserva tombstone e versione precedente');
+    assertEquals_(updated.data.event.id, audit.target_event_id, 'audit delete collegato all evento');
+  });
+}
+
+function testCheckVisiteSyncV4DetectsMismatchReadOnly() {
+  withTestSpreadsheet_(function(ss) {
+    resetTestDatabase_(ss);
+    var created = addJob({ title: 'Diagnostica visite V4', size_class: 'S' }).data;
+    assertEquals_(0, checkVisiteSyncV4_(ss).jobs_out_of_sync, 'fixture live inizialmente coerente');
+    var sheet = ss.getSheetByName(SIGMAFLOW.SHEETS.VISITE);
+    var headers = getHeaderMap_(sheet);
+    var row = findRowById_(sheet, 'job_id', created.job_id);
+    sheet.getRange(row, headers.apertura_ts).setValue('');
+    var result = checkVisiteSyncV4_(ss);
+    assertEquals_(1, result.jobs_out_of_sync, 'divergenza rilevata senza rebuild');
+    assertEquals_(created.job_id, result.mismatches[0].job_id, 'job divergente identificato');
+  });
 }
 
 function runSingleTest_(testFn) {

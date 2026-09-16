@@ -4,7 +4,7 @@ var SIGMAFLOW = {
   PROP_SCHEMA_VERSION: 'SIGMAFLOW_SCHEMA_VERSION',
   SCHEMA_VERSION: '13',
   DEFAULT_SPREADSHEET_ID: '15XQwfbTLH4wv8IOzhzIyhpATZY-9KmXoorhD4mpZk4g',
-  DEFAULT_TEST_SPREADSHEET_ID: '1kzoVGcIqcYIuGWgmRQbeuyK-37cmSaUQye3d36rhDRU',
+  DEFAULT_TEST_SPREADSHEET_ID: '1CNoFPeoQKQ2LBmnaldp1Id3_CRtfviep4I4xkKPujtk',
   PROP_TEST_SPREADSHEET_ID: 'SIGMAFLOW_TEST_SPREADSHEET_ID',
   SHEETS: {
     JOBS: 'jobs',
@@ -125,6 +125,22 @@ var SIGMAFLOW = {
     // observation_window_days. Default 26, nessun cambio di
     // comportamento finche' non modificato a mano.
     wip_trend_weeks: 26,
+    // V2.2: finestra e minimo campionario della capacita' osservata.
+    // Sono parametri distinti dalla finestra legacy e dallo storico WIP.
+    capacity_window_weeks: 8,
+    history_reliable_from: '',
+    min_samples_capacity: 5,
+    // Taratura operativa: nessun valore implicito o autocalibrato.
+    wip_target_min_jobs: '',
+    wip_target_max_jobs: '',
+    flow_reference_points_per_week: '',
+    flow_reference_completions_per_week: '',
+    flow_slow_ratio: '',
+    // V5 Fase 2: metadati di tracciabilita della taratura. Restano
+    // intenzionalmente vuoti finche una taratura non viene approvata.
+    calibration_date: '',
+    calibration_version: '',
+    calibration_note: '',
     archiviazione_giorni_default: 30,
     backup_retention_giorni: 14,
     theoretical_capacity_per_day: '',

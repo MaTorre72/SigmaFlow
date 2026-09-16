@@ -8,6 +8,7 @@
 // devono fermarsi su un fallimento, es. push-and-verify.sh).
 const path = require('path');
 const { createHarness } = require(path.join(__dirname, 'gas-harness.js'));
+const { verifyV3Ui } = require(path.join(__dirname, 'verify-v3-ui.js'));
 
 const h = createHarness();
 h.scriptProperties['SIGMAFLOW_TEST_SPREADSHEET_ID'] = 'test-ss';
@@ -20,6 +21,14 @@ if (result.failed > 0) {
   result.results
     .filter(function (r) { return !r.passed; })
     .forEach(function (r) { console.log(`  FALLITO: ${r.name} - ${r.error}`); });
+  process.exit(1);
+}
+
+try {
+  const uiChecks = verifyV3Ui();
+  console.log(`Verifiche UI V3 passate: ${uiChecks.length}/${uiChecks.length}`);
+} catch (error) {
+  console.log(`Verifiche UI V3 fallite: ${error.message}`);
   process.exit(1);
 }
 

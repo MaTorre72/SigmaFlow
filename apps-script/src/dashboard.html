@@ -1,4 +1,179 @@
-<section class="dashboard-quick" aria-label="Vista rapida">
+<section class="dashboard-v3" aria-labelledby="dashboard-v3-title">
+  <header class="v3-heading">
+    <div>
+      <h1 id="dashboard-v3-title">Situazione operativa</h1>
+      <p>Una lettura immediata del lavoro attivo, di quello da assorbire e del ritmo recente.</p>
+    </div>
+    <span id="v3-updated-at" class="v3-updated-at" hidden></span>
+  </header>
+
+  <div id="v3-loading-state" class="v3-loading-state" role="status" aria-live="polite">
+    <span class="v3-loading-spinner" aria-hidden="true"></span>
+    <strong>Aggiornamento in corso…</strong>
+    <span>Il calcolo può richiedere alcuni secondi.</span>
+  </div>
+
+  <article id="v3-flow-status" class="v3-flow-status v3-state-insufficient" aria-live="polite">
+    <div class="v3-status-kicker">Stato del flusso</div>
+    <div class="v3-status-main">
+      <span id="v3-flow-icon" class="v3-status-icon" aria-hidden="true">?</span>
+      <div>
+        <h2 id="v3-flow-label">Dati insufficienti</h2>
+        <p id="v3-flow-message">Dato non ancora disponibile</p>
+      </div>
+    </div>
+    <details class="v3-status-detail">
+      <summary>Come è stata ottenuta questa lettura</summary>
+      <div id="v3-flow-detail" class="v3-flow-detail"></div>
+      <button type="button" data-v3-detail="recent_completions">Apri completamenti della finestra</button>
+    </details>
+  </article>
+
+  <section class="v3-card-grid" aria-label="Indicatori operativi">
+    <button class="v3-metric-card" type="button" data-v3-detail="wip">
+      <span class="v3-card-label">Lavori in corso</span>
+      <strong id="v3-wip-jobs">—</strong>
+      <span id="v3-wip-points" class="v3-card-detail">Dato non ancora disponibile</span>
+      <span class="v3-card-action">Apri il dettaglio</span>
+    </button>
+    <button class="v3-metric-card" type="button" data-v3-detail="future_work">
+      <span class="v3-card-label">Lavoro già acquisito</span>
+      <strong id="v3-future-jobs">—</strong>
+      <span id="v3-future-points" class="v3-card-detail">Da programmare o avviare</span>
+      <span class="v3-card-action">Apri il dettaglio</span>
+    </button>
+    <article class="v3-metric-card v3-committed-card">
+      <span class="v3-card-label">Settimane di lavoro già impegnate</span>
+      <strong id="v3-committed-weeks">—</strong>
+      <span id="v3-committed-message" class="v3-card-detail">Dato non ancora disponibile</span>
+      <span class="v3-card-note" title="Calcolate dal backend sul ritmo di assorbimento del nuovo lavoro.">Non è una previsione di consegna</span>
+    </article>
+    <button class="v3-metric-card" type="button" data-v3-detail="waiting">
+      <span class="v3-card-label">In attesa</span>
+      <strong id="v3-waiting-jobs">—</strong>
+      <span id="v3-waiting-points" class="v3-card-detail">Lavoro temporaneamente fermo che può rientrare</span>
+      <span class="v3-card-action">Apri il dettaglio</span>
+    </button>
+    <button class="v3-metric-card" type="button" data-v3-detail="timing">
+      <span class="v3-card-label">Tempo tipico alla consegna</span>
+      <strong id="v3-lead-time-median">—</strong>
+      <span id="v3-lead-time-median-detail" class="v3-card-detail">Dato non ancora disponibile</span>
+      <span class="v3-card-action">Apri i tempi per taglia</span>
+    </button>
+    <button class="v3-metric-card" type="button" data-v3-detail="timing">
+      <span class="v3-card-label">8 pratiche su 10 entro</span>
+      <strong id="v3-lead-time-p80">—</strong>
+      <span id="v3-lead-time-p80-detail" class="v3-card-detail">Dato non ancora disponibile</span>
+      <span class="v3-card-action">Apri i tempi per taglia</span>
+    </button>
+  </section>
+
+  <article class="v3-flow-chart-panel">
+    <div class="v3-section-heading">
+      <div><h2>Andamento del lavoro</h2><p>Come sono cambiati nel tempo il lavoro acquisito, quello attivo, le attese e i completamenti.</p></div>
+      <div class="v3-unit-switch" role="group" aria-label="Unità del grafico">
+        <button type="button" class="active" data-v3-chart-unit="jobs" aria-pressed="true">Lavori</button>
+        <button type="button" data-v3-chart-unit="points" aria-pressed="false">Punti</button>
+      </div>
+    </div>
+    <div class="v3-cfd-navigation" aria-label="Periodo e risoluzione del grafico">
+      <label>Periodo
+        <select id="v3-cfd-period">
+          <option value="8w">8 settimane</option><option value="3m">3 mesi</option>
+          <option value="6m">6 mesi</option><option value="12m">12 mesi</option>
+          <option value="current_year">Anno corrente</option><option value="month">Mese</option>
+          <option value="quarter">Trimestre</option><option value="year">Anno</option>
+          <option value="custom">Da/A</option>
+        </select>
+      </label>
+      <label>Risoluzione
+        <select id="v3-cfd-resolution">
+          <option value="day">Giorno</option><option value="week" selected>Settimana</option>
+          <option value="month">Mese</option>
+        </select>
+      </label>
+      <label id="v3-cfd-month-wrap" hidden>Mese <input id="v3-cfd-month" type="month"></label>
+      <label id="v3-cfd-quarter-wrap" hidden>Trimestre
+        <select id="v3-cfd-quarter"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select>
+      </label>
+      <label id="v3-cfd-year-wrap" hidden>Anno <select id="v3-cfd-year"></select></label>
+      <label id="v3-cfd-from-wrap" hidden>Da <input id="v3-cfd-from" type="date"></label>
+      <label id="v3-cfd-to-wrap" hidden>A <input id="v3-cfd-to" type="date"></label>
+      <label>Confronto
+        <select id="v3-cfd-comparison">
+          <option value="none">Nessun confronto</option>
+          <option value="previous">Periodo precedente equivalente</option>
+          <option value="previous_year">Stesso periodo anno precedente</option>
+          <option value="custom">Periodo personalizzato</option>
+        </select>
+      </label>
+      <label id="v3-cfd-comparison-from-wrap" hidden>Confronto da <input id="v3-cfd-comparison-from" type="date"></label>
+      <label id="v3-cfd-comparison-to-wrap" hidden>Confronto a <input id="v3-cfd-comparison-to" type="date"></label>
+      <div class="v3-cfd-viewport" role="group" aria-label="Navigazione nel grafico">
+        <button id="v3-cfd-zoom-in" type="button" aria-label="Aumenta zoom">Zoom +</button>
+        <button id="v3-cfd-zoom-out" type="button" aria-label="Riduci zoom">Zoom −</button>
+        <button id="v3-cfd-pan-left" type="button" aria-label="Scorri periodo indietro">←</button>
+        <button id="v3-cfd-pan-right" type="button" aria-label="Scorri periodo avanti">→</button>
+        <button id="v3-cfd-select-range" type="button" aria-pressed="false">Seleziona intervallo</button>
+        <button id="v3-cfd-measure" type="button" aria-pressed="false">Misura tempo</button>
+        <button id="v3-cfd-rate-entry" type="button" aria-pressed="false">Tasso di ingresso</button>
+        <button id="v3-cfd-rate-completion" type="button" aria-pressed="false">Tasso di completamento</button>
+        <button id="v3-cfd-reset" type="button">Reset zoom</button>
+      </div>
+    </div>
+    <div id="v3-cfd-charts" class="v3-cfd-charts">
+      <section class="v3-cfd-chart-column"><h3 id="v3-cfd-primary-title" hidden>Periodo selezionato</h3><div class="v3-chart-wrap"><canvas id="v3-flow-chart" height="330" tabindex="0" aria-describedby="v3-flow-selection" aria-label="Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere le settimane"></canvas></div></section>
+      <section id="v3-cfd-comparison-panel" class="v3-cfd-chart-column" hidden><h3>Periodo di confronto</h3><div class="v3-chart-wrap"><canvas id="v3-flow-comparison-chart" height="330" tabindex="0" aria-describedby="v3-flow-comparison-selection" aria-label="Andamento del lavoro nel periodo di confronto"></canvas></div><p id="v3-flow-comparison-selection" class="v3-flow-selection" aria-live="polite"></p><div id="v3-flow-comparison-empty" class="chart-empty" hidden>Confronto non ancora disponibile per il periodo selezionato.</div></section>
+    </div>
+    <div class="v3-chart-legend" aria-label="Legenda">
+      <button type="button" class="v3-legend-completed" data-v3-cfd-series="completed">Completato</button>
+      <button type="button" class="v3-legend-waiting" data-v3-cfd-series="waiting">In attesa</button>
+      <button type="button" class="v3-legend-wip-rework" data-v3-cfd-series="wipRework">WIP rework</button>
+      <button type="button" class="v3-legend-wip-new" data-v3-cfd-series="wipNew">WIP nuovo</button>
+      <button type="button" class="v3-legend-future" data-v3-cfd-series="future">Già acquisito</button>
+      <button id="v3-cfd-show-all" type="button">Mostra tutte</button>
+    </div>
+    <p id="v3-flow-selection" class="v3-flow-selection" aria-live="polite">Sposta il puntatore o tocca il grafico per leggere una settimana.</p>
+    <div id="v3-cfd-measure-result" class="v3-cfd-measure-result" aria-live="polite" hidden></div>
+    <p id="v3-cfd-rate-result" class="v3-cfd-rate-result" aria-live="polite" hidden></p>
+    <div id="v3-flow-chart-empty" class="chart-empty" hidden>Storico non ancora disponibile</div>
+  </article>
+
+  <section class="v3-secondary-grid">
+    <button class="v3-resumed-card" type="button" data-v3-detail="resumed">
+      <span class="v3-card-label">Rientri nel lavoro</span>
+      <strong id="v3-resumed-count">—</strong>
+      <span id="v3-resumed-share">Dato non ancora disponibile</span>
+      <span class="v3-card-detail">Nuovi ingressi di lavori già entrati in lavorazione.</span>
+      <span class="v3-card-action">Apri il dettaglio</span>
+    </button>
+    <details class="v3-diagnostics">
+      <summary>Diagnostica e taratura</summary>
+      <section class="v7-diagnostic-block"><h3>Parametri configurati</h3><dl id="v7-config-detail"></dl></section>
+      <section class="v7-diagnostic-block"><h3>Capacità e rientri</h3><dl id="v7-capacity-detail"></dl><p id="v7-capacity-note" hidden>Il sistema movimenta più lavoro di quanto ne porti a consegna; i rientri descrivono lavoro già transitato nel WIP.</p></section>
+      <section class="v7-diagnostic-block"><h3>Taratura WIP suggerita dai dati</h3><dl id="v7-suggestion-detail"></dl><p>Stima diagnostica, non una nuova soglia operativa. Non modifica CONFIG.</p></section>
+      <section class="v7-diagnostic-block"><h3>Qualità e copertura</h3>
+        <p id="v3-diagnostics-message">Riepilogo diagnostico in caricamento.</p>
+        <dl id="v7-coverage-detail"></dl><p>Le finestre sovrapposte descrivono un intervallo osservato, non un intervallo di confidenza. Gli episodi WIP ancora aperti sono esclusi dalla permanenza media: il WIP di riferimento può essere ottimistico.</p><dl id="v3-diagnostics-detail"></dl>
+        <dl id="v3-performance-detail"></dl><p id="v3-history-message" class="v3-card-detail"></p>
+      </section>
+    </details>
+  </section>
+</section>
+
+<dialog id="v3-detail-dialog" class="v3-detail-dialog" aria-labelledby="v3-detail-title">
+  <div class="v3-detail-shell">
+    <header><div><h2 id="v3-detail-title">Dettaglio</h2><p id="v3-detail-description"></p></div><button id="v3-detail-close" type="button" aria-label="Chiudi dettaglio">×</button></header>
+    <button id="v3-detail-export" type="button">Esporta CSV</button>
+    <div class="table-scroll"><table><thead id="v3-detail-head"></thead><tbody id="v3-detail-body"></tbody></table></div>
+    <p id="v3-detail-empty" class="chart-empty" hidden>Nessun lavoro in questa sezione</p>
+  </div>
+</dialog>
+
+<details class="legacy-dashboard">
+<summary>Vista precedente — confronto</summary>
+<p id="legacy-dashboard-loading" class="muted" hidden>Caricamento dell’analisi di confronto…</p>
+<section class="dashboard-quick" aria-label="Vista rapida precedente">
   <div class="quick-heading">
     <div><h2>Vista rapida</h2><p>Situazione corrente del sistema</p></div>
     <button id="seed-test-data-button" type="button" hidden>Genera dati TEST</button>
@@ -219,4 +394,5 @@
     <p class="panel-note" id="wip-cycle-fit-note"></p>
   </details>
 </section>
+</details>
 </details>

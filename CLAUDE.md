@@ -162,6 +162,15 @@ lo strumento dedicato già esiste ed è verificato funzionante.
   sistema, è un ID di spreadsheet dentro il codice) — affidato
   interamente al rispetto di questa regola.
 - Se un file non esiste dove atteso: documentarlo, non inventarlo.
+- **Igiene di `docs/`**: quando un documento (`DESIGN_faseX_*`, `NOTE_*`, `RICOGNIZIONE_*`,
+  `VALIDAZIONE_*`, `VERIFICA_*`) viene superato da una versione successiva o chiude la fase
+  a cui si riferisce, spostarlo con `git mv` in `docs/storico/` **nella stessa sessione che
+  lo supera** — non lasciarlo in `docs/` in attesa di un riordino successivo, non crearne uno
+  nuovo senza valutare se quello vecchio va archiviato. In `docs/` restano solo: il
+  documento di design attivo per ciascun sistema (un solo `DESIGN_*` corrente per
+  dashboard/modulo, non uno per fase) e i documenti già elencati in "Riferimenti tecnici"
+  più sotto. In caso di dubbio se un documento sia ancora referenziato altrove nel repo,
+  verificarlo con una ricerca testuale del suo nome file prima di spostarlo, non a occhio.
 - Prima di ogni consegna: eseguire la suite di test (harness Node o
   `runAllTestsAndLog`), verificare il push su TEST con `clasp pull`
   isolato + diff (sotto `/tmp/sf-scratch/`, vedi sopra), poi aggiornare

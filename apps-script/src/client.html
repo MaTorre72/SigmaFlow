@@ -18,6 +18,8 @@
     touchStart: null,
     suppressCardClick: false,
     metricsLoaded: false,
+    legacyMetricsLoaded: false,
+    legacyMetricsLoading: false,
     archivioLoaded: false,
     cestinoLoaded: false
   };
@@ -50,6 +52,7 @@
     bindModal();
     bindCestinoToolbar();
     bindDistributionTabs_();
+    bindDashboardV3_();
     loadBoard();
     bindVisibilityPolling_();
   });
@@ -122,6 +125,7 @@
     getActivityLog: true,
     getArchivio: true,
     getCestino: true,
+    getDashboardMetrics: true,
     getMetrics: true
   };
 
@@ -1219,7 +1223,7 @@
     return Math.round(ms / 60000) + 'm';
   }
 
-  var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE' };
+  var ACTIVITY_TYPE_LABELS_ = { move: 'SPOSTAMENTO', note: 'NOTA', correction: 'CORREZIONE', audit: 'AUDIT' };
   var STRUCTURAL_FIELD_LABELS_ = {
     arrival_ts: 'Data creazione (arrival_ts)',
     incarico_ts: 'Data incarico (incarico_ts)',
@@ -1274,6 +1278,11 @@
     if (event.type === 'correction') {
       var reason = event.reason ? ' — ' + event.reason : '';
       return (STRUCTURAL_FIELD_LABELS_[event.field] || event.field || '') + ': ' + formatEventTimestamp_(event.old) + ' → ' + formatEventTimestamp_(event.new) + reason;
+    }
+    if (event.type === 'audit') {
+      return event.action === 'delete'
+        ? 'Evento ' + (event.target_event_id || '') + ' eliminato; versione precedente conservata nell’audit.'
+        : 'Operazione storica registrata.';
     }
     return event.note || '';
   }
@@ -1346,8 +1355,9 @@
 
     var sourceBadge = document.createElement('span');
     var isAuto = logEvent.source === 'auto';
+    var isAudit = logEvent.type === 'audit';
     sourceBadge.className = 'activity-log-badge activity-log-badge-source ' + (isAuto ? 'activity-log-badge-auto' : 'activity-log-badge-manual');
-    sourceBadge.textContent = isAuto ? 'AUTO' : 'MANUALE';
+    sourceBadge.textContent = isAudit ? 'SISTEMA' : (isAuto ? 'AUTO' : 'MANUALE');
     row.appendChild(sourceBadge);
 
     var description = document.createElement('span');
@@ -1362,6 +1372,10 @@
     // auto cancellerebbe un pezzo di storia reale, non una correzione.
     var actions = document.createElement('span');
     actions.className = 'activity-log-actions';
+    if (isAudit) {
+      row.appendChild(actions);
+      return row;
+    }
     var editButton = document.createElement('button');
     editButton.type = 'button';
     editButton.className = 'activity-log-edit';
@@ -2058,16 +2072,999 @@
     if (state.metricsLoaded && !force) {
       return;
     }
-    callApi('getMetrics').then(function(metrics) {
+    setDashboardV3Loading_(true);
+    callApi('getDashboardMetrics').then(function(metrics) {
       state.metricsLoaded = true;
       renderMetrics(metrics);
-    }).catch(showError);
+      setDashboardV3Loading_(false);
+    }).catch(function(error) {
+      setDashboardV3Loading_(false, true);
+      showError(error);
+    });
+  }
+
+  function setDashboardV3Loading_(loading, failed) {
+    var loadingState = document.getElementById('v3-loading-state');
+    var updatedAt = document.getElementById('v3-updated-at');
+    if (loadingState) {
+      loadingState.hidden = !loading;
+    }
+    if (updatedAt) {
+      updatedAt.hidden = loading;
+      if (failed) { updatedAt.textContent = 'Aggiornamento non riuscito'; }
+    }
+  }
+
+  function bindDashboardV3_() {
+    document.querySelectorAll('[data-v3-detail]').forEach(function(button) {
+      button.addEventListener('click', function() { openDashboardV3Detail_(button.dataset.v3Detail); });
+    });
+    document.querySelectorAll('[data-v3-chart-unit]').forEach(function(button) {
+      button.addEventListener('click', function() {
+        document.querySelectorAll('[data-v3-chart-unit]').forEach(function(other) {
+          var selected = other === button;
+          other.classList.toggle('active', selected);
+          other.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        });
+        state.dashboardV3ChartUnit = button.dataset.v3ChartUnit;
+        state.dashboardV3ChartHoverIndex = null;
+        state.dashboardV5MeasureHover = null;
+        drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+      });
+    });
+    ['v3-cfd-period', 'v3-cfd-resolution', 'v3-cfd-month', 'v3-cfd-quarter',
+      'v3-cfd-year', 'v3-cfd-from', 'v3-cfd-to', 'v3-cfd-comparison',
+      'v3-cfd-comparison-from', 'v3-cfd-comparison-to'].forEach(function(id) {
+      document.getElementById(id).addEventListener('change', function() {
+        dashboardV5UpdateNavigationVisibility_();
+        state.dashboardV5ChartWindow = null;
+        state.dashboardV3ChartHoverIndex = null;
+        state.dashboardV3ChartSelectedIndex = null;
+        state.dashboardV5MeasureHover = null;
+        state.dashboardV5MeasureSelections = {};
+        drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+      });
+    });
+    document.getElementById('v3-cfd-zoom-in').addEventListener('click', function() { dashboardV5ZoomChart_(0.5); });
+    document.getElementById('v3-cfd-zoom-out').addEventListener('click', function() { dashboardV5ZoomChart_(2); });
+    document.getElementById('v3-cfd-pan-left').addEventListener('click', function() { dashboardV5PanChart_(-1); });
+    document.getElementById('v3-cfd-pan-right').addEventListener('click', function() { dashboardV5PanChart_(1); });
+    document.getElementById('v3-cfd-reset').addEventListener('click', function() {
+      state.dashboardV5ChartWindow = null;
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    document.getElementById('v3-cfd-select-range').addEventListener('click', function(event) {
+      state.dashboardV5SelectingRange = !state.dashboardV5SelectingRange;
+      state.dashboardV5Measuring = false;
+      document.getElementById('v3-cfd-measure').classList.remove('active');
+      document.getElementById('v3-cfd-measure').setAttribute('aria-pressed', 'false');
+      state.dashboardV5RangeStart = null;
+      state.dashboardV5MeasureHover = null;
+      event.currentTarget.classList.toggle('active', state.dashboardV5SelectingRange);
+      event.currentTarget.setAttribute('aria-pressed', state.dashboardV5SelectingRange ? 'true' : 'false');
+    });
+    document.getElementById('v3-cfd-measure').addEventListener('click', function(event) {
+      state.dashboardV5Measuring = !state.dashboardV5Measuring;
+      state.dashboardV5MeasureHover = null;
+      state.dashboardV5SelectingRange = false;
+      document.getElementById('v3-cfd-select-range').classList.remove('active');
+      document.getElementById('v3-cfd-select-range').setAttribute('aria-pressed', 'false');
+      event.currentTarget.classList.toggle('active', state.dashboardV5Measuring);
+      event.currentTarget.setAttribute('aria-pressed', state.dashboardV5Measuring ? 'true' : 'false');
+      document.getElementById('v3-cfd-measure-result').hidden = !state.dashboardV5Measuring;
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    [['v3-cfd-rate-entry', 'dashboardV5EntryRate'], ['v3-cfd-rate-completion', 'dashboardV5CompletionRate']]
+      .forEach(function(binding) {
+        document.getElementById(binding[0]).addEventListener('click', function(event) {
+          state[binding[1]] = !state[binding[1]];
+          event.currentTarget.classList.toggle('active', state[binding[1]]);
+          event.currentTarget.setAttribute('aria-pressed', state[binding[1]] ? 'true' : 'false');
+          drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+        });
+      });
+    document.querySelectorAll('[data-v3-cfd-series]').forEach(function(button) {
+      button.addEventListener('click', function() {
+        state.dashboardV5FocusedSeries = button.dataset.v3CfdSeries;
+        document.querySelectorAll('[data-v3-cfd-series]').forEach(function(other) {
+          var active = other === button; other.classList.toggle('active', active);
+          other.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+      });
+    });
+    document.getElementById('v3-cfd-show-all').addEventListener('click', function() {
+      state.dashboardV5FocusedSeries = null;
+      document.querySelectorAll('[data-v3-cfd-series]').forEach(function(button) {
+        button.classList.remove('active'); button.setAttribute('aria-pressed', 'false');
+      });
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    var chart = document.getElementById('v3-flow-chart');
+    function chartIndexFromPointer_(event, targetChart) {
+      targetChart = targetChart || chart;
+      var geometry = targetChart._v3ChartGeometry;
+      if (!geometry || !geometry.rows) { return null; }
+      var rect = targetChart.getBoundingClientRect();
+      var px = (event.clientX - rect.left) * geometry.width / rect.width;
+      var ratio = (px - geometry.left) / Math.max(1, geometry.right - geometry.left);
+      return Math.max(0, Math.min(geometry.rows - 1, Math.round(ratio * Math.max(1, geometry.rows - 1))));
+    }
+    function chartMeasureFromPointer_(event, index) {
+      var geometry = chart._v3ChartGeometry;
+      var rows = chart._v3ChartRows || [];
+      if (!geometry || !rows[index]) { return null; }
+      var rect = chart.getBoundingClientRect();
+      var py = (event.clientY - rect.top) * (geometry.height / rect.height);
+      // Inversa della stessa y(value) usata dal disegno, non una seconda scala.
+      var requested = geometry.maximum * (geometry.bottom - py) / (geometry.bottom - geometry.top);
+      var upper = Number(rows[index].boundaries[state.dashboardV3ChartUnit].future_work_boundary || 0);
+      return { row: rows[index], unit: state.dashboardV3ChartUnit,
+        quota: Math.round(Math.max(0, Math.min(upper, requested)) * 100) / 100 };
+    }
+    chart.addEventListener('pointermove', function(event) {
+      var index = chartIndexFromPointer_(event);
+      if (index === null) { return; }
+      if (state.dashboardV5Measuring) {
+        var hovered = chartMeasureFromPointer_(event, index);
+        if (hovered && state.dashboardV5MeasureHover && state.dashboardV5MeasureHover.row === hovered.row &&
+            state.dashboardV5MeasureHover.quota === hovered.quota) { return; }
+        state.dashboardV5MeasureHover = hovered;
+      } else if (index === state.dashboardV3ChartHoverIndex) { return; }
+      state.dashboardV3ChartHoverIndex = index;
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    chart.addEventListener('pointerdown', function(event) {
+      if (state.dashboardV5SelectingRange) { state.dashboardV5DragStart = chartIndexFromPointer_(event); }
+    });
+    chart.addEventListener('pointerup', function(event) {
+      if (!state.dashboardV5SelectingRange || state.dashboardV5DragStart === null) { return; }
+      var finish = chartIndexFromPointer_(event);
+      if (finish !== state.dashboardV5DragStart) { dashboardV5FinishRange_(state.dashboardV5DragStart, finish); }
+      state.dashboardV5DragStart = null;
+    });
+    chart.addEventListener('wheel', function(event) {
+      if (window.matchMedia('(max-width: 900px), (pointer: coarse)').matches) { return; }
+      event.preventDefault();
+      dashboardV5ZoomChart_(event.deltaY < 0 ? 0.5 : 2);
+    }, { passive: false });
+    chart.addEventListener('pointerleave', function() {
+      if (state.dashboardV3ChartHoverIndex === null || state.dashboardV3ChartHoverIndex === undefined) { return; }
+      state.dashboardV3ChartHoverIndex = null;
+      state.dashboardV5MeasureHover = null;
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    chart.addEventListener('click', function(event) {
+      var clicked = chartIndexFromPointer_(event);
+      if (state.dashboardV5SelectingRange) {
+        if (state.dashboardV5RangeStart === null || state.dashboardV5RangeStart === undefined) {
+          state.dashboardV5RangeStart = clicked;
+          document.getElementById('v3-flow-selection').textContent = 'Seleziona il secondo estremo dell’intervallo.';
+        } else {
+          dashboardV5FinishRange_(state.dashboardV5RangeStart, clicked);
+        }
+        return;
+      }
+      state.dashboardV3ChartSelectedIndex = clicked;
+      if (state.dashboardV5Measuring) {
+        state.dashboardV5MeasureSelections = state.dashboardV5MeasureSelections || {};
+        state.dashboardV5MeasureSelections[state.dashboardV3ChartUnit] = chartMeasureFromPointer_(event, clicked);
+      }
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    chart.addEventListener('keydown', function(event) {
+      var horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+      var vertical = state.dashboardV5Measuring &&
+        (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Home' || event.key === 'End');
+      if (!horizontal && !vertical) { return; }
+      var rows = chart._v3ChartRows || [];
+      if (!rows.length) { return; }
+      event.preventDefault();
+      var current = state.dashboardV3ChartSelectedIndex;
+      if (current === null || current === undefined) { current = rows.length - 1; }
+      if (horizontal) {
+        state.dashboardV3ChartSelectedIndex = Math.max(0, Math.min(rows.length - 1,
+          current + (event.key === 'ArrowLeft' ? -1 : 1)));
+        state.dashboardV3ChartHoverIndex = null;
+        state.dashboardV5MeasureHover = null;
+      } else {
+        var row = rows[current];
+        var unit = state.dashboardV3ChartUnit;
+        var upper = Number(row.boundaries[unit].future_work_boundary || 0);
+        state.dashboardV5MeasureSelections = state.dashboardV5MeasureSelections || {};
+        var saved = state.dashboardV5MeasureSelections[unit];
+        var quota = saved && saved.row === row ? saved.quota : upper;
+        quota = event.key === 'Home' ? 0 : event.key === 'End' ? upper :
+          Math.max(0, Math.min(upper, quota + (event.key === 'ArrowUp' ? 1 : -1)));
+        state.dashboardV3ChartSelectedIndex = current;
+        state.dashboardV5MeasureSelections[unit] = { row: row, unit: unit, quota: quota };
+        state.dashboardV5MeasureHover = null;
+        state.dashboardV3ChartHoverIndex = null;
+      }
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    var comparisonChart = document.getElementById('v3-flow-comparison-chart');
+    comparisonChart.addEventListener('click', function(event) {
+      var comparisonIndex = chartIndexFromPointer_(event, comparisonChart);
+      var primaryRows = chart._v3ChartRows || [];
+      var comparisonRows = comparisonChart._v3ChartRows || [];
+      if (comparisonIndex === null || !primaryRows.length || !comparisonRows.length) { return; }
+      state.dashboardV3ChartSelectedIndex = Math.round(comparisonIndex * Math.max(0, primaryRows.length - 1) /
+        Math.max(1, comparisonRows.length - 1));
+      drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+    });
+    comparisonChart.addEventListener('keydown', function(event) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') { return; }
+      event.preventDefault();
+      chart.dispatchEvent(new KeyboardEvent('keydown', { key: event.key }));
+    });
+    var dialog = document.getElementById('v3-detail-dialog');
+    document.getElementById('v3-detail-close').addEventListener('click', function() { dialog.close(); });
+    document.getElementById('v3-detail-export').addEventListener('click', function() {
+      if (state.dashboardV3DetailExport) {
+        downloadDashboardV4Csv_(state.dashboardV3DetailExport.filename, state.dashboardV3DetailExport.columns, state.dashboardV3DetailExport.rows);
+      }
+    });
+    dialog.addEventListener('click', function(event) {
+      if (event.target === dialog) { dialog.close(); }
+    });
+    var legacy = document.querySelector('.legacy-dashboard');
+    if (legacy) {
+      legacy.addEventListener('toggle', function() {
+        if (legacy.open) { loadLegacyMetrics_(); }
+      });
+    }
+  }
+
+  function loadLegacyMetrics_() {
+    if (state.legacyMetricsLoaded || state.legacyMetricsLoading) { return; }
+    state.legacyMetricsLoading = true;
+    var status = document.getElementById('legacy-dashboard-loading');
+    if (status) { status.hidden = false; status.textContent = 'Caricamento dell’analisi di confronto…'; }
+    callApi('getMetrics').then(function(metrics) {
+      state.legacyMetricsLoaded = true;
+      renderMetrics(metrics);
+      if (status) { status.hidden = true; }
+    }).catch(function(error) {
+      if (status) { status.hidden = false; status.textContent = 'Analisi di confronto non disponibile.'; }
+      showError(error);
+    }).finally(function() {
+      state.legacyMetricsLoading = false;
+    });
+  }
+
+  function dashboardV3Text_(value, suffix) {
+    if (value === null || value === undefined || value === '') { return 'Dato non ancora disponibile'; }
+    var numeric = Number(value);
+    var shown = isFinite(numeric) ? numeric.toLocaleString('it-IT', { maximumFractionDigits: 2 }) : String(value);
+    return shown + (suffix || '');
+  }
+
+  function dashboardV7LocalDate_(value) {
+    return value ? new Date(value).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }) : 'Non configurato';
+  }
+
+  function dashboardV7ShouldShowCapacityNote_(activeRate, deliveryRate) {
+    if (activeRate === null || activeRate === undefined ||
+        deliveryRate === null || deliveryRate === undefined) { return false; }
+    var active = Number(activeRate);
+    var delivery = Number(deliveryRate);
+    return isFinite(active) && isFinite(delivery) && active > delivery;
+  }
+
+  function dashboardV4QualityLabel_(quality) {
+    return quality === 'sufficient' ? 'Buona' : quality === 'partial' ? 'Parziale' : 'Insufficiente';
+  }
+
+  function dashboardV5RenderFlowDetail_(recent, detail, bandText) {
+    var root = document.getElementById('v3-flow-detail');
+    var weeks = recent.window_weeks;
+    var weeksText = weeks === null || weeks === undefined
+      ? 'finestra configurata' : 'ultime ' + dashboardV3Text_(weeks) + ' settimane ISO complete';
+    root.innerHTML =
+      '<dl class="v3-flow-current">' +
+        '<dt>Lavori attivi adesso</dt><dd>' + escapeHtml(dashboardV3Text_(detail.wip_current)) + '</dd>' +
+        '<dt>Fascia configurata</dt><dd>' + escapeHtml(bandText) + '</dd>' +
+      '</dl>' +
+      '<section class="v3-flow-throughput" aria-labelledby="v3-flow-throughput-title">' +
+        '<h3 id="v3-flow-throughput-title">Ritmo recente delle consegne</h3>' +
+        '<p>Media sulle ' + escapeHtml(weeksText) + '.</p>' +
+        '<div class="v3-flow-rate-table-wrap"><table class="v3-flow-rate-table">' +
+          '<thead><tr><th scope="col">Lettura</th><th scope="col">Completamenti</th><th scope="col">Punti</th></tr></thead>' +
+          '<tbody>' +
+            '<tr><th scope="row">Osservato</th><td>' + escapeHtml(dashboardV3Text_(recent.visits_per_week, '/settimana')) + '</td><td>' + escapeHtml(dashboardV3Text_(recent.points_per_week, '/settimana')) + '</td></tr>' +
+          '</tbody>' +
+        '</table></div>' +
+        '<dl class="v3-flow-evidence">' +
+          '<dt>Soglia di rallentamento</dt><dd>' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')) + '</dd>' +
+        '</dl>' +
+      '</section>';
+  }
+
+  // Fase 4a: la precisione di presentazione della home e' intenzionalmente
+  // inferiore a quella del contratto backend e dei calcoli diagnostici.
+  function dashboardV3FormatHomeEstimate_(value, maximumFractionDigits, suffix) {
+    if (value === null || value === undefined || !isFinite(Number(value))) { return '—'; }
+    return Number(value).toLocaleString('it-IT', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: maximumFractionDigits
+    }) + (suffix || '');
+  }
+
+  function downloadDashboardV4Csv_(filename, columns, rows) {
+    function cell(value) {
+      var text = value === null || value === undefined ? '' : String(value);
+      return '"' + text.replace(/"/g, '""') + '"';
+    }
+    var csv = [columns.map(function(column) { return cell(column[1]); }).join(',')]
+      .concat((rows || []).map(function(row) {
+        return columns.map(function(column) { return cell(row[column[0]]); }).join(',');
+      })).join('\r\n');
+    var link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  }
+
+  function renderDashboardV3_(dashboard) {
+    state.dashboardV3 = dashboard || null;
+    state.dashboardV3ChartUnit = state.dashboardV3ChartUnit || 'jobs';
+    dashboardV5InitializeNavigation_(dashboard);
+    if (!dashboard) {
+      document.getElementById('v3-flow-label').textContent = 'Dati insufficienti';
+      document.getElementById('v3-flow-message').textContent = 'La nuova lettura operativa non è disponibile in questo deployment.';
+      return;
+    }
+    var current = dashboard.currentWork || {};
+    var future = dashboard.futureWork || {};
+    var flow = dashboard.systemFlow || {};
+    var rework = dashboard.rework || {};
+    var timing = dashboard.timing || {};
+    var labels = {
+      UNDERFED: 'Sottoalimentato', REGULAR: 'Regolare', SLOWING: 'Rallentato',
+      HIGH_LOAD: 'Carico elevato', INSUFFICIENT_DATA: 'Dati insufficienti'
+    };
+    var icons = { UNDERFED: '↓', REGULAR: '✓', SLOWING: '!', HIGH_LOAD: '!', INSUFFICIENT_DATA: '?' };
+    var classes = { UNDERFED: 'underfed', REGULAR: 'regular', SLOWING: 'slowing', HIGH_LOAD: 'high-load', INSUFFICIENT_DATA: 'insufficient' };
+    var code = flow.system_flow_status || 'INSUFFICIENT_DATA';
+    var statusRoot = document.getElementById('v3-flow-status');
+    statusRoot.className = 'v3-flow-status v3-state-' + (classes[code] || 'insufficient');
+    document.getElementById('v3-flow-icon').textContent = icons[code] || '?';
+    document.getElementById('v3-flow-label').textContent = labels[code] || 'Dati insufficienti';
+    document.getElementById('v3-flow-message').textContent = flow.system_flow_message || 'Dato non ancora disponibile';
+    document.getElementById('v3-updated-at').textContent = dashboard.generated_at
+      ? 'Aggiornato il ' + formatItalianDate(dashboard.generated_at) : 'Aggiornamento non disponibile';
+
+    document.getElementById('v3-wip-jobs').textContent = dashboardV3Text_(current.wip_jobs);
+    document.getElementById('v3-wip-points').textContent = dashboardV3Text_(current.wip_points, ' punti');
+    document.getElementById('v3-future-jobs').textContent = dashboardV3Text_(future.future_work_jobs);
+    document.getElementById('v3-future-points').textContent = dashboardV3Text_(future.future_work_points, ' punti · da programmare o avviare');
+    document.getElementById('v3-waiting-jobs').textContent = dashboardV3Text_(current.waiting_jobs);
+    document.getElementById('v3-waiting-points').textContent = current.waiting_points === null || current.waiting_points === undefined
+      ? 'Dato non ancora disponibile' : dashboardV3Text_(current.waiting_points, ' punti · lavoro che può rientrare');
+    document.getElementById('v3-committed-weeks').textContent = future.committed_weeks === null || future.committed_weeks === undefined
+      ? '—' : dashboardV3FormatHomeEstimate_(future.committed_weeks, 1);
+    document.getElementById('v3-committed-message').textContent = future.committed_weeks === null || future.committed_weeks === undefined
+      ? 'Ritmo di assorbimento del nuovo lavoro non ancora stimabile.'
+      : 'Settimane equivalenti necessarie per assorbire il lavoro già acquisito.';
+    document.getElementById('v3-resumed-count').textContent = rework.rework_window_weeks === null || rework.rework_window_weeks === undefined
+      ? 'Dato non ancora disponibile'
+      : dashboardV3Text_(rework.rework_wip_entries) + ' nelle ultime ' + dashboardV3Text_(rework.rework_window_weeks) + ' settimane ISO complete';
+    document.getElementById('v3-resumed-share').textContent = rework.rework_share === null || rework.rework_share === undefined
+      ? 'Quota non ancora disponibile'
+      : Math.round(Number(rework.rework_share) * 100) + '% degli ingressi in lavorazione';
+    document.getElementById('v3-lead-time-median').textContent = timing.lead_time_median_days === null || timing.lead_time_median_days === undefined
+      ? '—' : dashboardV3FormatHomeEstimate_(timing.lead_time_median_days, 0, ' giorni');
+    document.getElementById('v3-lead-time-p80').textContent = timing.lead_time_p80_days === null || timing.lead_time_p80_days === undefined
+      ? '—' : dashboardV3FormatHomeEstimate_(timing.lead_time_p80_days, 0, ' giorni');
+    var timingEvidence = timing.lead_time_sample_size
+      ? dashboardV3Text_(timing.lead_time_sample_size, ' unità concluse · qualità ') + dashboardV4QualityLabel_(timing.lead_time_quality)
+      : 'Nessun intervallo completo disponibile';
+    document.getElementById('v3-lead-time-median-detail').textContent = timingEvidence;
+    document.getElementById('v3-lead-time-p80-detail').textContent = timingEvidence;
+
+    var recent = flow.recent_completion_throughput || {};
+    var detail = flow.system_flow_detail || {};
+    var bandText = detail.wip_target_min === null || detail.wip_target_max === null
+      ? 'Taratura non configurata'
+      : detail.wip_target_min + '–' + detail.wip_target_max + ' lavori';
+    dashboardV5RenderFlowDetail_(recent, detail, bandText);
+
+    var diagnostic = ((dashboard.diagnostics || {}).summary || {});
+    var suggestion = ((dashboard.diagnostics || {}).calibration_suggestion || {});
+    var little = ((dashboard.diagnostics || {}).little_wip || {});
+    var active = ((dashboard.capacity || {}).active_flow || {});
+    var observed = ((dashboard.capacity || {}).observed || {});
+    var calibration = flow.calibration || {};
+    var reliableDate = suggestion.history_reliable_from
+      ? dashboardV7LocalDate_(suggestion.history_reliable_from) : 'Non configurato';
+    renderDl('v7-config-detail', {
+      'Finestra di osservazione': dashboardV3Text_(recent.window_weeks, ' settimane ISO complete'),
+      'Storico affidabile da': reliableDate,
+      'Fascia WIP configurata': bandText,
+      'Riferimento consegne': dashboardV3Text_(calibration.reference_points_per_week, ' punti/settimana') +
+        ' · ' + dashboardV3Text_(calibration.reference_completions_per_week, ' completamenti/settimana'),
+      'Soglia di rallentamento': dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')
+    });
+    renderDl('v7-capacity-detail', {
+      'Flusso attivo osservato': dashboardV3Text_(active.points_per_week, ' punti/settimana'),
+      'Ritmo di consegna': dashboardV3Text_(observed.rolling_capacity_points_per_week, ' punti/settimana'),
+      'Rientri negli ingressi WIP': rework.rework_share === null || rework.rework_share === undefined
+        ? 'Dato non ancora disponibile' : dashboardV3Text_(100 * rework.rework_share, '%')
+    });
+    document.getElementById('v7-capacity-note').hidden = !dashboardV7ShouldShowCapacityNote_(
+      active.points_per_week_exact, observed.rolling_capacity_points_per_week_exact);
+    renderDl('v7-suggestion-detail', {
+      'Capacità attiva stimata': dashboardV3Text_(suggestion.suggested_active_flow_points_per_week, ' punti/settimana'),
+      'WIP di riferimento suggerito': dashboardV3Text_(little.little_wip_jobs, ' lavori') +
+        ' · ' + dashboardV3Text_(little.little_wip_points, ' punti'),
+      'Fascia WIP configurata': bandText
+    });
+    renderDl('v7-coverage-detail', {
+      'Settimane complete affidabili': dashboardV3Text_(suggestion.complete_reliable_weeks),
+      'Finestre valide': dashboardV3Text_(suggestion.valid_window_count),
+      'Intervallo osservato': suggestion.observed_min_points_per_week === null || suggestion.observed_min_points_per_week === undefined
+        ? 'Dato non ancora disponibile' : dashboardV3Text_(suggestion.observed_min_points_per_week) + '–' +
+          dashboardV3Text_(suggestion.observed_max_points_per_week, ' punti/settimana'),
+      'Periodo coperto': suggestion.covered_from
+        ? dashboardV7LocalDate_(suggestion.covered_from) + ' – ' + dashboardV7LocalDate_(suggestion.covered_until)
+        : 'Dato non ancora disponibile',
+      'Permanenza media nel WIP': dashboardV3Text_(little.mean_wip_episode_duration_weeks, ' settimane'),
+      'Permanenza ponderata per punti': dashboardV3Text_(little.weighted_mean_wip_episode_duration_weeks, ' settimane'),
+      'Episodi WIP utilizzati': dashboardV3Text_(little.sample_size),
+      'Consegne osservate': dashboardV3Text_(observed.sample_size),
+      'Inizio storico affidabile': reliableDate
+    });
+    var timingDiagnostic = ((dashboard.diagnostics || {}).timing || {});
+    var cfdCheck = diagnostic.last_cfd_bucket || {};
+    document.getElementById('v3-diagnostics-message').textContent = diagnostic.scope_note || 'Riepilogo dei controlli implementati.';
+    renderDl('v3-diagnostics-detail', {
+      'Identità CFD ultimo bucket': dashboardV3Text_(cfdCheck.identities_verified) + '/' + dashboardV3Text_(cfdCheck.identities_checked) + ' verificate · ' + dashboardV3Text_(cfdCheck.identities_violated) + ' violate',
+      'Job senza stato osservato': dashboardV3Text_(diagnostic.jobs_without_observed_state),
+      'Log non parsabili': dashboardV3Text_(diagnostic.unparsable_logs),
+      'Colonne orfane': dashboardV3Text_(diagnostic.orphan_columns),
+      'Visite senza job corrispondente': dashboardV3Text_(diagnostic.visits_without_matching_job),
+      'Timestamp ultimo dato': diagnostic.latest_data_ts ? formatItalianDate(diagnostic.latest_data_ts) : 'Dato non disponibile',
+      'Metodo dei tempi osservati': timingDiagnostic.interval_method
+        ? 'Dal primo ingresso operativo alla consegna; attese e rientri intermedi non azzerano il tempo.' : 'Dato non disponibile',
+      'Intervalli tempi esclusi': dashboardV3Text_((timingDiagnostic.excluded_intervals || []).length),
+      'Stima teorica': timingDiagnostic.theoretical_reference || 'Dato non disponibile'
+    });
+    document.getElementById('v3-history-message').textContent = ((dashboard.history || {}).comparison_quality === 'insufficient')
+      ? 'Storico ancora insufficiente per un confronto affidabile tra anni.' : '';
+    var performance = dashboard.performance || {};
+    renderDl('v3-performance-detail', {
+      'Tempo di calcolo del backend': dashboardV3Text_(performance.backend_calculation_ms, ' ms'),
+      'Richieste per il caricamento': dashboardV3Text_(performance.backend_requests_for_dashboard)
+    });
+    drawDashboardV3Flow_(dashboard, state.dashboardV3ChartUnit);
+  }
+
+  function dashboardV5DateKey_(instant) {
+    return new Date(instant).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+  }
+
+  function dashboardV5InitializeNavigation_(dashboard) {
+    if (state.dashboardV5NavigationReady) { return; }
+    var generatedKey = dashboardV5DateKey_(dashboard.generated_at || new Date());
+    var generatedYear = generatedKey.slice(0, 4);
+    document.getElementById('v3-cfd-month').value = generatedKey.slice(0, 7);
+    document.getElementById('v3-cfd-from').value = generatedKey;
+    document.getElementById('v3-cfd-to').value = generatedKey;
+    var comparisonStart = new Date(generatedKey + 'T00:00:00Z'); comparisonStart.setUTCDate(comparisonStart.getUTCDate() - 56);
+    document.getElementById('v3-cfd-comparison-from').value = comparisonStart.toISOString().slice(0, 10);
+    document.getElementById('v3-cfd-comparison-to').value = generatedKey;
+    document.getElementById('v3-cfd-quarter').value = String(Math.floor((Number(generatedKey.slice(5, 7)) - 1) / 3) + 1);
+    var yearSelect = document.getElementById('v3-cfd-year');
+    var years = (((dashboard || {}).history || {}).available_years || []).slice();
+    if (years.indexOf(Number(generatedYear)) < 0) { years.push(Number(generatedYear)); }
+    years.sort().forEach(function(year) {
+      var option = document.createElement('option'); option.value = String(year); option.textContent = String(year);
+      yearSelect.appendChild(option);
+    });
+    yearSelect.value = generatedYear;
+    state.dashboardV5NavigationReady = true;
+    dashboardV5UpdateNavigationVisibility_();
+  }
+
+  function dashboardV5UpdateNavigationVisibility_() {
+    var period = document.getElementById('v3-cfd-period').value;
+    document.getElementById('v3-cfd-month-wrap').hidden = period !== 'month';
+    document.getElementById('v3-cfd-quarter-wrap').hidden = period !== 'quarter';
+    document.getElementById('v3-cfd-year-wrap').hidden = ['quarter', 'year'].indexOf(period) < 0;
+    document.getElementById('v3-cfd-from-wrap').hidden = period !== 'custom';
+    document.getElementById('v3-cfd-to-wrap').hidden = period !== 'custom';
+    var customComparison = document.getElementById('v3-cfd-comparison').value === 'custom';
+    document.getElementById('v3-cfd-comparison-from-wrap').hidden = !customComparison;
+    document.getElementById('v3-cfd-comparison-to-wrap').hidden = !customComparison;
+  }
+
+  function dashboardV5CfdRows_(dashboard) {
+    var history = (dashboard || {}).history || {};
+    var resolution = document.getElementById('v3-cfd-resolution').value;
+    var rows = (resolution === 'day' ? history.daily : resolution === 'month' ? history.monthly : history.weekly) || [];
+    var period = document.getElementById('v3-cfd-period').value;
+    var generatedKey = dashboardV5DateKey_(dashboard.generated_at || new Date());
+    var end = new Date(generatedKey + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 1);
+    var start = new Date(end);
+    if (period === '8w') { start.setUTCDate(start.getUTCDate() - 56); }
+    else if (/^\d+m$/.test(period)) { start.setUTCMonth(start.getUTCMonth() - Number(period.slice(0, -1))); }
+    else if (period === 'current_year') { start = new Date(generatedKey.slice(0, 4) + '-01-01T00:00:00Z'); }
+    else if (period === 'month') {
+      var month = document.getElementById('v3-cfd-month').value || generatedKey.slice(0, 7);
+      start = new Date(month + '-01T00:00:00Z'); end = new Date(start); end.setUTCMonth(end.getUTCMonth() + 1);
+    } else if (period === 'quarter') {
+      var quarterYear = Number(document.getElementById('v3-cfd-year').value || generatedKey.slice(0, 4));
+      var quarter = Number(document.getElementById('v3-cfd-quarter').value || 1);
+      start = new Date(Date.UTC(quarterYear, (quarter - 1) * 3, 1)); end = new Date(Date.UTC(quarterYear, quarter * 3, 1));
+    } else if (period === 'year') {
+      var year = document.getElementById('v3-cfd-year').value || generatedKey.slice(0, 4);
+      start = new Date(year + '-01-01T00:00:00Z'); end = new Date((Number(year) + 1) + '-01-01T00:00:00Z');
+    } else if (period === 'custom') {
+      var from = document.getElementById('v3-cfd-from').value;
+      var to = document.getElementById('v3-cfd-to').value;
+      if (!from || !to || from > to) { return []; }
+      start = new Date(from + 'T00:00:00Z'); end = new Date(to + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 1);
+    }
+    var selected = rows.filter(function(row) {
+      return Date.parse(row.period_end) > start.getTime() && Date.parse(row.period_start) < end.getTime();
+    });
+    return selected.some(function(row) { return row.has_data !== false; }) ? selected : [];
+  }
+
+  function dashboardV5ComparisonRows_(dashboard, primaryRows) {
+    var comparison = document.getElementById('v3-cfd-comparison').value;
+    if (comparison === 'none' || !primaryRows.length) { return []; }
+    var history = (dashboard || {}).history || {};
+    var resolution = document.getElementById('v3-cfd-resolution').value;
+    var rows = (resolution === 'day' ? history.daily : resolution === 'month' ? history.monthly : history.weekly) || [];
+    var primaryStart = Date.parse(primaryRows[0].period_start);
+    var primaryEnd = Date.parse(primaryRows[primaryRows.length - 1].period_end);
+    var start, end;
+    if (comparison === 'previous') {
+      var duration = primaryEnd - primaryStart; start = primaryStart - duration; end = primaryStart;
+    } else if (comparison === 'previous_year') {
+      start = new Date(primaryStart); end = new Date(primaryEnd);
+      start.setUTCFullYear(start.getUTCFullYear() - 1); end.setUTCFullYear(end.getUTCFullYear() - 1);
+      start = start.getTime(); end = end.getTime();
+    } else {
+      var from = document.getElementById('v3-cfd-comparison-from').value;
+      var to = document.getElementById('v3-cfd-comparison-to').value;
+      if (!from || !to || from > to) { return []; }
+      start = Date.parse(from + 'T00:00:00Z'); end = Date.parse(to + 'T00:00:00Z') + 86400000;
+    }
+    var selected = rows.filter(function(row) {
+      return Date.parse(row.period_end) > start && Date.parse(row.period_start) < end;
+    });
+    return selected.some(function(row) { return row.has_data !== false; }) ? selected : [];
+  }
+
+  function dashboardV5WindowedRows_(rows) {
+    var windowRange = state.dashboardV5ChartWindow;
+    if (!windowRange) { return { rows: rows, start: 0 }; }
+    var start = Math.max(0, Math.min(rows.length - 1, windowRange.start));
+    var end = Math.max(start + 1, Math.min(rows.length, windowRange.end));
+    state.dashboardV5ChartWindow = { start: start, end: end };
+    return { rows: rows.slice(start, end), start: start };
+  }
+
+  function dashboardV5FinishRange_(first, last) {
+    var canvas = document.getElementById('v3-flow-chart');
+    var offset = canvas._v3ChartWindowStart || 0;
+    state.dashboardV5ChartWindow = { start: offset + Math.min(first, last), end: offset + Math.max(first, last) + 1 };
+    state.dashboardV5SelectingRange = false;
+    state.dashboardV5RangeStart = null;
+    var button = document.getElementById('v3-cfd-select-range');
+    button.classList.remove('active'); button.setAttribute('aria-pressed', 'false');
+    drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+  }
+
+  function dashboardV5ZoomChart_(factor) {
+    var canvas = document.getElementById('v3-flow-chart');
+    var rows = canvas._v3ChartBaseRows || [];
+    if (rows.length < 2) { return; }
+    var current = state.dashboardV5ChartWindow || { start: 0, end: rows.length };
+    var currentLength = current.end - current.start;
+    var nextLength = Math.max(2, Math.min(rows.length, Math.round(currentLength * factor)));
+    var center = (current.start + current.end) / 2;
+    var start = Math.max(0, Math.min(rows.length - nextLength, Math.round(center - nextLength / 2)));
+    state.dashboardV5ChartWindow = nextLength === rows.length ? null : { start: start, end: start + nextLength };
+    drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+  }
+
+  function dashboardV5PanChart_(direction) {
+    var canvas = document.getElementById('v3-flow-chart');
+    var rows = canvas._v3ChartBaseRows || [];
+    var current = state.dashboardV5ChartWindow;
+    if (!current || !rows.length) { return; }
+    var length = current.end - current.start;
+    var shift = Math.max(1, Math.round(length / 4)) * direction;
+    var start = Math.max(0, Math.min(rows.length - length, current.start + shift));
+    state.dashboardV5ChartWindow = { start: start, end: start + length };
+    drawDashboardV3Flow_(state.dashboardV3, state.dashboardV3ChartUnit);
+  }
+
+  function dashboardV5DrawComparison_(rows, unit, maximum, selectedIndex, primaryLength) {
+    var panel = document.getElementById('v3-cfd-comparison-panel');
+    var canvas = document.getElementById('v3-flow-comparison-chart');
+    var empty = document.getElementById('v3-flow-comparison-empty');
+    var selection = document.getElementById('v3-flow-comparison-selection');
+    if (!rows.length) {
+      canvas.hidden = true; empty.hidden = false; selection.textContent = '';
+      canvas._v3ChartRows = [];
+      return;
+    }
+    canvas.hidden = false; empty.hidden = true;
+    var dpr = window.devicePixelRatio || 1;
+    var width = Math.max(620, canvas.parentElement.clientWidth || 620), height = 330;
+    canvas.width = width * dpr; canvas.height = height * dpr;
+    canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
+    var ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+    var pad = { left: 48, right: 18, top: 18 }, plotBottom = 270;
+    function x(index) { return pad.left + index * (width - pad.left - pad.right) / Math.max(1, rows.length - 1); }
+    function y(value) { return pad.top + (maximum - Number(value || 0)) * (plotBottom - pad.top) / maximum; }
+    ctx.clearRect(0, 0, width, height); ctx.strokeStyle = '#d9dee5'; ctx.fillStyle = '#667085'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+    for (var tick = 0; tick <= 4; tick++) {
+      var value = maximum * tick / 4, py = y(value);
+      ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(width - pad.right, py); ctx.stroke();
+      ctx.fillText(Math.round(value).toLocaleString('it-IT'), pad.left - 8, py + 4);
+    }
+    function band(lower, upper, color, key) {
+      ctx.beginPath();
+      rows.forEach(function(row, index) { var b = row.boundaries[unit]; if (!index) { ctx.moveTo(x(index), y(b[upper])); } else { ctx.lineTo(x(index), y(b[upper])); } });
+      for (var i = rows.length - 1; i >= 0; i--) { var b = rows[i].boundaries[unit]; ctx.lineTo(x(i), lower ? y(b[lower]) : y(0)); }
+      ctx.closePath(); ctx.fillStyle = color; ctx.globalAlpha = state.dashboardV5FocusedSeries && state.dashboardV5FocusedSeries !== key ? 0.12 : 1;
+      ctx.fill(); ctx.globalAlpha = 1;
+    }
+    band(null, 'completed_boundary', '#d9eee0', 'completed');
+    band('completed_boundary', 'waiting_boundary', '#f5c968', 'waiting');
+    band('waiting_boundary', 'wip_rework_boundary', '#c94b4b', 'wipRework');
+    band('wip_rework_boundary', 'wip_new_boundary', '#4f86b5', 'wipNew');
+    band('wip_new_boundary', 'future_work_boundary', '#a9bed2', 'future');
+    if (rows.length > 1) {
+      var first = rows[0].boundaries[unit], last = rows[rows.length - 1].boundaries[unit];
+      function rate(enabled, key, color) {
+        if (!enabled) { return; }
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash([8, 5]); ctx.beginPath();
+        ctx.moveTo(x(0), y(first[key])); ctx.lineTo(x(rows.length - 1), y(last[key])); ctx.stroke(); ctx.setLineDash([]);
+      }
+      rate(state.dashboardV5EntryRate, 'future_work_boundary', '#1f527a');
+      rate(state.dashboardV5CompletionRate, 'completed_boundary', '#276749');
+    }
+    ctx.fillStyle = '#667085'; ctx.textAlign = 'center';
+    var labelEvery = Math.max(1, Math.ceil(rows.length / 6));
+    rows.forEach(function(row, index) {
+      if (index % labelEvery !== 0 && index !== rows.length - 1) { return; }
+      ctx.fillText(new Date(row.sampled_at).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }), x(index), height - 16);
+    });
+    var comparisonIndex = selectedIndex === null || selectedIndex === undefined ? null :
+      Math.round(selectedIndex * Math.max(0, rows.length - 1) / Math.max(1, primaryLength - 1));
+    if (comparisonIndex !== null && rows[comparisonIndex]) {
+      ctx.strokeStyle = '#101828'; ctx.setLineDash([4, 3]); ctx.beginPath();
+      ctx.moveTo(x(comparisonIndex), pad.top); ctx.lineTo(x(comparisonIndex), plotBottom); ctx.stroke(); ctx.setLineDash([]);
+      var row = rows[comparisonIndex], b = row.boundaries[unit];
+      selection.textContent = new Date(row.sampled_at).toLocaleDateString('it-IT') + ' · Totale ' +
+        dashboardV3Text_(b.future_work_boundary) + ' · WIP ' + dashboardV3Text_(row['wip_stock_' + unit]) +
+        ' · Nuovi ingressi ' + dashboardV3Text_(row.new_work_jobs) + ' · Rientri ' +
+        dashboardV3Text_(row.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(row.completed_visits);
+    } else { selection.textContent = 'Selezione sincronizzata con il periodo principale.'; }
+    canvas._v3ChartGeometry = { width: width, left: pad.left, right: width - pad.right, rows: rows.length };
+    canvas._v3ChartRows = rows;
+  }
+
+  // Stessa interpolazione di dashboardV5EquivalentTimeAtQuota_ sul backend.
+  // Legge soltanto le boundary gia' consegnate: nessuno stock o cumulata viene derivato qui.
+  function dashboardV5EquivalentTimeAtQuota_(rows, entryIndex, unit, requestedQuota) {
+    var row = rows[entryIndex];
+    var maximum = Number(row.boundaries[unit].future_work_boundary || 0);
+    var quota = Math.min(maximum, Math.max(0, Number(requestedQuota)));
+    var completedAtEntry = Number(row.boundaries[unit].completed_boundary || 0);
+    if (!(quota > completedAtEntry)) {
+      return { quota: quota, entry_at: row.sampled_at, exit_at: row.sampled_at,
+        duration_calendar_days: 0, quality: 'same_bucket' };
+    }
+    var exitIndex = entryIndex;
+    while (exitIndex < rows.length && Number(rows[exitIndex].boundaries[unit].completed_boundary || 0) < quota) { exitIndex++; }
+    if (exitIndex >= rows.length) {
+      return { quota: quota, entry_at: row.sampled_at, exit_at: null,
+        duration_calendar_days: null, quality: 'completion_not_yet_observed' };
+    }
+    var exitAt = Date.parse(rows[exitIndex].sampled_at);
+    if (exitIndex > 0) {
+      var previous = rows[exitIndex - 1];
+      var low = Number(previous.boundaries[unit].completed_boundary || 0);
+      var high = Number(rows[exitIndex].boundaries[unit].completed_boundary || 0);
+      if (high > low && quota > low) {
+        exitAt = Date.parse(previous.sampled_at) + (quota - low) / (high - low) *
+          (Date.parse(rows[exitIndex].sampled_at) - Date.parse(previous.sampled_at));
+      }
+    }
+    var entryAt = Date.parse(row.sampled_at);
+    return { quota: quota, entry_at: row.sampled_at, exit_at: new Date(exitAt).toISOString(),
+      duration_calendar_days: Math.round(Math.max(0, exitAt - entryAt) / 86400000 * 100) / 100,
+      quality: 'linear_interpolation_between_backend_buckets' };
+  }
+
+  function drawDashboardV3Flow_(dashboard, unit) {
+    var canvas = document.getElementById('v3-flow-chart');
+    var empty = document.getElementById('v3-flow-chart-empty');
+    var selection = document.getElementById('v3-flow-selection');
+    var measureResult = document.getElementById('v3-cfd-measure-result');
+    var rateResult = document.getElementById('v3-cfd-rate-result');
+    var resolution = document.getElementById('v3-cfd-resolution').value;
+    var resolutionLabel = resolution === 'day' ? 'giorno' : resolution === 'month' ? 'mese' : 'settimana';
+    var resolutionPrompt = resolution === 'week' ? 'una settimana' : 'un ' + resolutionLabel;
+    var baseRows = dashboardV5CfdRows_(dashboard || {});
+    canvas._v3ChartBaseRows = baseRows;
+    var comparisonMode = document.getElementById('v3-cfd-comparison').value;
+    var comparisonBaseRows = dashboardV5ComparisonRows_(dashboard || {}, baseRows);
+    var windowed = dashboardV5WindowedRows_(baseRows);
+    var rows = windowed.rows;
+    var comparisonRows = comparisonBaseRows;
+    if (state.dashboardV5ChartWindow && comparisonRows.length) {
+      comparisonRows = comparisonRows.slice(state.dashboardV5ChartWindow.start, state.dashboardV5ChartWindow.end);
+    }
+    var comparing = comparisonMode !== 'none';
+    document.getElementById('v3-cfd-charts').classList.toggle('comparing', comparing);
+    document.getElementById('v3-cfd-comparison-panel').hidden = !comparing;
+    document.getElementById('v3-cfd-primary-title').hidden = !comparing;
+    if (!rows.length) {
+      canvas.hidden = true;
+      canvas._v3ChartRows = [];
+      empty.hidden = false;
+      empty.textContent = 'Dati non ancora disponibili per il periodo selezionato.';
+      selection.textContent = '';
+      measureResult.hidden = true;
+      rateResult.hidden = true;
+      return;
+    }
+    canvas.hidden = false;
+    canvas.setAttribute('aria-label', 'Andamento del lavoro nel tempo; usa freccia sinistra e destra per leggere ' +
+      resolutionPrompt + (state.dashboardV5Measuring ? '; freccia su e giù per cambiare la quota, Inizio e Fine per i limiti' : ''));
+    empty.hidden = true;
+    var dpr = window.devicePixelRatio || 1;
+    var width = Math.max(620, canvas.parentElement.clientWidth || 620);
+    var height = 330;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    var pad = { left: 48, right: 18, top: 18 };
+    var plotBottom = 270;
+    var keys = ['completed_boundary', 'waiting_boundary', 'wip_rework_boundary', 'wip_new_boundary', 'future_work_boundary'];
+    var maximum = Math.max.apply(null, rows.map(function(row) {
+      return Number((((row.boundaries || {})[unit] || {}).future_work_boundary) || 0);
+    }).concat(comparisonRows.map(function(row) {
+      return Number((((row.boundaries || {})[unit] || {}).future_work_boundary) || 0);
+    })));
+    if (!(maximum > 0)) { maximum = 1; }
+    function x(index) { return pad.left + index * (width - pad.left - pad.right) / Math.max(1, rows.length - 1); }
+    function y(value) { return pad.top + (maximum - Number(value || 0)) * (plotBottom - pad.top) / maximum; }
+    ctx.clearRect(0, 0, width, height);
+    ctx.strokeStyle = '#d9dee5';
+    ctx.fillStyle = '#667085';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'right';
+    for (var tick = 0; tick <= 4; tick++) {
+      var value = maximum * tick / 4;
+      var py = y(value);
+      ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(width - pad.right, py); ctx.stroke();
+      ctx.fillText(Math.round(value).toLocaleString('it-IT'), pad.left - 8, py + 4);
+    }
+    function drawBand(lowerKey, upperKey, color, seriesKey) {
+      ctx.beginPath();
+      rows.forEach(function(row, index) { var b = row.boundaries[unit]; var upper = b[upperKey]; if (!index) { ctx.moveTo(x(index), y(upper)); } else { ctx.lineTo(x(index), y(upper)); } });
+      for (var index = rows.length - 1; index >= 0; index--) {
+        var boundary = rows[index].boundaries[unit];
+        ctx.lineTo(x(index), lowerKey ? y(boundary[lowerKey]) : y(0));
+      }
+      ctx.closePath(); ctx.fillStyle = color;
+      ctx.globalAlpha = state.dashboardV5FocusedSeries && state.dashboardV5FocusedSeries !== seriesKey ? 0.12 : 1;
+      ctx.fill(); ctx.globalAlpha = 1;
+    }
+    drawBand(null, keys[0], '#d9eee0', 'completed');
+    drawBand(keys[0], keys[1], '#f5c968', 'waiting');
+    drawBand(keys[1], keys[2], '#c94b4b', 'wipRework');
+    drawBand(keys[2], keys[3], '#4f86b5', 'wipNew');
+    drawBand(keys[3], keys[4], '#a9bed2', 'future');
+
+    var elapsedWeeks = rows.length > 1 ?
+      (Date.parse(rows[rows.length - 1].sampled_at) - Date.parse(rows[0].sampled_at)) / (7 * 86400000) : 0;
+    var firstBoundaries = rows[0].boundaries[unit];
+    var lastBoundaries = rows[rows.length - 1].boundaries[unit];
+    var entryRate = elapsedWeeks > 0 ?
+      (Number(lastBoundaries.future_work_boundary || 0) - Number(firstBoundaries.future_work_boundary || 0)) / elapsedWeeks : null;
+    var completionRate = elapsedWeeks > 0 ?
+      (Number(lastBoundaries.completed_boundary || 0) - Number(firstBoundaries.completed_boundary || 0)) / elapsedWeeks : null;
+    function drawRateLine(enabled, key, color) {
+      if (!enabled || rows.length < 2) { return; }
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash([8, 5]);
+      ctx.beginPath(); ctx.moveTo(x(0), y(firstBoundaries[key]));
+      ctx.lineTo(x(rows.length - 1), y(lastBoundaries[key])); ctx.stroke(); ctx.setLineDash([]);
+    }
+    drawRateLine(state.dashboardV5EntryRate, 'future_work_boundary', '#1f527a');
+    drawRateLine(state.dashboardV5CompletionRate, 'completed_boundary', '#276749');
+    if (state.dashboardV5EntryRate || state.dashboardV5CompletionRate) {
+      var rateUnit = unit === 'jobs' ? ' lavori/settimana' : ' punti/settimana';
+      var parts = [];
+      if (state.dashboardV5EntryRate) { parts.push('Tasso di ingresso ' + dashboardV3Text_(Math.round(entryRate * 100) / 100, rateUnit)); }
+      if (state.dashboardV5CompletionRate) { parts.push('Tasso di completamento ' + dashboardV3Text_(Math.round(completionRate * 100) / 100, rateUnit)); }
+      rateResult.hidden = false; rateResult.textContent = parts.join(' · ');
+    } else { rateResult.hidden = true; rateResult.textContent = ''; }
+
+    ctx.fillStyle = '#667085';
+    ctx.textAlign = 'center';
+    var labelEvery = Math.max(1, Math.ceil(rows.length / 6));
+    rows.forEach(function(row, index) {
+      if (index % labelEvery !== 0 && index !== rows.length - 1) { return; }
+      var date = new Date(row.sampled_at || row.period_end);
+      ctx.fillText(date.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }), x(index), height - 16);
+    });
+
+    canvas._v3ChartGeometry = { width: width, height: height, left: pad.left, right: width - pad.right,
+      top: pad.top, bottom: plotBottom, maximum: maximum, rows: rows.length };
+    canvas._v3ChartRows = rows;
+    canvas._v3ChartWindowStart = windowed.start;
+    var selectedIndex = state.dashboardV3ChartHoverIndex;
+    if (selectedIndex === null || selectedIndex === undefined) { selectedIndex = state.dashboardV3ChartSelectedIndex; }
+    if (comparing) { dashboardV5DrawComparison_(comparisonRows, unit, maximum, selectedIndex, rows.length); }
+    if (selectedIndex === null || selectedIndex === undefined || !rows[selectedIndex]) {
+      selection.textContent = 'Sposta il puntatore o tocca il grafico per leggere ' + resolutionPrompt + '.';
+      if (state.dashboardV5Measuring) {
+        measureResult.hidden = false;
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>Tocca o fai clic sul grafico: l’altezza sceglie la quota, la posizione orizzontale sceglie la data. Da tastiera: ←/→ cambia data, ↑/↓ cambia quota, Inizio/Fine sceglie un limite.';
+      } else { measureResult.hidden = true; }
+      return;
+    }
+    var selected = rows[selectedIndex];
+    var boundaries = selected.boundaries[unit];
+    var values = {
+      completed: Number(((selected.cumulative || {})['cum_completed_' + (unit === 'jobs' ? 'visits' : 'points')]) || 0),
+      waiting: Number(selected['waiting_stock_' + unit] || 0),
+      wipRework: Number(selected['wip_rework_' + unit] || 0),
+      wipNew: Number(selected['wip_new_' + unit] || 0),
+      wip: Number(selected['wip_stock_' + unit] || 0),
+      future: Number(selected['future_work_stock_' + unit] || 0),
+      total: Number(boundaries.future_work_boundary || 0),
+      cumulativeEntries: Number(((selected.cumulative || {})['cum_new_work_' + unit]) || 0),
+      cumulativeCompleted: Number(((selected.cumulative || {})['cum_completed_' + (unit === 'jobs' ? 'visits' : 'points')]) || 0)
+    };
+    var selectedDate = new Date(selected.sampled_at || selected.period_end);
+    var dateLabel = selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
+    selection.textContent = dateLabel + ' · Già acquisito ' + dashboardV3Text_(values.future) +
+      ' · WIP nuovo ' + dashboardV3Text_(values.wipNew) + ' · WIP rework ' + dashboardV3Text_(values.wipRework) +
+      ' · WIP totale ' + dashboardV3Text_(values.wip) + ' · In attesa ' + dashboardV3Text_(values.waiting) +
+      ' · Completato ' + dashboardV3Text_(values.completed) + ' · Totale ' + dashboardV3Text_(values.total) +
+      ' · Ingressi cumulativi ' + dashboardV3Text_(values.cumulativeEntries) +
+      ' · Completamenti cumulativi ' + dashboardV3Text_(values.cumulativeCompleted) +
+      ' · Nuovi ingressi ' + dashboardV3Text_(selected.new_work_jobs) + ' · Rientri ' +
+      dashboardV3Text_(selected.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(selected.completed_visits);
+
+    if (state.dashboardV5Measuring) {
+      var history = (dashboard || {}).history || {};
+      var allRows = (resolution === 'day' ? history.daily : resolution === 'month' ? history.monthly : history.weekly) || [];
+      var sourceIndex = allRows.indexOf(selected);
+      var hoverMeasure = state.dashboardV5MeasureHover;
+      var savedMeasure = (state.dashboardV5MeasureSelections || {})[unit];
+      var chosen = hoverMeasure && hoverMeasure.row === selected && hoverMeasure.unit === unit
+        ? hoverMeasure : savedMeasure && savedMeasure.row === selected ? savedMeasure : null;
+      var selectedQuota = chosen ? chosen.quota : Number(boundaries.future_work_boundary || 0);
+      var measure = sourceIndex >= 0
+        ? dashboardV5EquivalentTimeAtQuota_(allRows, sourceIndex, unit, selectedQuota) : {};
+      var quotaLabel = 'Quota selezionata: ' + dashboardV3Text_(measure.quota, unit === 'jobs' ? ' lavori' : ' punti');
+      measureResult.hidden = false;
+      if (measure.exit_at && measure.duration_calendar_days !== null && measure.duration_calendar_days !== undefined) {
+        var entryLabel = new Date(measure.entry_at).toLocaleDateString('it-IT');
+        var exitLabel = new Date(measure.exit_at).toLocaleDateString('it-IT');
+        var timing = (dashboard || {}).timing || {};
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>' +
+          escapeHtml(quotaLabel) + ' · Data ingresso equivalente: ' + escapeHtml(entryLabel) + ' · Data uscita equivalente: ' + escapeHtml(exitLabel) +
+          ' · Durata: ' + escapeHtml(dashboardV3Text_(measure.duration_calendar_days, ' giorni')) +
+          ' · P50 osservato: ' + escapeHtml(dashboardV3Text_(timing.lead_time_median_days, ' giorni')) +
+          ' · P80 osservato: ' + escapeHtml(dashboardV3Text_(timing.lead_time_p80_days, ' giorni'));
+        var exitTime = Date.parse(measure.exit_at);
+        var exitPosition = null;
+        for (var measureIndex = 0; measureIndex < rows.length; measureIndex++) {
+          if (Date.parse(rows[measureIndex].sampled_at) >= exitTime) { exitPosition = measureIndex; break; }
+        }
+        if (exitPosition !== null && exitPosition >= selectedIndex) {
+          ctx.strokeStyle = '#2f6b9a'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+          ctx.beginPath(); ctx.moveTo(x(selectedIndex), y(measure.quota));
+          ctx.lineTo(x(exitPosition), y(measure.quota)); ctx.stroke(); ctx.setLineDash([]);
+        }
+      } else {
+        measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>' + escapeHtml(quotaLabel) +
+          ' · Completamento equivalente non ancora osservato nello storico disponibile.';
+      }
+      ctx.fillStyle = '#2f6b9a'; ctx.beginPath(); ctx.arc(x(selectedIndex), y(measure.quota), 4, 0, Math.PI * 2); ctx.fill();
+    } else { measureResult.hidden = true; }
+    var crossX = x(selectedIndex);
+    ctx.strokeStyle = '#101828';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(crossX, pad.top); ctx.lineTo(crossX, plotBottom); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#101828';
+    ctx.beginPath(); ctx.arc(crossX, y(boundaries.future_work_boundary), 4, 0, Math.PI * 2); ctx.fill();
+
+    var tooltipLines = [dateLabel, 'Già acquisito  ' + dashboardV3Text_(values.future),
+      'WIP nuovo  ' + dashboardV3Text_(values.wipNew), 'WIP rework  ' + dashboardV3Text_(values.wipRework),
+      'WIP totale  ' + dashboardV3Text_(values.wip), 'In attesa  ' + dashboardV3Text_(values.waiting),
+      'Completato  ' + dashboardV3Text_(values.completed), 'Totale  ' + dashboardV3Text_(values.total)];
+    var tooltipWidth = 220;
+    var tooltipHeight = 164;
+    var tooltipX = crossX + 12;
+    if (tooltipX + tooltipWidth > width - pad.right) { tooltipX = crossX - tooltipWidth - 12; }
+    var tooltipY = 28;
+    ctx.fillStyle = 'rgba(255,255,255,.84)';
+    ctx.strokeStyle = '#98a2b3';
+    ctx.lineWidth = 1;
+    ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+    ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+    ctx.fillStyle = '#101828';
+    ctx.textAlign = 'left';
+    ctx.font = '12px sans-serif';
+    tooltipLines.forEach(function(line, lineIndex) {
+      if (lineIndex === 0) { ctx.font = 'bold 12px sans-serif'; }
+      else if (lineIndex === 1) { ctx.font = '12px sans-serif'; }
+      ctx.fillText(line, tooltipX + 10, tooltipY + 20 + lineIndex * 19);
+    });
+  }
+
+  function openDashboardV3Detail_(kind) {
+    var dashboard = state.dashboardV3 || {};
+    var rows = ((dashboard.details || {})[kind] || []);
+    var definitions = {
+      wip: { title: 'Lavori in corso', description: 'Lavori attivi ordinati dalla permanenza più lunga.', columns: [
+        ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['punti', 'Punti'], ['ingresso_lavoro_attivo', 'Ingresso nel lavoro attivo'], ['durata_episodio_giorni', 'Durata attuale (giorni)']] },
+      future_work: { title: 'Lavoro già acquisito', description: 'Lavori da programmare o pronti da avviare.', columns: [
+        ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['fase', 'Situazione'], ['punti', 'Punti'], ['anzianita_giorni', 'Anzianità (giorni)']] },
+      waiting: { title: 'Lavori in attesa', description: 'Lavori temporaneamente fermi che possono rientrare.', columns: [
+        ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['tipo_attesa', 'Motivo dell’attesa'], ['durata_giorni', 'Durata (giorni)']] },
+      resumed: { title: 'Rientri nel lavoro', description: 'Lavori già iniziati che sono usciti dal lavoro attivo e sono poi rientrati.', columns: [
+        ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['numero_rientro', 'Rientro n.'], ['stato_provenienza', 'Stato di provenienza'], ['data_uscita_precedente', 'Data uscita precedente'], ['data_ripresa', 'Data rientro']] },
+      timing: { title: 'Tempi per taglia', description: 'Distribuzione degli intervalli completi dall’ingresso nel lavoro alla consegna.', columns: [
+        ['taglia', 'Taglia'], ['mediana_giorni', 'Tempo tipico (giorni)'], ['p80_giorni', '8 pratiche su 10 entro (giorni)'], ['numero_casi', 'Casi'], ['qualita', 'Qualità']] },
+      recent_completions: { title: 'Completamenti del ritmo recente', description: 'Righe incluse nella finestra, esportabili per la riconciliazione esterna.', columns: [
+        ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['job_id', 'Job'], ['numero_visita', 'Numero visita'], ['consegna_ts', 'Consegna'], ['punti', 'Punti']] }
+    };
+    var definition = definitions[kind];
+    if (!definition) { return; }
+    document.getElementById('v3-detail-title').textContent = definition.title;
+    document.getElementById('v3-detail-description').textContent = definition.description;
+    document.getElementById('v3-detail-head').innerHTML = '<tr>' + definition.columns.map(function(column) { return '<th>' + escapeHtml(column[1]) + '</th>'; }).join('') + '</tr>';
+    document.getElementById('v3-detail-body').innerHTML = rows.map(function(row) {
+      return '<tr>' + definition.columns.map(function(column) {
+        var value = row[column[0]];
+        if (/_at$|ingresso_|uscita|ripresa/.test(column[0]) && value) { value = formatItalianDate(value); }
+        if (column[0] === 'qualita') { value = dashboardV4QualityLabel_(value); }
+        return '<td>' + escapeHtml(value === null || value === undefined || value === '' ? 'Dato non disponibile' : value) + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+    document.getElementById('v3-detail-empty').hidden = rows.length > 0;
+    document.querySelector('#v3-detail-dialog .table-scroll').hidden = rows.length === 0;
+    state.dashboardV3DetailExport = { filename: 'sigmaflow-' + kind + '.csv', columns: definition.columns, rows: rows };
+    document.getElementById('v3-detail-export').hidden = rows.length === 0;
+    document.getElementById('v3-detail-dialog').showModal();
   }
 
   function renderMetrics(metrics) {
+    // La risposta completa della vista legacy contiene ancora dashboardState
+    // per retrocompatibilita', ma non deve sovrascrivere tempo e stato della
+    // lettura V3 rapida gia' visibile.
+    if (metrics.dashboardState && !metrics.systemState) {
+      renderDashboardV3_(metrics.dashboardState);
+    }
     var system = metrics.systemState;
     if (!system) {
-      showError(new Error('La lettura operativa della dashboard non e disponibile. Aggiorna il deployment Apps Script.'));
+      if (!metrics.dashboardState) {
+        showError(new Error('La lettura operativa della dashboard non è disponibile. Aggiorna il deployment Apps Script.'));
+      }
       return;
     }
 

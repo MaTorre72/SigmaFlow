@@ -1,5 +1,108 @@
 # Metriche dashboard SigmaFlow
 
+## V5 — precisione home, lettura verticale e viste temporali
+
+I valori di presentazione nei riquadri principali sono meno precisi del
+contratto numerico: `committed_weeks` mostra al massimo una cifra decimale;
+`lead_time_median_days` e `lead_time_p80_days` sono arrotondati all'intero.
+Il dettaglio e la diagnostica conservano la precisione backend a due decimali.
+
+"Andamento del lavoro" usa le boundary settimanali del backend senza
+ricalcolare gli stock nel browser. La selezione puntuale espone lavoro già
+acquisito, WIP nuovo, WIP rework, WIP totale, in attesa, completato e totale;
+funziona con puntatore,
+tocco e frecce da tastiera. Sotto le bande, sullo stesso asse temporale, sono
+mostrati i conteggi settimanali `new_work_jobs`, `rework_wip_episodes` e
+`completed_visits` come Nuovi ingressi, Rientri e Consegne.
+
+Il WIP puntuale è classificato dal numero dell'episodio osservato: il primo è
+`wip_new_*`, i successivi sono `wip_rework_*`. La boundary totale V2 resta
+disponibile; nella pila il rework rosso è sotto il nuovo blu.
+
+`dashboardV2History_` espone `weekly`, `monthly`, `quarterly` e `annual_cfd`.
+Espone inoltre `daily` per la navigazione del CFD. La home consente 8
+settimane, 3/6/12 mesi, anno corrente, mese, trimestre, anno e Da/A alle
+risoluzioni giorno/settimana/mese; la scelta filtra bucket calcolati dal
+backend e non ricostruisce le metriche nel browser.
+
+Zoom, pan, reset e selezione di sottointervallo agiscono esclusivamente sulla
+finestra dei bucket visualizzati. Il tooltip legge gli stock e le cumulative
+dal contratto backend e aggiunge ingressi/completamenti cumulativi ai valori
+puntuali già disponibili.
+
+La legenda delle cinque bande può applicare un focus visivo: la serie scelta
+resta piena e le altre sono attenuate. La geometria dello stack non cambia;
+“Mostra tutte” azzera il focus.
+
+La modalità “Misura tempo” permette di scegliere data e quota cumulativa con
+le coordinate orizzontale e verticale del puntatore. La quota è vincolata fra
+zero e il bordo superiore degli ingressi della colonna selezionata, ed è
+sempre mostrata insieme a ingresso equivalente, uscita equivalente e durata.
+Da tastiera, le frecce orizzontali cambiano data, quelle verticali regolano
+la quota, mentre Inizio/Fine scelgono zero/massimo della colonna.
+L'incrocio usa i `completed_boundary` già prodotti dal backend, anche oltre
+il periodo momentaneamente visibile; il client applica la stessa
+interpolazione lineare del backend senza ricostruire stock o cumulative e
+senza round-trip durante l'interazione. `equivalent_time.jobs/points` resta
+nel contratto backend come esito per la quota massima. Un incrocio non ancora
+osservato resta nullo. P50 e P80 dei tempi effettivi conclusi sono mostrati
+accanto come confronto di plausibilità, non come misure equivalenti.
+
+Le rate lines opzionali mostrano la pendenza fra prima e ultima boundary del
+periodo visibile, normalizzata per la durata reale in settimane. Ingresso e
+completamento sono indipendenti e cambiano unità insieme al CFD.
+
+Nel dettaglio dello Stato del flusso, il ritmo di completamento osservato usa
+`capacity_window_weeks`: è una media mobile distinta dalla finestra
+`wip_trend_weeks` usata per serie e analisi WIP. Riferimento, osservato e
+campione sono presentati in colonne parallele per completamenti e punti; la
+soglia che determina lo stato resta espressa in punti/settimana.
+
+Lo zoom tramite rotella è disattivato sotto 900 px e sui dispositivi con
+puntatore coarse, così il canvas non interrompe lo scorrimento verticale della
+pagina. Il tooltip sovrapposto mostra soltanto stock, composizione e totale;
+cumulative e movimenti del bucket restano nel riepilogo testuale accessibile
+sotto il grafico.
+
+I confronti CFD possono usare il periodo precedente equivalente, lo stesso
+periodo dell'anno precedente o un intervallo Da/A dedicato. Il browser
+seleziona sempre bucket già calcolati dal backend; non ricostruisce stock,
+flussi o boundary. Il CFD principale e quello di confronto condividono unità,
+massimo dell'asse verticale, finestra di zoom/pan, focus e rate lines. La
+selezione è sincronizzata per posizione relativa, così serie di lunghezza
+diversa restano confrontabili senza forzare date artificialmente uguali.
+
+Le barre permanenti Nuovi ingressi/Rientri/Consegne della prima versione non
+fanno più parte del CFD. Questi movimenti rimangono leggibili nel tooltip del
+bucket e nel riepilogo accessibile del confronto. La card Rientri è l'unico
+riepilogo aggregato della finestra recente, evitando una seconda lettura
+grafica dello stesso fenomeno.
+I bucket trimestrali sono calendariali (`quarter` 1–4), attraversano il cambio
+anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
+stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta
+`has_data: false` e il relativo `empty_state_message` esplicito.
+
+## Trasparenza V4 dello Stato del flusso
+
+La fascia mostrata in UI si chiama **Fascia centrale osservata**: quando non
+configurata e' il 25°–75° percentile (`linear_interpolation_p25_p75`) delle
+medie settimanali di WIP pesate per durata. L'export di taratura espone per
+ogni settimana `avg_wip_jobs`, copertura temporale, completamenti/punti e i
+flag `sufficiently_loaded`/`included_in_baseline`.
+
+Il ritmo recente usa la finestra `(generated_at - capacity_window_weeks,
+generated_at]`. Contratto e dettaglio espongono estremi ISO, timezone,
+completamenti, punti e settimane con almeno un completamento; il drill-down
+aggiunge `job_id`, numero visita, `consegna_ts` e punti. Qualita' del ritmo
+recente e qualita' della baseline storica sono distinte (`sufficient`,
+`partial`, `insufficient`). Il messaggio di stato combina separatamente il
+fatto sul WIP e quello sul ritmo, senza dedurre congestione.
+
+Il riepilogo diagnostico copre soltanto i controlli dichiarati: identita' CFD
+dell'ultimo bucket, job senza stato osservato, log non parsabili, colonne
+orfane, visite senza job e timestamp dell'ultimo dato. Uno zero non equivale
+a una certificazione generale del dataset.
+
 ## Principio
 
 La dashboard descrive lo stato osservato nel periodo configurato. Non produce ancora previsioni future.
@@ -69,6 +172,10 @@ R5 (2026-08-27) ha diviso quello che prima era un unico numero mescolato in tre 
 - **Lavori bloccati**: job in colonne con ruolo `stand_by`.
 
 ## Tempi
+
+- **Tempo tipico alla consegna (V5)**: mediana degli intervalli completi dal primo ingresso osservato in backlog/preparazione/WIP alla successiva entrata in `done`. Attese e rientri intermedi restano nello stesso intervallo; un nuovo ingresso operativo dopo `done` apre una nuova unità valida soltanto per questa misura.
+- **8 pratiche su 10 entro (V5)**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
+- La stima M/G/1 della vista legacy usa visite e tempi di servizio ed è una grandezza teorica diversa: non viene usata come sostituto del lead time osservato e non compare nella home.
 
 - **Tempo medio di lavorazione**: media del tempo di servizio (`consegna_ts - start_ts` sulla visita) sulle visite completate valide.
 - **Variabilita'**: rapporto tra varianza e quadrato della media dei tempi.
