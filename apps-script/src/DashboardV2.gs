@@ -450,6 +450,41 @@ function dashboardV2CompleteIsoWeeks_(now, count) {
   return dashboardV2CalendarWeeks_(now, count + 1).slice(0, count);
 }
 
+// Turnover del WIP: solo episodi davvero conclusi, mai consegne inferite o
+// movimenti interni WIP→WIP. Riusa gli episodi normalizzati V2.
+function dashboardV7ActiveFlow_(episodes, jobsById, weeks, windowWeeks) {
+  var weekly = weeks.map(function(week) {
+    var start = new Date(week.period_start);
+    var end = new Date(week.period_end);
+    var closed = episodes.filter(function(episode) {
+      if (!episode.closed_at) { return false; }
+      var at = dashboardV2Instant_(episode.closed_at);
+      return !isNaN(at.getTime()) && at >= start && at < end;
+    });
+    return {
+      period_start: week.period_start, period_end: week.period_end,
+      closed_wip_episodes: closed.length,
+      closed_wip_points: round_(closed.reduce(function(sum, episode) {
+        return sum + jobPoints_(jobsById[episode.job_id]);
+      }, 0))
+    };
+  });
+  var recent = weekly.slice(Math.max(0, weekly.length - windowWeeks));
+  var jobs = recent.reduce(function(sum, bucket) { return sum + bucket.closed_wip_episodes; }, 0);
+  var points = recent.reduce(function(sum, bucket) { return sum + bucket.closed_wip_points; }, 0);
+  return {
+    definition: 'closed_wip_episodes_in_complete_iso_weeks',
+    window_weeks: windowWeeks,
+    window_start: recent.length ? recent[0].period_start : null,
+    window_end: recent.length ? recent[recent.length - 1].period_end : null,
+    closed_wip_episodes: jobs,
+    closed_wip_points: round_(points),
+    jobs_per_week: recent.length === windowWeeks ? round_(jobs / windowWeeks) : null,
+    points_per_week: recent.length === windowWeeks ? round_(points / windowWeeks) : null,
+    weekly: weekly
+  };
+}
+
 function dashboardV2CalendarDaysBetween_(firstDay, now) {
   var firstCivil = new Date(dashboardV2WallClock_(firstDay).slice(0, 10) + 'T00:00:00Z');
   var lastCivil = new Date(dashboardV2WallClock_(now).slice(0, 10) + 'T00:00:00Z');
@@ -1220,6 +1255,10 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   var capacity = dashboardV2Capacity_(jobs, archivedJobs || [], visits, archivedVisits || [], config, now, currentWork.future_work_points, episodes);
   var firstCount = episodes.filter(function(e) { return e.wip_episode_number === 1; }).length;
   var allJobs = jobs.concat(archivedJobs || []);
+  if (capacity.configuration_quality === 'valid') {
+    capacity.active_flow = dashboardV7ActiveFlow_(episodes, indexBy_(allJobs, 'job_id'),
+      dashboardV2CompleteIsoWeeks_(now, Number(config.wip_trend_weeks)), Number(config.capacity_window_weeks));
+  }
   var flow = dashboardV2Flow_(normalized, episodes, allJobs, visits.concat(archivedVisits || []), config, now);
   var stockIndex = dashboardV2StockIndex_(normalized, allJobs);
   var cfd = dashboardV2CFD_(normalized, allJobs, flow, now, stockIndex);

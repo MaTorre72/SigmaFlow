@@ -315,6 +315,7 @@ function runAllTests() {
     testDashboardV2CommittedWeeksIsNullWhenCapacityIsInsufficient,
     testDashboardV2RejectsCapacityWindowLongerThanWipHistory,
     testDashboardV2WipEpisodeTransitions,
+    testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes,
     testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks,
     testDashboardV2FlowClassificationAndFromIndependence,
     testDashboardV2ISOCalendarAndDST,
@@ -5533,6 +5534,27 @@ function testDashboardV2WipEpisodeTransitions() {
     assertEquals_(null, episodes[episodes.length - 1].closed_at, 'episodio ancora WIP non chiuso da now o chiusura amministrativa');
     assertEquals_(original, JSON.stringify(job), 'nessuna mutazione della cronologia');
   });
+}
+
+function testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes() {
+  var now = new Date('2026-01-12T12:00:00+01:00');
+  var events = [
+    ['2026-01-05T09:00:00+01:00', 'wip'],
+    ['2026-01-05T10:00:00+01:00', 'wip'],
+    ['2026-01-06T09:00:00+01:00', 'waiting'],
+    ['2026-01-07T09:00:00+01:00', 'wip'],
+    ['2026-01-08T09:00:00+01:00', 'done'],
+    ['2026-01-09T09:00:00+01:00', 'wip'],
+    ['2026-01-10T09:00:00+01:00', 'prep']
+  ].map(function(row) { return { at: row[0], to_role: row[1] }; });
+  var episodes = dashboardV2WipEpisodes_([{ job_id: 'J', significant_events: events }], now);
+  var flow = dashboardV7ActiveFlow_(episodes, { J: { job_id: 'J', size_points: 4 } },
+    dashboardV2CompleteIsoWeeks_(now, 2), 1);
+  assertEquals_(3, episodes.length, 'WIP→WIP non apre ne chiude un episodio');
+  assertEquals_(3, flow.closed_wip_episodes, 'attesa, done e prep chiudono episodi');
+  assertEquals_(12, flow.closed_wip_points, 'taglia corrente contata a ogni uscita');
+  assertEquals_(3, flow.jobs_per_week, 'turnover recente in episodi/settimana');
+  assertEquals_(12, flow.points_per_week, 'turnover recente in punti/settimana');
 }
 
 function testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks() {
