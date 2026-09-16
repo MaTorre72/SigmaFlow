@@ -318,6 +318,7 @@ function runAllTests() {
     testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes,
     testDashboardV7CalibrationUsesReliableValidWindowsAndMedian,
     testDashboardV7ReliableHistoryExcludesRecentCapacityButPreservesHistory,
+    testDashboardV7LittleUsesEpisodeDurationsAndPointWeights,
     testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks,
     testDashboardV2FlowClassificationAndFromIndependence,
     testDashboardV2ISOCalendarAndDST,
@@ -5597,6 +5598,26 @@ function testDashboardV7ReliableHistoryExcludesRecentCapacityButPreservesHistory
   assertEquals_(0, state.diagnostics.calibration_suggestion.valid_window_count, 'storico non affidabile escluso dalla taratura');
   assertTrue_(state.flow.events.some(function(event) { return event.job_id === 'J'; }),
     'evento antecedente resta nella ricostruzione storica');
+}
+
+function testDashboardV7LittleUsesEpisodeDurationsAndPointWeights() {
+  var episodes = [
+    { job_id: 'A', opened_at: '2026-01-05T00:00:00Z', closed_at: '2026-01-12T00:00:00Z' },
+    { job_id: 'B', opened_at: '2026-01-05T00:00:00Z', closed_at: '2026-01-26T00:00:00Z' },
+    { job_id: 'C', opened_at: '2026-01-05T00:00:00Z', closed_at: null }
+  ];
+  var jobs = { A: { size_points: 2 }, B: { size_points: 6 }, C: { size_points: 100 } };
+  var flow = { jobs_per_week: 2, points_per_week: 8 };
+  var result = dashboardV7LittleWip_(episodes, jobs, flow, { history_reliable_from: '' });
+  assertEquals_(2, result.sample_size, 'solo episodi conclusi');
+  assertEquals_(1, result.excluded_open_episodes, 'episodi aperti esplicitamente segnalati');
+  assertEquals_(2, result.mean_wip_episode_duration_weeks, 'durata media in settimane');
+  assertEquals_(2.5, result.weighted_mean_wip_episode_duration_weeks, 'durata ponderata per i punti');
+  assertEquals_(4, result.little_wip_jobs, 'Little lavori = 2 × 2');
+  assertEquals_(20, result.little_wip_points, 'Little punti = 8 × 2,5');
+  var reliable = dashboardV7LittleWip_(episodes, jobs, flow, { history_reliable_from: '2026-01-12' });
+  assertEquals_(0, reliable.sample_size, 'episodi aperti prima dello storico affidabile esclusi');
+  assertEquals_(null, reliable.little_wip_jobs, 'nessuna durata inventata');
 }
 
 function testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks() {

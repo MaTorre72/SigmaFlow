@@ -556,6 +556,40 @@ function dashboardV7CalibrationSuggestion_(activeFlow, cfd, config) {
   };
 }
 
+function dashboardV7LittleWip_(episodes, jobsById, activeFlow, config) {
+  var reliableFrom = dashboardV7ReliableFrom_(config);
+  var used = episodes.map(function(episode) {
+    if (!episode.opened_at || !episode.closed_at) { return null; }
+    var opened = dashboardV2Instant_(episode.opened_at);
+    var closed = dashboardV2Instant_(episode.closed_at);
+    if (isNaN(opened.getTime()) || isNaN(closed.getTime()) || closed < opened ||
+      (reliableFrom && (isNaN(reliableFrom.getTime()) || opened < reliableFrom))) { return null; }
+    return { duration_weeks: (closed - opened) / (7 * 86400000),
+      points: jobPoints_(jobsById[episode.job_id]) };
+  }).filter(function(row) { return row !== null; });
+  var totalPoints = used.reduce(function(sum, row) { return sum + row.points; }, 0);
+  var mean = used.length ? used.reduce(function(sum, row) { return sum + row.duration_weeks; }, 0) / used.length : null;
+  var weighted = totalPoints > 0 ? used.reduce(function(sum, row) {
+    return sum + row.points * row.duration_weeks;
+  }, 0) / totalPoints : null;
+  var jobsRate = activeFlow && activeFlow.jobs_per_week;
+  var pointsRate = activeFlow && activeFlow.points_per_week;
+  // Bias noto: gli episodi ancora aperti (piu' spesso lunghi) sono esclusi;
+  // la stima Little e' quindi tendenzialmente ottimistica, non corretta qui.
+  return {
+    definition: 'closed_wip_episodes_only',
+    sample_size: used.length,
+    excluded_open_episodes: episodes.filter(function(episode) { return !episode.closed_at; }).length,
+    active_flow_jobs_per_week: jobsRate === undefined ? null : jobsRate,
+    active_flow_points_per_week: pointsRate === undefined ? null : pointsRate,
+    mean_wip_episode_duration_weeks: mean === null ? null : round_(mean),
+    weighted_mean_wip_episode_duration_weeks: weighted === null ? null : round_(weighted),
+    little_wip_jobs: mean === null || jobsRate === null || jobsRate === undefined ? null : round_(jobsRate * mean),
+    little_wip_points: weighted === null || pointsRate === null || pointsRate === undefined ? null : round_(pointsRate * weighted),
+    limitation: 'Escludere episodi WIP ancora aperti sottostima tendenzialmente durata e WIP suggerito.'
+  };
+}
+
 function dashboardV2CalendarDaysBetween_(firstDay, now) {
   var firstCivil = new Date(dashboardV2WallClock_(firstDay).slice(0, 10) + 'T00:00:00Z');
   var lastCivil = new Date(dashboardV2WallClock_(now).slice(0, 10) + 'T00:00:00Z');
@@ -1353,6 +1387,8 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   var diagnostic = dashboardV2DiagnosticContract_();
   diagnostic.diagnostics.summary = dashboardV4Diagnostics_(normalized, visits.concat(archivedVisits || []), allJobs, cfd);
   diagnostic.diagnostics.calibration_suggestion = calibrationSuggestion;
+  diagnostic.diagnostics.little_wip = dashboardV7LittleWip_(episodes,
+    indexBy_(allJobs, 'job_id'), capacity.active_flow, config);
   diagnostic.diagnostics.timing = {
     interval_method: 'first_operational_entry_to_next_done; intermediate_returns_do_not_reset',
     median_method: 'average_of_middle_values',

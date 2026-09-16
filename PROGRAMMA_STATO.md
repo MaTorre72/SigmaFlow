@@ -1,6 +1,21 @@
 # Stato SigmaFlow
 Aggiornato: 2026-09-16
 
+## Fase 7 — avanzamento metodologico (2026-09-16)
+
+Sottofasi 7A–7C completate in commit separati; la 7D introduce Little sul
+flusso di episodi WIP chiusi. **Limite metodologico noto:** gli episodi ancora
+aperti sono esclusi dalla durata media; quelli più lunghi hanno maggiore
+probabilità di essere ancora aperti, perciò il WIP suggerito risulta
+tendenzialmente sottostimato (ottimistico). Nessuna correzione del censoring è
+applicata in questa fase; il risultato è diagnostico e non modifica CONFIG.
+
+Audit §35: `flow_reference_points_per_week` e
+`flow_reference_completions_per_week` rappresentano entrambi il throughput di
+**consegna tecnica** (punti e completamenti). Il turnover WIP resta misura e
+suggerimento distinti, senza riferimento CONFIG approvato; non serve rinominare
+o dividere i due parametri esistenti e non è stata migrata la taratura vigente.
+
 ## V5 — Fase 5E riaperta e corretta su TEST (2026-09-16)
 
 Il collaudo umano reale di Marco ha riaperto la Fase 5E: l'aritmetica della
