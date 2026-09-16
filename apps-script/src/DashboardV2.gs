@@ -224,17 +224,16 @@ function dashboardV2WipEpisodes_(normalized, now) {
   return episodes;
 }
 
-// Bucket mobili consecutivi di 7 giorni, (inizio, fine], ancorati a now.
+// Settimane ISO complete del fuso applicativo; la corrente non entra nei KPI.
 // Le settimane senza aperture valgono zero e restano nella media.
-function dashboardV2Absorption_(episodes, jobsById, now, weeks, windowWeeks, minSamples) {
-  var duration = 7 * 86400000;
+function dashboardV2Absorption_(episodes, jobsById, buckets, windowWeeks, minSamples) {
   var weekly = [];
-  for (var i = 0; i < weeks; i++) {
-    var end = new Date(now.getTime() - (weeks - 1 - i) * duration);
-    var start = new Date(end.getTime() - duration);
+  for (var i = 0; i < buckets.length; i++) {
+    var start = new Date(buckets[i].period_start);
+    var end = new Date(buckets[i].period_end);
     var inWeek = episodes.filter(function(e) {
       var at = dashboardV2Instant_(e.opened_at);
-      return at > start && at <= end;
+      return at >= start && at < end;
     });
     var first = inWeek.filter(function(e) { return e.wip_episode_number === 1; });
     weekly.push({
@@ -298,11 +297,11 @@ function dashboardV3RecentRework_(capacity) {
   };
 }
 
-function dashboardV2CapacityMetric_(visits, jobsById, since, now, windowWeeks, minSamples) {
+function dashboardV2CapacityMetric_(visits, jobsById, since, until, windowWeeks, minSamples) {
   var eligible = visits.filter(function(visit) {
     if (!visit.consegna_ts) { return false; }
     var completedAt = dashboardV2Instant_(visit.consegna_ts);
-    return !isNaN(completedAt.getTime()) && completedAt > since && completedAt <= now;
+    return !isNaN(completedAt.getTime()) && completedAt >= since && completedAt < until;
   });
   var usable = eligible.filter(function(visit) { return Boolean(jobsById[visit.job_id]); });
   var sampleSize = usable.length;
@@ -324,7 +323,7 @@ function dashboardV2CapacityMetric_(visits, jobsById, since, now, windowWeeks, m
     sample_size: sampleSize,
     window_weeks: windowWeeks,
     window_start: since.toISOString(),
-    window_end: now.toISOString(),
+    window_end: until.toISOString(),
     timezone: SIGMAFLOW.TZ,
     completed_points: round_(points),
     weeks_with_completions: Object.keys(completionWeeks).length,
@@ -361,14 +360,17 @@ function dashboardV2Capacity_(jobs, archivedJobs, visits, archivedVisits, config
     };
   }
 
-  var since = new Date(now.getTime() - windowWeeks * 7 * 86400000);
+  var buckets = dashboardV2CompleteIsoWeeks_(now, trendWeeks);
+  var recent = buckets.slice(buckets.length - windowWeeks);
+  var since = new Date(recent[0].period_start);
+  var until = new Date(recent[recent.length - 1].period_end);
   var allJobs = jobs.concat(archivedJobs || []);
   var jobsById = indexBy_(allJobs, 'job_id');
   var allVisits = visits.concat(archivedVisits || []);
-  var observed = dashboardV2CapacityMetric_(allVisits, jobsById, since, now, windowWeeks, minSamples);
+  var observed = dashboardV2CapacityMetric_(allVisits, jobsById, since, until, windowWeeks, minSamples);
   // Decisione Marco: punti del job contati una sola volta, all'apertura
   // dell'episodio WIP 1. Riprese conteggiate senza replicare la taglia.
-  var weekly = dashboardV2Absorption_(episodes, jobsById, now, trendWeeks, windowWeeks, minSamples);
+  var weekly = dashboardV2Absorption_(episodes, jobsById, buckets, windowWeeks, minSamples);
   var firstCycle = weekly[weekly.length - 1];
   var newWorkPoints = firstCycle.new_work_capacity_points_per_week;
   var committedWeeks = newWorkPoints !== null && newWorkPoints > 0
@@ -385,7 +387,7 @@ function dashboardV2Capacity_(jobs, archivedJobs, visits, archivedVisits, config
       sample_size: firstCycle.sample_size,
       window_weeks: windowWeeks,
       first_cycle_definition: 'apertura del primo episodio WIP del job',
-      bucket_convention: 'rolling_7_days_start_exclusive_end_inclusive',
+      bucket_convention: 'complete_iso_week_start_inclusive_end_exclusive',
       weekly: weekly
     },
     committed_weeks: committedWeeks,
@@ -440,6 +442,12 @@ function dashboardV2CalendarWeeks_(now, count) {
     });
   }
   return buckets;
+}
+
+function dashboardV2CompleteIsoWeeks_(now, count) {
+  if (!isFinite(count) || count < 1 || Math.floor(count) !== count) { return []; }
+  // CalendarWeeks include la settimana corrente: chiedine una in piu' ed escludila.
+  return dashboardV2CalendarWeeks_(now, count + 1).slice(0, count);
 }
 
 function dashboardV2CalendarDaysBetween_(firstDay, now) {
@@ -1138,8 +1146,8 @@ function dashboardV3Details_(jobs, normalized, episodes, columnMap, now, capacit
     var job = jobs.filter(function(item) { return item.job_id === episode.job_id; })[0] || {};
     var openedAt = dashboardV2Instant_(episode.opened_at);
     var inRecentWindow = recentRework && recentRework.rework_window_start && recentRework.rework_window_end &&
-      openedAt > dashboardV2Instant_(recentRework.rework_window_start) &&
-      openedAt <= dashboardV2Instant_(recentRework.rework_window_end);
+      openedAt >= dashboardV2Instant_(recentRework.rework_window_start) &&
+      openedAt < dashboardV2Instant_(recentRework.rework_window_end);
     if (episode.wip_episode_number > 1 && inRecentWindow) {
       details.resumed.push({
         job_id: episode.job_id,

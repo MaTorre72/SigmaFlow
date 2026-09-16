@@ -2348,7 +2348,7 @@
     var root = document.getElementById('v3-flow-detail');
     var weeks = recent.window_weeks;
     var weeksText = weeks === null || weeks === undefined
-      ? 'finestra configurata' : 'ultime ' + dashboardV3Text_(weeks) + ' settimane';
+      ? 'finestra configurata' : 'ultime ' + dashboardV3Text_(weeks) + ' settimane ISO complete';
     var start = recent.window_start ? formatItalianDate(recent.window_start) : 'Dato non disponibile';
     var end = recent.window_end ? formatItalianDate(recent.window_end) : 'Dato non disponibile';
     var timezone = recent.timezone || 'timezone non disponibile';
@@ -2359,7 +2359,7 @@
       '</dl>' +
       '<section class="v3-flow-throughput" aria-labelledby="v3-flow-throughput-title">' +
         '<h3 id="v3-flow-throughput-title">Ritmo di completamento</h3>' +
-        '<p>Media mobile sulle ' + escapeHtml(weeksText) +
+        '<p>Media sulle ' + escapeHtml(weeksText) +
           '. È la finestra della capacità osservata, distinta dalla finestra più ampia dello storico WIP.</p>' +
         '<div class="v3-flow-rate-table-wrap"><table class="v3-flow-rate-table">' +
           '<thead><tr><th scope="col">Lettura</th><th scope="col">Completamenti</th><th scope="col">Punti</th></tr></thead>' +

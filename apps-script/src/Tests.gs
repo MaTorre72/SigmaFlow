@@ -310,6 +310,8 @@ function runAllTests() {
     testDashboardV2NormalizationAcceptsSkippedPrepWithoutInventingState,
     testDashboardV2CurrentWorkUsesExactOperationalPopulations,
     testDashboardV2CapacityUsesTechnicalCompletionsAndFirstCycles,
+    testDashboardV7CompleteIsoWeeksExcludeCurrentAndStayStable,
+    testDashboardV7CapacityWindowReconfiguresAllRecentRates,
     testDashboardV2CommittedWeeksIsNullWhenCapacityIsInsufficient,
     testDashboardV2RejectsCapacityWindowLongerThanWipHistory,
     testDashboardV2WipEpisodeTransitions,
@@ -5427,7 +5429,7 @@ function testDashboardV2CurrentWorkUsesExactOperationalPopulations() {
 }
 
 function testDashboardV2CapacityUsesTechnicalCompletionsAndFirstCycles() {
-  var now = new Date('2026-02-15T12:00:00+01:00');
+  var now = new Date('2026-02-16T12:00:00+01:00');
   var jobs = [
     { job_id: 'J1', status: 'backlog', size_points: 5 },
     { job_id: 'J2', status: 'todo', size_points: 8 },
@@ -5452,12 +5454,44 @@ function testDashboardV2CapacityUsesTechnicalCompletionsAndFirstCycles() {
   assertEquals_(3, state.capacity.observed.sample_size, 'done_ts senza consegna_ts non crea completamenti tecnici');
 }
 
+function testDashboardV7CompleteIsoWeeksExcludeCurrentAndStayStable() {
+  var tuesday = new Date('2026-03-31T13:00:00+02:00');
+  var friday = new Date('2026-04-03T21:00:00+02:00');
+  var first = dashboardV2CompleteIsoWeeks_(tuesday, 2);
+  var second = dashboardV2CompleteIsoWeeks_(friday, 2);
+  assertEquals_(JSON.stringify(first), JSON.stringify(second), 'finestra completa invariata nella stessa settimana');
+  assertEquals_('2026-03-16T00:00:00', dashboardV2WallClock_(new Date(first[0].period_start)), 'inizio lunedi locale');
+  assertEquals_('2026-03-30T00:00:00', dashboardV2WallClock_(new Date(first[1].period_end)), 'fine lunedi locale, settimana corrente esclusa');
+  assertEquals_(167, (Date.parse(first[1].period_end) - Date.parse(first[1].period_start)) / 3600000, 'DST non trasformato in una finestra mobile di 168 ore');
+  assertEquals_(false, first[1].is_partial, 'settimana ISO conclusa');
+}
+
+function testDashboardV7CapacityWindowReconfiguresAllRecentRates() {
+  var jobs = [{ job_id: 'J', status: 'backlog', size_points: 10,
+    activity_log_json: JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-03-24T12:00:00+01:00' }]) }];
+  var visits = [
+    { job_id: 'J', numero_visita: 1, consegna_ts: '2026-03-24T12:00:00+01:00' },
+    { job_id: 'J', numero_visita: 2, consegna_ts: '2026-03-31T12:00:00+02:00' }
+  ];
+  var now = new Date('2026-04-02T12:00:00+02:00');
+  var one = buildDashboardStateV2_(jobs, visits,
+    dashboardV2TestConfig_({ capacity_window_weeks: 1, wip_trend_weeks: 3, min_samples_capacity: 1 }), now);
+  var two = buildDashboardStateV2_(jobs, visits,
+    dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 3, min_samples_capacity: 1 }), now);
+  assertEquals_(10, one.capacity.observed.rolling_capacity_points_per_week, 'settimana corrente ignorata');
+  assertEquals_(5, two.capacity.observed.rolling_capacity_points_per_week, 'rate consegne riconfigurato');
+  assertEquals_(10, one.capacity.new_work.new_work_capacity_points_per_week, 'nuovi ingressi su una settimana');
+  assertEquals_(5, two.capacity.new_work.new_work_capacity_points_per_week, 'nuovi ingressi su due settimane');
+  assertEquals_(1, one.rework.rework_window_weeks, 'rientri sulla finestra configurata');
+  assertEquals_(2, two.rework.rework_window_weeks, 'rientri riconfigurabili');
+}
+
 function testDashboardV2CommittedWeeksIsNullWhenCapacityIsInsufficient() {
   var jobs = [{ job_id: 'J1', status: 'backlog', size_points: 5 }];
   jobs[0].activity_log_json = JSON.stringify([{ type: 'move', to: 'wip', ts: '2026-02-10T12:00:00+01:00' }]);
   var visits = [{ job_id: 'J1', numero_visita: 1, consegna_ts: '2026-02-10T12:00:00+01:00' }];
   var config = dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 6, min_samples_capacity: 2 });
-  var state = buildDashboardStateV2_(jobs, visits, config, new Date('2026-02-15T12:00:00+01:00'));
+  var state = buildDashboardStateV2_(jobs, visits, config, new Date('2026-02-16T12:00:00+01:00'));
   assertEquals_(null, state.capacity.new_work.new_work_capacity_points_per_week, 'capacita nuovo lavoro nulla sotto il minimo campionario');
   assertEquals_(null, state.futureWork.committed_weeks, 'nessun fallback numerico per settimane impegnate');
   assertEquals_('insufficient', state.futureWork.committed_weeks_quality, 'qualita insufficiente restituita insieme al null');
@@ -5502,7 +5536,7 @@ function testDashboardV2WipEpisodeTransitions() {
 }
 
 function testDashboardV2AbsorptionIgnoresReentriesAndIncludesZeroWeeks() {
-  var now = new Date('2026-02-15T12:00:00Z');
+  var now = new Date('2026-02-16T12:00:00Z');
   var config = dashboardV2TestConfig_({ capacity_window_weeks: 2, wip_trend_weeks: 4, min_samples_capacity: 1 });
   function job(id, points, dates, roles) {
     return { job_id: id, status: 'backlog', size_points: points, activity_log_json: JSON.stringify(dates.map(function(ts, i) {
