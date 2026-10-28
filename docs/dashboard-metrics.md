@@ -4,7 +4,9 @@
 
 - **Flusso attivo**: uscite dal ruolo WIP, anche verso attesa; passaggi/settimana e punti/settimana, con la taglia del job che pesa ogni passaggio; Prima lavorazione e Riprese di lavorazione sommano al totale. [Dettaglio](#flusso-attivo).
 - **Consegne tecniche**: visite con consegna_ts; consegne/settimana e punti/settimana, misura distinta dal flusso attivo. [Dettaglio](#consegne-tecniche).
-- **Incarichi conclusi**: incarichi con chiusura definitiva registrata in incarico_chiuso_ts; incarichi e punti osservati, con proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-conclusi-e-proiezione-di-regime).
+- **Incarichi fatturati**: incarichi con chiusura definitiva registrata dalla spunta «fatturato», che valorizza incarico_chiuso_ts; incarichi e punti osservati, con proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-fatturati-e-proiezione-di-regime).
+
+Togliere la spunta azzera la chiusura definitiva, quindi il conteggio segue lo stato attuale.
 
 ## Nuova dashboard — dashboardState
 
@@ -39,9 +41,9 @@ consegne nasconde il ritmo WIP; zero uscite con copertura è zero. Se manca
 un riferimento positivo, la lettura è «In osservazione», se manca copertura
 temporale è «Dati insufficienti». Restano precedenti i segnali fuori fascia.
 
-### Incarichi conclusi e proiezione di regime
+### Incarichi fatturati e proiezione di regime
 
-«Incarichi conclusi» usa esclusivamente la chiusura definitiva registrata.
+«Incarichi fatturati» usa esclusivamente la chiusura definitiva registrata.
 La proiezione di regime è `passaggi WIP/settimana / passaggi medi per
 incarico definitivamente chiuso`; in punti usa la media ponderata delle
 molteplicità. Richiede almeno `min_samples_final_closures` percorsi completi
@@ -53,11 +55,11 @@ alla selezione dei soli casi già chiusi; non prevede date di conclusione.
 
 ### Tempi osservati
 
-- **Tempo tipico alla consegna (V5)**: mediana degli intervalli completi dal primo ingresso osservato in backlog/preparazione/WIP alla successiva entrata in `done`. Attese e rientri intermedi restano nello stesso intervallo; un nuovo ingresso operativo dopo `done` apre una nuova unità valida soltanto per questa misura.
-- **8 pratiche su 10 entro (V5)**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
+- **Tempo tipico alla consegna**: mediana degli intervalli completi dal primo ingresso osservato in backlog/preparazione/WIP alla successiva entrata in `done`. Attese e rientri intermedi restano nello stesso intervallo; un nuovo ingresso operativo dopo `done` apre una nuova unità valida soltanto per questa misura.
+- **8 pratiche su 10 entro**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
 - La stima M/G/1 della vista legacy usa visite e tempi di servizio ed è una grandezza teorica diversa: non viene usata come sostituto del lead time osservato e non compare nella home.
 
-### V5 — precisione home, lettura verticale e viste temporali
+### Precisione home, lettura verticale e viste temporali
 
 I valori di presentazione nei riquadri principali sono meno precisi del
 contratto numerico: `committed_weeks` mostra al massimo una cifra decimale;
@@ -137,7 +139,9 @@ Nel dettaglio dello Stato del flusso, il ritmo di completamento osservato usa
 campione sono presentati in colonne parallele per completamenti e punti; la
 soglia che determina lo stato resta espressa in punti/settimana.
 
-### Trasparenza V4 dello Stato del flusso
+### Trasparenza storica dello Stato del flusso
+
+Superata: il codice attuale usa le ultime N settimane ISO complete.
 
 La fascia mostrata in UI si chiama **Fascia centrale osservata**: quando non
 configurata e' il 25°–75° percentile (`linear_interpolation_p25_p75`) delle
@@ -153,9 +157,11 @@ recente e qualita' della baseline storica sono distinte (`sufficient`,
 `partial`, `insufficient`). Il messaggio di stato combina separatamente il
 fatto sul WIP e quello sul ritmo, senza dedurre congestione.
 
+## Definizioni storiche del CFD
+
 ### Presentazione storica dei movimenti nel CFD
 
-Questa presentazione precede la lettura descritta in [V5 — precisione home, lettura verticale e viste temporali](#v5--precisione-home-lettura-verticale-e-viste-temporali).
+Questa presentazione precede la lettura descritta in [Precisione home, lettura verticale e viste temporali](#precisione-home-lettura-verticale-e-viste-temporali).
 
 "Andamento del lavoro" usa le boundary settimanali del backend senza
 ricalcolare gli stock nel browser. La selezione puntuale espone lavoro già
@@ -167,7 +173,7 @@ mostrati i conteggi settimanali `new_work_jobs`, `rework_wip_episodes` e
 
 ## Definizioni del modello legacy — systemState
 
-Queste definizioni restano riferite al modello legacy e non sono etichettate come errate; per le misure correnti vedere il [Glossario delle misure](#glossario-delle-misure).
+Queste definizioni descrivono il modello legacy, ancora in uso; per le misure della nuova dashboard vedere il [Glossario delle misure](#glossario-delle-misure).
 
 ### Principio
 
