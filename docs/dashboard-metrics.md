@@ -1,19 +1,68 @@
 # Metriche dashboard SigmaFlow
 
-## V5 — precisione home, lettura verticale e viste temporali
+## Glossario delle misure
+
+- **Flusso attivo**: uscite dal ruolo WIP, anche verso attesa; passaggi/settimana e punti/settimana, con la taglia del job che pesa ogni passaggio; Prima lavorazione e Riprese di lavorazione sommano al totale. [Dettaglio](#flusso-attivo).
+- **Consegne tecniche**: visite con consegna_ts; consegne/settimana e punti/settimana, misura distinta dal flusso attivo. [Dettaglio](#consegne-tecniche).
+- **Incarichi conclusi**: incarichi con chiusura definitiva registrata in incarico_chiuso_ts; incarichi e punti osservati, con proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-conclusi-e-proiezione-di-regime).
+
+## Nuova dashboard — dashboardState
+
+Le sezioni correnti descrivono la revisione documentata e il codice locale; non attestano la pubblicazione delle stesse regole in produzione.
+
+### Revisione operativa del 5 ottobre 2026
+
+Questa revisione prevale sulle definizioni storiche basate sulle sole consegne raccolte più avanti in [Definizioni storiche dello Stato del flusso basate sulle consegne](#definizioni-storiche-dello-stato-del-flusso-basate-sulle-consegne).
+
+### Flusso attivo
+
+Lo Stato del flusso usa il turnover WIP: un passaggio inizia all'ingresso
+nel ruolo WIP e termina alla prima uscita da tale ruolo, anche verso attesa.
+WIP→WIP non genera un nuovo passaggio. Il primo passaggio del job è «Prima
+lavorazione», i successivi sono «Riprese di lavorazione», senza attribuire
+automaticamente errori o inefficienze. Le due componenti contano le uscite
+nella stessa finestra ISO completa e riconciliano al totale. La taglia del
+job pesa ogni passaggio; non misura ore o avanzamento netto.
+
+### Consegne tecniche
+
+Il conteggio usa le visite con consegna_ts; i punti sono quelli del job associato a ogni visita. Le unità sono consegne/settimana e punti/settimana. Il CFD delle consegne e le settimane di assorbimento restano misure distinte dal turnover WIP.
+
+### Soglia dello Stato del flusso
+
+Con WIP nella fascia configurata, il ritmo recente in punti viene confrontato
+con `flow_slow_ratio × mediana delle finestre WIP affidabili`. La mediana è
+calcolata dalla diagnostica V7 sulle finestre con WIP medio almeno pari al
+limite inferiore configurato, a precisione piena. È un riferimento empirico
+aggiornabile, non la precedente taratura di consegna. Nessun minimo di
+consegne nasconde il ritmo WIP; zero uscite con copertura è zero. Se manca
+un riferimento positivo, la lettura è «In osservazione», se manca copertura
+temporale è «Dati insufficienti». Restano precedenti i segnali fuori fascia.
+
+### Incarichi conclusi e proiezione di regime
+
+«Incarichi conclusi» usa esclusivamente la chiusura definitiva registrata.
+La proiezione di regime è `passaggi WIP/settimana / passaggi medi per
+incarico definitivamente chiuso`; in punti usa la media ponderata delle
+molteplicità. Richiede almeno `min_samples_final_closures` percorsi completi
+nello storico affidabile (default 5). Si escludono percorsi incompleti,
+cronologie non ricostruibili e movimenti dopo la chiusura. L'eventuale
+incoerenza dei soli `from` non esclude una sequenza di `to` ricostruibile.
+È una stima condizionale di regime, sensibile al mix, ai tempi esterni e
+alla selezione dei soli casi già chiusi; non prevede date di conclusione.
+
+### Tempi osservati
+
+- **Tempo tipico alla consegna (V5)**: mediana degli intervalli completi dal primo ingresso osservato in backlog/preparazione/WIP alla successiva entrata in `done`. Attese e rientri intermedi restano nello stesso intervallo; un nuovo ingresso operativo dopo `done` apre una nuova unità valida soltanto per questa misura.
+- **8 pratiche su 10 entro (V5)**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
+- La stima M/G/1 della vista legacy usa visite e tempi di servizio ed è una grandezza teorica diversa: non viene usata come sostituto del lead time osservato e non compare nella home.
+
+### V5 — precisione home, lettura verticale e viste temporali
 
 I valori di presentazione nei riquadri principali sono meno precisi del
 contratto numerico: `committed_weeks` mostra al massimo una cifra decimale;
 `lead_time_median_days` e `lead_time_p80_days` sono arrotondati all'intero.
 Il dettaglio e la diagnostica conservano la precisione backend a due decimali.
-
-"Andamento del lavoro" usa le boundary settimanali del backend senza
-ricalcolare gli stock nel browser. La selezione puntuale espone lavoro già
-acquisito, WIP nuovo, WIP rework, WIP totale, in attesa, completato e totale;
-funziona con puntatore,
-tocco e frecce da tastiera. Sotto le bande, sullo stesso asse temporale, sono
-mostrati i conteggi settimanali `new_work_jobs`, `rework_wip_episodes` e
-`completed_visits` come Nuovi ingressi, Rientri e Consegne.
 
 Il WIP puntuale è classificato dal numero dell'episodio osservato: il primo è
 `wip_new_*`, i successivi sono `wip_rework_*`. La boundary totale V2 resta
@@ -52,12 +101,6 @@ Le rate lines opzionali mostrano la pendenza fra prima e ultima boundary del
 periodo visibile, normalizzata per la durata reale in settimane. Ingresso e
 completamento sono indipendenti e cambiano unità insieme al CFD.
 
-Nel dettaglio dello Stato del flusso, il ritmo di completamento osservato usa
-`capacity_window_weeks`: è una media mobile distinta dalla finestra
-`wip_trend_weeks` usata per serie e analisi WIP. Riferimento, osservato e
-campione sono presentati in colonne parallele per completamenti e punti; la
-soglia che determina lo stato resta espressa in punti/settimana.
-
 Lo zoom tramite rotella è disattivato sotto 900 px e sui dispositivi con
 puntatore coarse, così il canvas non interrompe lo scorrimento verticale della
 pagina. Il tooltip sovrapposto mostra soltanto stock, composizione e totale;
@@ -82,7 +125,19 @@ anno senza azzerare gli stock e condividono con i mesi lo stesso motore di
 stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta
 `has_data: false` e il relativo `empty_state_message` esplicito.
 
-## Trasparenza V4 dello Stato del flusso
+## Definizioni storiche dello Stato del flusso basate sulle consegne
+
+Queste definizioni storiche non governano la lettura corrente: vedere [Flusso attivo](#flusso-attivo) e [Soglia dello Stato del flusso](#soglia-dello-stato-del-flusso).
+
+### Dettaglio storico del ritmo di completamento
+
+Nel dettaglio dello Stato del flusso, il ritmo di completamento osservato usa
+`capacity_window_weeks`: è una media mobile distinta dalla finestra
+`wip_trend_weeks` usata per serie e analisi WIP. Riferimento, osservato e
+campione sono presentati in colonne parallele per completamenti e punti; la
+soglia che determina lo stato resta espressa in punti/settimana.
+
+### Trasparenza V4 dello Stato del flusso
 
 La fascia mostrata in UI si chiama **Fascia centrale osservata**: quando non
 configurata e' il 25°–75° percentile (`linear_interpolation_p25_p75`) delle
@@ -98,12 +153,23 @@ recente e qualita' della baseline storica sono distinte (`sufficient`,
 `partial`, `insufficient`). Il messaggio di stato combina separatamente il
 fatto sul WIP e quello sul ritmo, senza dedurre congestione.
 
-Il riepilogo diagnostico copre soltanto i controlli dichiarati: identita' CFD
-dell'ultimo bucket, job senza stato osservato, log non parsabili, colonne
-orfane, visite senza job e timestamp dell'ultimo dato. Uno zero non equivale
-a una certificazione generale del dataset.
+### Presentazione storica dei movimenti nel CFD
 
-## Principio
+Questa presentazione precede la lettura descritta in [V5 — precisione home, lettura verticale e viste temporali](#v5--precisione-home-lettura-verticale-e-viste-temporali).
+
+"Andamento del lavoro" usa le boundary settimanali del backend senza
+ricalcolare gli stock nel browser. La selezione puntuale espone lavoro già
+acquisito, WIP nuovo, WIP rework, WIP totale, in attesa, completato e totale;
+funziona con puntatore,
+tocco e frecce da tastiera. Sotto le bande, sullo stesso asse temporale, sono
+mostrati i conteggi settimanali `new_work_jobs`, `rework_wip_episodes` e
+`completed_visits` come Nuovi ingressi, Rientri e Consegne.
+
+## Definizioni del modello legacy — systemState
+
+Queste definizioni restano riferite al modello legacy e non sono etichettate come errate; per le misure correnti vedere il [Glossario delle misure](#glossario-delle-misure).
+
+### Principio
 
 La dashboard descrive lo stato osservato nel periodo configurato. Non produce ancora previsioni future.
 
@@ -122,21 +188,21 @@ del profilo di rientro, scatter WIP/tempo di ciclo, fasce a percentile
 sulla lista dei job attualmente fermi) in preparazione della futura
 Fase T (calibrazione, bloccata dal backfill storico).
 
-## Qualita' del dato
+### Qualita' del dato
 
 - `BASSA`: meno di 10 iniziative osservate (righe `visite` nel periodo).
 - `MEDIA`: da 10 a 30 iniziative osservate.
 - `BUONA`: piu' di 30 iniziative osservate.
 - Tempi, capacita' e carico sono stimati solo con almeno 5 lavori completati e un tempo di lavorazione valido.
 
-## Flusso
+### Flusso
 
 - **Nuove iniziative al giorno**: visite aperte (`apertura_ts`) nel periodo divise per i giorni osservati — dopo Fase R conta ogni caso *toccato* (nuovo o rientrato) nella finestra, non solo i nuovi arrivi.
 - **Lavori completati al giorno**: visite con `consegna_ts` valorizzato nel periodo, divise per i giorni osservati, anche quando il tempo di lavorazione non e' calcolabile.
 - **Differenza tra entrate e uscite**: nuove iniziative al giorno meno iniziative completate al giorno.
 - **Aggiunte (periodo)**: card/punti con `arrival_ts` nella finestra (`pointsMetrics.added_cards`/`added_points`) — R2 (2026-08-27): il tasso settimanale mostrato accanto e' derivato dallo **stesso totale** (`added_cards`), non piu' da `flow.new_initiatives_per_day` (che conta iniziative *toccate*, una popolazione diversa da "aggiunte").
 
-## Rientri
+### Rientri
 
 - **Iniziative con almeno un rientro** (`reworkMetrics.initiatives_with_rework`): quota di casi con almeno un rientro *osservato nella finestra*.
 - **Rientri medi quando il lavoro rientra** (`average_reentries_when_reworked`): media dei rientri osservati nella finestra sui soli casi rientrati.
@@ -146,7 +212,7 @@ Fase T (calibrazione, bloccata dal backfill storico).
 - **Rientri per causa** (`reworkMetrics.by_cause`, R4, 2026-08-27): scompone i rientri osservati nella finestra per `rework_cause` della visita rientrata — `client`/`authority`/`internal` (conteggi), `controllable_share` (cliente + interno, leva: gating diretto sul team) e `external_share` (enti, nessuna leva diretta).
 - **Quadro avanzato — p1/r/E[K]/lambda_effective/rho_effective** (R3, 2026-08-27): stesso blocco di sempre (`reworkMetrics_`, Model.gs), ma calcolato **per visita**, non per iniziativa come il resto di questa sezione — le etichette in dashboard lo dicono esplicitamente ("per visita, non per iniziativa") per non farlo sembrare la stessa grandezza di `initiatives_with_rework` con un numero diverso.
 
-## Dove si blocca il lavoro (attesa)
+### Dove si blocca il lavoro (attesa)
 
 R5 (2026-08-27) ha diviso quello che prima era un unico numero mescolato in tre letture distinte:
 
@@ -154,16 +220,16 @@ R5 (2026-08-27) ha diviso quello che prima era un unico numero mescolato in tre 
 - **Fermi ora** (`currentlyBlocked`): elenco dei job attualmente in una colonna di attesa, con `elapsed_days` (da `status_since_ts` a ora), ordinato per giorni decrescenti — nessuna finestra, e' lo stato adesso. S3 (2026-08-27): quando lo storico ha almeno 20 campioni di tempo di ciclo, ogni riga porta anche `band` (`green`/`yellow`/`red`) in base a dove cade `elapsed_days` rispetto ai percentili 50°/85°/95° dei tempi di ciclo storici (`cycleTimeBands`); sotto soglia, nessun colore.
 - **Andamento mensile** (`waitTimeTrend`): ultimi 6 mesi, una serie per tipo di attesa — ogni visita **chiusa** (`consegna_ts` o, in mancanza, `rientro_ts`) attribuisce la sua attesa cumulata al mese in cui si e' chiusa. Serve per vedere se una leva di controllo sta funzionando nel tempo, non per lo stato attuale.
 
-## Esposizione futura a rientri
+### Esposizione futura a rientri
 
 - **Consegne non ancora chiuse** (`latentBacklogMetrics`): consegne recenti (nella finestra) la cui visita non e' mai rientrata e il cui caso non e' ancora formalmente chiuso.
 
-## Profilo di rientro
+### Profilo di rientro
 
 - **Rientri osservati / alpha** (`delayProfileMetrics`): quanto spesso e con quale attesa reale accumulata (`t_cliente_d + t_ente_d + t_interno_d`) un caso rientra — calcolato su tutto lo storico disponibile, non sulla finestra.
 - **80° percentile del tempo prima del rientro** (`p80_days`, S1, 2026-08-27): soglia indicativa per la futura calibrazione della finestra `H` (Fase T, bloccata dal backfill) — presente quando `sample_size >= 5`.
 
-## Lavoro presente
+### Lavoro presente
 
 - **Lavoro pronto**: job in colonne con ruolo `backlog`.
 - **Lavoro in preparazione**: job in colonne con ruolo `prep`.
@@ -171,11 +237,7 @@ R5 (2026-08-27) ha diviso quello che prima era un unico numero mescolato in tre 
 - **Lavoro che puo' rientrare**: job in colonne `done` non ancora chiusi (`invoiced` falso).
 - **Lavori bloccati**: job in colonne con ruolo `stand_by`.
 
-## Tempi
-
-- **Tempo tipico alla consegna (V5)**: mediana degli intervalli completi dal primo ingresso osservato in backlog/preparazione/WIP alla successiva entrata in `done`. Attese e rientri intermedi restano nello stesso intervallo; un nuovo ingresso operativo dopo `done` apre una nuova unità valida soltanto per questa misura.
-- **8 pratiche su 10 entro (V5)**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
-- La stima M/G/1 della vista legacy usa visite e tempi di servizio ed è una grandezza teorica diversa: non viene usata come sostituto del lead time osservato e non compare nella home.
+### Tempi
 
 - **Tempo medio di lavorazione**: media del tempo di servizio (`consegna_ts - start_ts` sulla visita) sulle visite completate valide.
 - **Variabilita'**: rapporto tra varianza e quadrato della media dei tempi.
@@ -186,18 +248,18 @@ Il campione dei tempi è distinto dal conteggio delle visite concluse:
 una `consegna_ts` senza `start_ts` valido alimenta il flusso in uscita,
 ma non la stima di tempi e capacità.
 
-## Capacita'
+### Capacita'
 
 - **Capacita' teorica**: valore opzionale `theoretical_capacity_per_day` nel foglio `config`.
 - **Capacita' effettiva**: persone attive (`team_size`) divise per il tempo medio di lavorazione.
 - **Carico effettivo**: passaggi totali al giorno divisi per la capacita' effettiva.
 - **Margine residuo**: capacita' effettiva meno passaggi totali richiesti.
 
-## Scenari
+### Scenari
 
 Gli scenari `optimistic`, `baseline` e `pessimistic` sono salvati in `scenarios_json`. I moltiplicatori sono predisposti, ma non vengono ancora usati per calcolare traiettorie future.
 
-## Punti e taglie
+### Punti e taglie
 
 - **Punti aperti**: somma dei punti delle card non concluse (`jobs`, non richiede `visite`).
 - **Punti aggiunti**: punti delle card con `arrival_ts` nel periodo osservato.
@@ -207,6 +269,15 @@ Gli scenari `optimistic`, `baseline` e `pessimistic` sono salvati in `scenarios_
 - Per le card senza `size_points`, i punti sono ricavati dalla taglia; se manca anche la taglia viene usato il valore predefinito `M = 8`.
 - Se non esistono osservazioni utili, il grafico mostra `Dato non ancora stimabile` invece di una serie a zero.
 
-## Diagnostica per la futura calibrazione (Cap. 12, Fase T)
+## Diagnostica
+
+### Controlli della nuova dashboard
+
+Il riepilogo diagnostico copre soltanto i controlli dichiarati: identita' CFD
+dell'ultimo bucket, job senza stato osservato, log non parsabili, colonne
+orfane, visite senza job e timestamp dell'ultimo dato. Uno zero non equivale
+a una certificazione generale del dataset.
+
+### Diagnostica per la futura calibrazione (Cap. 12, Fase T)
 
 - **WIP vs tempo di ciclo** (`wipCycleTimeScatter`, S2, 2026-08-27): uno scatter diagnostico, dentro il "Quadro avanzato" collassato — per ogni visita con un tempo di ciclo calcolabile, quante altre visite erano attive (WIP) nel momento esatto in cui e' partita. E' un'approssimazione di `L_WIP(t)` al momento dell'avvio, non una serie storica esatta giorno per giorno — pensata per "cercare il ginocchio" nella curva quando il backfill storico sara' completo (Fase T, fuori da questo documento). Sotto 10 punti mostra "Dato non ancora stimabile" invece del grafico vuoto.
