@@ -4,9 +4,9 @@
 
 - **Flusso attivo**: uscite dal ruolo WIP, anche verso attesa; passaggi/settimana e punti/settimana, con la taglia del job che pesa ogni passaggio; Prima lavorazione e Riprese di lavorazione sommano al totale. [Dettaglio](#flusso-attivo).
 - **Consegne tecniche**: visite con consegna_ts; consegne/settimana e punti/settimana, misura distinta dal flusso attivo. [Dettaglio](#consegne-tecniche).
-- **Incarichi fatturati**: incarichi con chiusura definitiva registrata dalla spunta «fatturato», che valorizza incarico_chiuso_ts; incarichi e punti osservati, con proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-fatturati-e-proiezione-di-regime).
+- **Incarichi chiusi**: incarichi con chiusura definitiva registrata dalla spunta «Chiuso», che valorizza incarico_chiuso_ts; incarichi e punti osservati, con proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-chiusi-e-proiezione-di-regime).
 
-Togliere la spunta azzera la chiusura definitiva, quindi il conteggio segue lo stato attuale.
+Togliere la spunta «Chiuso» azzera la chiusura definitiva, quindi il conteggio segue lo stato attuale.
 
 ## Nuova dashboard — dashboardState
 
@@ -41,9 +41,9 @@ consegne nasconde il ritmo WIP; zero uscite con copertura è zero. Se manca
 un riferimento positivo, la lettura è «In osservazione», se manca copertura
 temporale è «Dati insufficienti». Restano precedenti i segnali fuori fascia.
 
-### Incarichi fatturati e proiezione di regime
+### Incarichi chiusi e proiezione di regime
 
-«Incarichi fatturati» usa esclusivamente la chiusura definitiva registrata.
+«Incarichi chiusi» usa esclusivamente la chiusura definitiva registrata.
 La proiezione di regime è `passaggi WIP/settimana / passaggi medi per
 incarico definitivamente chiuso`; in punti usa la media ponderata delle
 molteplicità. Richiede almeno `min_samples_final_closures` percorsi completi
