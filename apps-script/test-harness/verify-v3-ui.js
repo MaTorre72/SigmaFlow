@@ -42,11 +42,11 @@ function verifyV3Ui() {
     ['stato del flusso limitato alle cinque etichette approvate', ['Sottoalimentato', 'Regolare', 'Rallentato', 'Carico elevato', 'Dati insufficienti'].every(label => client.includes(label))],
     ['classificazione e parametri obsoleti assenti dai sorgenti applicativi', obsoleteFlowTokens.every(token => !applicationSources.includes(token))],
     ['dettaglio stato usa solo i fattori decisionali', client.includes('detail.wip_current') &&
-      client.includes('detail.slowing_threshold_points_per_week') && !client.includes('detail.reference_points_per_week') &&
+      client.includes('detail.slowing_threshold_points_per_week') && client.includes('detail.reference_points_per_week') &&
       !client.includes('Qualità del campione</dt>')],
     ['dettaglio ritmo esplicita finestra e doppia unità',
-      client.includes('Ritmo recente delle consegne') && client.includes('recent.window_weeks') &&
-      client.includes('recent.visits_per_week') && client.includes('recent.points_per_week') &&
+      client.includes('Flusso attivo osservato') && client.includes('recent.window_weeks') &&
+      client.includes('recent.jobs_per_week') && client.includes('deliveries.visits_per_week') && client.includes('recent.points_per_week') &&
       client.includes('settimane ISO complete') &&
       !client.includes('ultime 8 settimane') && style.includes('.v3-flow-rate-table')],
     ['WIP letto dal backend', renderer.includes('current.wip_jobs') && renderer.includes('current.wip_points')],
@@ -173,7 +173,7 @@ function verifyV3Ui() {
   if (failures.length) {
     throw new Error('Verifiche UI V3 fallite: ' + failures.join(', '));
   }
-  return checks.map(([name]) => name);
+  return checks.map(([name]) => name).concat(require('./verify-flow-card').verifyFlowCard());
 }
 
 if (require.main === module) {

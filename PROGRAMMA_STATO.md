@@ -1,5 +1,22 @@
 # Stato SigmaFlow
-Aggiornato: 2026-09-16
+Aggiornato: 2026-10-28
+
+## Riga del flusso attivo nello Stato del flusso (2026-10-28)
+
+Branch codex/riga-flusso-attivo: tabella con flusso attivo osservato, prima
+lavorazione, rientri e ritmo di consegna, in lavori/settimana e punti/settimana.
+Finestra backend nella didascalia; soglia accanto ai punti del flusso attivo.
+Tassi delle componenti già presenti nel lavoro locale V8, inclusi con le sole
+dipendenze dello stato esistente; nessuna formula cambiata. Escluse la revisione
+degli incarichi conclusi, i testi CFD e i relativi parametri e documenti.
+Tooltip «valori arrotondati»: possibili differenze fra somma visualizzata e totale.
+Suite eseguita con TZ=UTC: il fuso locale fa fallire due fixture legacy al cambio ora.
+Verifica sul contenuto isolato del commit: 261/261 test e 51/51 controlli UI.
+Push sul solo TEST, pull isolato: 17/17 file identici. Riproduzione locale con
+markup reale e routeAction_ a 1280 e 380 px: nessun overflow, sia con valori
+sia con copertura assente. preview_start non disponibile; controllo nel browser
+Chrome locale e schermate. Gate umano di Marco sul TEST ancora richiesto.
+
 
 ## V5 — gate umano 6F approvato sul TEST (2026-09-16)
 
