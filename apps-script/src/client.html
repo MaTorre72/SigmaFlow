@@ -2362,6 +2362,7 @@
     var weeks = recent.window_weeks;
     var weeksText = weeks === null || weeks === undefined
       ? 'finestra configurata' : 'ultime ' + dashboardV3Text_(weeks) + ' settimane ISO complete';
+    var explanations = dashboardV5FlowExplanations_(detail, state.columnMeta || []);
     root.innerHTML =
       '<dl class="v3-flow-current">' +
         '<dt>Lavori attivi adesso</dt><dd>' + escapeHtml(dashboardV3Text_(detail.wip_current)) + '</dd>' +
@@ -2379,8 +2380,7 @@
             '<tr><th scope="row">Ritmo di consegna</th><td>' + escapeHtml(dashboardV5FlowRateText_(deliveries.visits_per_week)) + '</td><td>' + escapeHtml(dashboardV5FlowRateText_(deliveries.points_per_week)) + '</td></tr>' +
           '</tbody>' +
         '</table></div>' +
-        '<p>Ogni uscita dal WIP termina un passaggio; gli spostamenti tra colonne WIP non ne creano altri. I rientri sono nuovi periodi in WIP sullo stesso incarico, anche dopo un’attesa. I punti pesano ogni passaggio con la taglia dell’incarico.</p>' +
-        '<p>Il riferimento è la mediana delle finestre dello storico affidabile con WIP medio almeno pari al limite inferiore della fascia. La soglia applica a questo riferimento il rapporto di rallentamento configurato.</p>' +
+        explanations +
         '<dl class="v3-flow-evidence">' +
           '<dt>Riferimento WIP dallo storico</dt><dd>' + escapeHtml(dashboardV3Text_(detail.reference_points_per_week, ' punti/settimana')) + ' · ' + escapeHtml(dashboardV3Text_(detail.reference_window_count, ' finestre valide')) + '</dd>' +
         '</dl>' +
@@ -2389,6 +2389,29 @@
 
   function dashboardV5FlowRateText_(value) {
     return value === null || value === undefined ? 'Dati insufficienti' : dashboardV3Text_(value);
+  }
+
+  function dashboardV5FlowExplanations_(detail, columns) {
+    var wip = columns.filter(function(column) { return column.role === 'wip'; });
+    var done = columns.filter(function(column) { return column.role === 'done'; });
+    var text = '';
+    // Il testo al singolare richiede la configurazione verificata della board.
+    if (wip.length === 1 && done.length === 1) {
+      var wipName = escapeHtml(wip[0].label);
+      var doneName = escapeHtml(done[0].label);
+      text += '<p>Ogni volta che un lavoro esce dalla colonna ' + wipName + ', verso un’attesa o verso ' + doneName +
+        ', viene registrato un passaggio. Il primo passaggio è la prima lavorazione. Ogni lavoro che ripassa nella colonna ' + wipName +
+        ', anche dopo un’attesa, è un rientro e viene conteggiato a parte. I punti di un passaggio sono quelli dell’incarico: nel periodo considerato, un incarico da 5 punti che esce dal WIP due volte (per esempio verso un’attesa e poi, dopo il rientro, verso la consegna) vale 10 punti.</p>';
+    }
+    if (detail.reference_window_count > 0 && detail.slow_ratio !== null && detail.slow_ratio !== undefined &&
+        detail.slowing_threshold_points_per_week !== null && detail.slowing_threshold_points_per_week !== undefined) {
+      text += '<p>Come riferimento si assume il ritmo tipico dell’andamento storico, calcolato come mediana di ' +
+        escapeHtml(dashboardV3Text_(detail.reference_window_count)) + ' finestre valide. Come soglia di rallentamento si assume il ' +
+        escapeHtml(detail.slow_ratio.toLocaleString('it-IT', { style: 'percent', maximumFractionDigits: 2 })) +
+        ' del riferimento: se il flusso attivo scende sotto ' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week)) +
+        ' punti/settimana, lo stato non è più «Regolare».</p>';
+    }
+    return text;
   }
 
   // Fase 4a: la precisione di presentazione della home e' intenzionalmente
