@@ -1230,7 +1230,7 @@
     prep_ts: 'Data inizio preparazione (prep_ts)',
     start_ts: 'Data inizio lavorazione (start_ts)',
     done_ts: 'Data consegna (done_ts)',
-    incarico_chiuso_ts: 'Chiusura incarico (incarico_chiuso_ts)'
+    incarico_chiuso_ts: 'Fatturazione incarico (incarico_chiuso_ts)'
   };
   var HARD_ERROR_MESSAGES_ = {
     TS_IN_FUTURO: 'La data non puo\' essere nel futuro.',
@@ -3363,7 +3363,7 @@
     var latentBacklog = system.latentBacklogMetrics || {};
     renderDl('latent-backlog-metrics', {
       'Periodo analizzato': metricValue(latentBacklog.window_days, ' giorni'),
-      'Consegne non ancora chiuse': valueOrDash(latentBacklog.count)
+      'Consegne non ancora fatturate': valueOrDash(latentBacklog.count)
     });
 
     renderDelayProfile(system.delayProfileMetrics || {});

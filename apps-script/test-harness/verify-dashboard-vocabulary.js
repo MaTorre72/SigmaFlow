@@ -30,7 +30,7 @@ function verifyDashboardVocabulary() {
   assert(client.includes('Lavori consegnati (periodo)') && client.includes('Passaggi consegnati (periodo)'));
   assert(client.includes('Tasso di consegna (pt/settimana)') && markup.includes('Tasso di consegna vs Lavoro in corso'));
   assert(markup.includes('>Rilavorazione<') && client.includes('Rilavorazioni medie quando capitano'));
-  assert(client.includes('Tasso di arrivo (lambda)') && client.includes('Consegne non ancora chiuse'));
+  assert(client.includes('Tasso di arrivo (lambda)') && client.includes('Consegne non ancora fatturate'));
   assert(markup.includes('I passaggi totali alla settimana'));
   const model = fs.readFileSync(path.join(src, 'Model.gs'), 'utf8');
   assert(model.includes('Servono almeno 5 lavori consegnati per stimare tempi e capacita.'));

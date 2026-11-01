@@ -173,7 +173,7 @@ function verifyV3Ui() {
   if (failures.length) {
     throw new Error('Verifiche UI V3 fallite: ' + failures.join(', '));
   }
-  return checks.map(([name]) => name).concat(require('./verify-flow-card').verifyFlowCard(), require('./verify-dashboard-vocabulary').verifyDashboardVocabulary());
+  return checks.map(([name]) => name).concat(require('./verify-flow-card').verifyFlowCard(), require('./verify-dashboard-vocabulary').verifyDashboardVocabulary(), require('./verify-invoiced-vocabulary').verifyInvoicedVocabulary());
 }
 
 if (require.main === module) {

@@ -1,5 +1,18 @@
 # Stato SigmaFlow
-Aggiornato: 2026-10-28
+Aggiornato: 2026-11-01
+
+## Vocabolario, Fatturato e preparazione del merge (2026-11-01)
+
+Documentazione allineata ai nomi della dashboard: Tasso di consegna, rientri,
+prima lavorazione e Incarichi fatturati. Verifica documentale: 119 elementi
+tra apici inversi e 81 numeri, stesse occorrenze e nessuna differenza.
+La spunta e le date collegate usano Fatturato/fatturazione, senza cambiare
+invoiced o incarico_chiuso_ts. La card Incarichi fatturati non è nel branch:
+la revisione delle conclusioni resta locale ed esclusa. Suite isolata
+261/261 e 57/57 UI; push TEST e pull isolato: 17/17 file identici.
+Preparazione del merge nel file Claude outputs/PREPARAZIONE_MERGE_FLUSSO_ATTIVO_2026-11-01.md:
+nessuna PR aperta, nessun merge o deployment pubblico eseguito.
+
 
 ## Riga del flusso attivo nello Stato del flusso (2026-10-28)
 
