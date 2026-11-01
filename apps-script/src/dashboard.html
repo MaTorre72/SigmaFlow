@@ -25,7 +25,7 @@
     <details class="v3-status-detail">
       <summary>Come è stata ottenuta questa lettura</summary>
       <div id="v3-flow-detail" class="v3-flow-detail"></div>
-      <button type="button" data-v3-detail="recent_completions">Apri completamenti della finestra</button>
+      <button type="button" data-v3-detail="recent_completions">Apri consegne della finestra</button>
     </details>
   </article>
 
@@ -61,7 +61,7 @@
       <span class="v3-card-action">Apri i tempi per taglia</span>
     </button>
     <button class="v3-metric-card" type="button" data-v3-detail="timing">
-      <span class="v3-card-label">8 pratiche su 10 entro</span>
+      <span class="v3-card-label">8 lavori su 10 entro</span>
       <strong id="v3-lead-time-p80">—</strong>
       <span id="v3-lead-time-p80-detail" class="v3-card-detail">Dato non ancora disponibile</span>
       <span class="v3-card-action">Apri i tempi per taglia</span>
@@ -70,7 +70,7 @@
 
   <article class="v3-flow-chart-panel">
     <div class="v3-section-heading">
-      <div><h2>Andamento del lavoro</h2><p>Come sono cambiati nel tempo il lavoro acquisito, quello attivo, le attese e i completamenti.</p></div>
+      <div><h2>Andamento del lavoro</h2><p>Come sono cambiati nel tempo il lavoro acquisito, quello attivo, le attese e le consegne.</p></div>
       <div class="v3-unit-switch" role="group" aria-label="Unità del grafico">
         <button type="button" class="active" data-v3-chart-unit="jobs" aria-pressed="true">Lavori</button>
         <button type="button" data-v3-chart-unit="points" aria-pressed="false">Punti</button>
@@ -117,7 +117,7 @@
         <button id="v3-cfd-select-range" type="button" aria-pressed="false">Seleziona intervallo</button>
         <button id="v3-cfd-measure" type="button" aria-pressed="false">Misura tempo</button>
         <button id="v3-cfd-rate-entry" type="button" aria-pressed="false">Tasso di ingresso</button>
-        <button id="v3-cfd-rate-completion" type="button" aria-pressed="false">Tasso di completamento</button>
+        <button id="v3-cfd-rate-completion" type="button" aria-pressed="false">Tasso di consegna</button>
         <button id="v3-cfd-reset" type="button">Reset zoom</button>
       </div>
     </div>
@@ -126,10 +126,10 @@
       <section id="v3-cfd-comparison-panel" class="v3-cfd-chart-column" hidden><h3>Periodo di confronto</h3><div class="v3-chart-wrap"><canvas id="v3-flow-comparison-chart" height="330" tabindex="0" aria-describedby="v3-flow-comparison-selection" aria-label="Andamento del lavoro nel periodo di confronto"></canvas></div><p id="v3-flow-comparison-selection" class="v3-flow-selection" aria-live="polite"></p><div id="v3-flow-comparison-empty" class="chart-empty" hidden>Confronto non ancora disponibile per il periodo selezionato.</div></section>
     </div>
     <div class="v3-chart-legend" aria-label="Legenda">
-      <button type="button" class="v3-legend-completed" data-v3-cfd-series="completed">Completato</button>
+      <button type="button" class="v3-legend-completed" data-v3-cfd-series="completed">Consegnato</button>
       <button type="button" class="v3-legend-waiting" data-v3-cfd-series="waiting">In attesa</button>
-      <button type="button" class="v3-legend-wip-rework" data-v3-cfd-series="wipRework">WIP rework</button>
-      <button type="button" class="v3-legend-wip-new" data-v3-cfd-series="wipNew">WIP nuovo</button>
+      <button type="button" class="v3-legend-wip-rework" data-v3-cfd-series="wipRework">Rientri</button>
+      <button type="button" class="v3-legend-wip-new" data-v3-cfd-series="wipNew">Prima lavorazione</button>
       <button type="button" class="v3-legend-future" data-v3-cfd-series="future">Già acquisito</button>
       <button id="v3-cfd-show-all" type="button">Mostra tutte</button>
     </div>

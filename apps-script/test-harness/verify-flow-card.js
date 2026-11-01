@@ -27,7 +27,7 @@ function verifyFlowCard() {
   assert(rows[0].includes('Flusso attivo osservato') && rows[0].includes('13,5') && rows[0].includes('Soglia di rallentamento: 5,53 punti/settimana'));
   assert(rows[1].includes('Prima lavorazione') && rows[1].includes('1,25') && rows[1].includes('7,9'));
   assert(rows[2].includes('Rientri') && rows[2].includes('0,75') && rows[2].includes('5,6'));
-  assert(rows[3].includes('Ritmo di consegna') && rows[3].includes('0,38') && rows[3].includes('2,63') && !rows[3].includes('Soglia'));
+  assert(rows[3].includes('Tasso di consegna') && rows[3].includes('0,38') && rows[3].includes('2,63') && !rows[3].includes('Soglia'));
   assert(root.innerHTML.includes('title="valori arrotondati"'));
   assert(root.innerHTML.includes('colonna Laboratorio &amp; verifica, verso un’attesa o verso Invii &lt;finali&gt;'));
   assert(root.innerHTML.includes('mediana di 17 finestre valide'));
