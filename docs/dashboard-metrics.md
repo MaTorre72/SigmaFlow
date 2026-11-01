@@ -2,11 +2,23 @@
 
 ## Glossario delle misure
 
-- **Flusso attivo**: uscite dal ruolo WIP, anche verso attesa; passaggi/settimana e punti/settimana, con la taglia del job che pesa ogni passaggio; Prima lavorazione e Riprese di lavorazione sommano al totale. [Dettaglio](#flusso-attivo).
-- **Consegne tecniche**: visite con consegna_ts; consegne/settimana e punti/settimana, misura distinta dal flusso attivo. [Dettaglio](#consegne-tecniche).
-- **Incarichi chiusi**: incarichi con chiusura definitiva registrata dalla spunta «Chiuso», che valorizza incarico_chiuso_ts; incarichi e punti osservati, con proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-chiusi-e-proiezione-di-regime).
+- **Flusso attivo** («Flusso attivo osservato»): uscite dal ruolo WIP, anche verso attesa; lavori/settimana e punti/settimana, con la taglia del lavoro che pesa ogni passaggio; prima lavorazione e rientri sommano al totale. [Dettaglio](#flusso-attivo).
+- **Tasso di consegna**: arrivi del lavoro nell'ultima colonna della board; il nome è letto dalla configurazione, oggi «DA INVIARE / DA FATTURARE». Le unità sono lavori/settimana e punti/settimana, misura distinta dal flusso attivo. (Per chi sviluppa: «consegne tecniche», visite con consegna_ts.) [Dettaglio](#tasso-di-consegna).
+- **Incarichi fatturati**: incarichi con chiusura definitiva registrata dalla spunta «Fatturato»; non è la consegna. La spunta valorizza incarico_chiuso_ts; incarichi e punti osservati hanno una proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-fatturati-e-proiezione-di-regime).
 
-Togliere la spunta «Chiuso» azzera la chiusura definitiva, quindi il conteggio segue lo stato attuale.
+Togliere la spunta «Fatturato» azzera la chiusura definitiva, quindi il conteggio segue lo stato attuale.
+
+## Termine precedente → termine attuale
+
+| Termine precedente | Termine attuale |
+|---|---|
+| Ritmo di consegna / Tasso di completamento | Tasso di consegna |
+| Completato / completamenti / completati | Consegnato / consegne / consegnati |
+| Riprese / WIP rework | Rientri |
+| WIP nuovo | Prima lavorazione |
+| pratiche | lavori |
+| Incarichi conclusi | Incarichi fatturati |
+| consegne tecniche | Termine di sviluppo, non usato nella dashboard |
 
 ## Nuova dashboard — dashboardState
 
@@ -21,14 +33,16 @@ Questa revisione prevale sulle definizioni storiche basate sulle sole consegne r
 Lo Stato del flusso usa il turnover WIP: un passaggio inizia all'ingresso
 nel ruolo WIP e termina alla prima uscita da tale ruolo, anche verso attesa.
 WIP→WIP non genera un nuovo passaggio. Il primo passaggio del job è «Prima
-lavorazione», i successivi sono «Riprese di lavorazione», senza attribuire
+lavorazione», i successivi sono «Rientri», senza attribuire
 automaticamente errori o inefficienze. Le due componenti contano le uscite
 nella stessa finestra ISO completa e riconciliano al totale. La taglia del
 job pesa ogni passaggio; non misura ore o avanzamento netto.
 
-### Consegne tecniche
+### Tasso di consegna
 
-Il conteggio usa le visite con consegna_ts; i punti sono quelli del job associato a ogni visita. Le unità sono consegne/settimana e punti/settimana. Il CFD delle consegne e le settimane di assorbimento restano misure distinte dal turnover WIP.
+Il tasso descrive gli arrivi del lavoro nell'ultima colonna della board, il cui nome è letto dalla configurazione, oggi «DA INVIARE / DA FATTURARE». Le unità sono lavori/settimana e punti/settimana. Il CFD delle consegne e le settimane di assorbimento restano misure distinte dal turnover WIP.
+
+Per chi sviluppa: il conteggio delle «consegne tecniche» usa le visite con consegna_ts; i punti sono quelli del lavoro associato a ogni visita.
 
 ### Soglia dello Stato del flusso
 
@@ -41,9 +55,9 @@ consegne nasconde il ritmo WIP; zero uscite con copertura è zero. Se manca
 un riferimento positivo, la lettura è «In osservazione», se manca copertura
 temporale è «Dati insufficienti». Restano precedenti i segnali fuori fascia.
 
-### Incarichi chiusi e proiezione di regime
+### Incarichi fatturati e proiezione di regime
 
-«Incarichi chiusi» usa esclusivamente la chiusura definitiva registrata.
+«Incarichi fatturati» usa esclusivamente la chiusura definitiva registrata.
 La proiezione di regime è `passaggi WIP/settimana / passaggi medi per
 incarico definitivamente chiuso`; in punti usa la media ponderata delle
 molteplicità. Richiede almeno `min_samples_final_closures` percorsi completi
@@ -56,7 +70,7 @@ alla selezione dei soli casi già chiusi; non prevede date di conclusione.
 ### Tempi osservati
 
 - **Tempo tipico alla consegna**: mediana degli intervalli completi dal primo ingresso osservato in backlog/preparazione/WIP alla successiva entrata in `done`. Attese e rientri intermedi restano nello stesso intervallo; un nuovo ingresso operativo dopo `done` apre una nuova unità valida soltanto per questa misura.
-- **8 pratiche su 10 entro**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
+- **8 lavori su 10 entro**: P80 nearest-rank degli stessi intervalli. Il contratto espone numerosità, qualità e disaggregazione XS/S/M/L/XL; la mediana usa la media dei due valori centrali per campioni pari.
 - La stima M/G/1 della vista legacy usa visite e tempi di servizio ed è una grandezza teorica diversa: non viene usata come sostituto del lead time osservato e non compare nella home.
 
 ### Precisione home, lettura verticale e viste temporali
@@ -68,7 +82,7 @@ Il dettaglio e la diagnostica conservano la precisione backend a due decimali.
 
 Il WIP puntuale è classificato dal numero dell'episodio osservato: il primo è
 `wip_new_*`, i successivi sono `wip_rework_*`. La boundary totale V2 resta
-disponibile; nella pila il rework rosso è sotto il nuovo blu.
+disponibile; nella pila i rientri in rosso sono sotto la prima lavorazione in blu.
 
 `dashboardV2History_` espone `weekly`, `monthly`, `quarterly` e `annual_cfd`.
 Espone inoltre `daily` per la navigazione del CFD. La home consente 8
@@ -78,7 +92,7 @@ backend e non ricostruisce le metriche nel browser.
 
 Zoom, pan, reset e selezione di sottointervallo agiscono esclusivamente sulla
 finestra dei bucket visualizzati. Il tooltip legge gli stock e le cumulative
-dal contratto backend e aggiunge ingressi/completamenti cumulativi ai valori
+dal contratto backend e aggiunge ingressi e consegne cumulative ai valori
 puntuali già disponibili.
 
 La legenda delle cinque bande può applicare un focus visivo: la serie scelta
@@ -101,7 +115,7 @@ accanto come confronto di plausibilità, non come misure equivalenti.
 
 Le rate lines opzionali mostrano la pendenza fra prima e ultima boundary del
 periodo visibile, normalizzata per la durata reale in settimane. Ingresso e
-completamento sono indipendenti e cambiano unità insieme al CFD.
+consegna sono indipendenti e cambiano unità insieme al CFD.
 
 Lo zoom tramite rotella è disattivato sotto 900 px e sui dispositivi con
 puntatore coarse, così il canvas non interrompe lo scorrimento verticale della
@@ -130,6 +144,8 @@ stock/flussi. Un mese o trimestre privo sia di stock sia di movimenti porta
 ## Definizioni storiche dello Stato del flusso basate sulle consegne
 
 Queste definizioni storiche non governano la lettura corrente: vedere [Flusso attivo](#flusso-attivo) e [Soglia dello Stato del flusso](#soglia-dello-stato-del-flusso).
+
+I nomi storici sono conservati per descrivere il codice di quella revisione; per le diciture correnti vedere [Termine precedente → termine attuale](#termine-precedente--termine-attuale).
 
 ### Dettaglio storico del ritmo di completamento
 
@@ -163,6 +179,8 @@ fatto sul WIP e quello sul ritmo, senza dedurre congestione.
 
 Questa presentazione precede la lettura descritta in [Precisione home, lettura verticale e viste temporali](#precisione-home-lettura-verticale-e-viste-temporali).
 
+I nomi storici sono conservati per descrivere il codice di quella revisione; per le diciture correnti vedere [Termine precedente → termine attuale](#termine-precedente--termine-attuale).
+
 "Andamento del lavoro" usa le boundary settimanali del backend senza
 ricalcolare gli stock nel browser. La selezione puntuale espone lavoro già
 acquisito, WIP nuovo, WIP rework, WIP totale, in attesa, completato e totale;
@@ -174,6 +192,8 @@ mostrati i conteggi settimanali `new_work_jobs`, `rework_wip_episodes` e
 ## Definizioni del modello legacy — systemState
 
 Queste definizioni descrivono il modello legacy, ancora in uso; per le misure della nuova dashboard vedere il [Glossario delle misure](#glossario-delle-misure).
+
+I termini propri del modello e gli identificatori restano invariati; le diciture visibili aggiornate sono riepilogate in [Termine precedente → termine attuale](#termine-precedente--termine-attuale).
 
 ### Principio
 
@@ -199,7 +219,7 @@ Fase T (calibrazione, bloccata dal backfill storico).
 - `BASSA`: meno di 10 iniziative osservate (righe `visite` nel periodo).
 - `MEDIA`: da 10 a 30 iniziative osservate.
 - `BUONA`: piu' di 30 iniziative osservate.
-- Tempi, capacita' e carico sono stimati solo con almeno 5 lavori completati e un tempo di lavorazione valido.
+- Tempi, capacita' e carico sono stimati solo con almeno 5 lavori consegnati e un tempo di lavorazione valido.
 
 ### Flusso
 
@@ -269,7 +289,7 @@ Gli scenari `optimistic`, `baseline` e `pessimistic` sono salvati in `scenarios_
 
 - **Punti aperti**: somma dei punti delle card non concluse (`jobs`, non richiede `visite`).
 - **Punti aggiunti**: punti delle card con `arrival_ts` nel periodo osservato.
-- **Punti completati**: punti delle card concluse (`status` in una colonna `done`) nel periodo osservato.
+- **Punti consegnati**: punti delle card consegnate (`status` in una colonna `done`) nel periodo osservato.
 - **Andamento del carico**: confronto mensile, sugli ultimi sei mesi, fra punti entrati, completati e ancora aperti.
 - Le distribuzioni per taglia, colonna e assegnatario mostrano sia punti sia numero di card.
 - Per le card senza `size_points`, i punti sono ricavati dalla taglia; se manca anche la taglia viene usato il valore predefinito `M = 8`.
