@@ -316,6 +316,8 @@ function runAllTests() {
     testDashboardV2RejectsCapacityWindowLongerThanWipHistory,
     testDashboardV2WipEpisodeTransitions,
     testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes,
+    testDashboardV8ActiveFlowComponentsAndZeroRate,
+    testDashboardV8FlowDoesNotDependOnDeliveries,
     testDashboardV7CalibrationUsesReliableValidWindowsAndMedian,
     testDashboardV7CalibrationUsesFullPrecisionAndIndependentJobMedian,
     testDashboardV7CalibrationIgnoresOperationalTrendDepth,
@@ -5550,6 +5552,58 @@ function testDashboardV2WipEpisodeTransitions() {
     assertEquals_(null, episodes[episodes.length - 1].closed_at, 'episodio ancora WIP non chiuso da now o chiusura amministrativa');
     assertEquals_(original, JSON.stringify(job), 'nessuna mutazione della cronologia');
   });
+}
+
+function testDashboardV8ActiveFlowComponentsAndZeroRate() {
+  var weeks = dashboardV2CompleteIsoWeeks_(new Date('2026-02-16T12:00:00+01:00'), 2);
+  var jobs = { A: { size_points: 8 }, B: { size_points: 3 } };
+  var episodes = [
+    { job_id: 'A', wip_episode_number: 1, closed_at: '2026-02-03T09:00' },
+    { job_id: 'A', wip_episode_number: 2, closed_at: '2026-02-10T09:00' },
+    { job_id: 'B', wip_episode_number: 1, closed_at: '2026-02-11T09:00' },
+    { job_id: 'A', wip_episode_number: 3, closed_at: null },
+    { job_id: 'B', wip_episode_number: 2, closed_at: '2026-02-16T09:00' }
+  ];
+  var active = dashboardV7ActiveFlow_(episodes, jobs, weeks, 2);
+  assertEquals_(3, active.closed_wip_episodes, 'esclusi episodio aperto e settimana corrente');
+  assertEquals_(2, active.first_work.episodes, 'primi passaggi chiusi');
+  assertEquals_(1, active.resumed_work.episodes, 'riprese chiuse');
+  assertEquals_(19, active.first_work.points + active.resumed_work.points, 'partizione esatta punti, job A pesa per ciascun passaggio');
+  assertEquals_(9.5, active.points_per_week_exact, 'media include entrambe le settimane');
+  assertEquals_(active.closed_wip_episodes, active.first_work.episodes + active.resumed_work.episodes, 'partizione passaggi');
+  assertEquals_(active.jobs_per_week, active.first_work.episodes_per_week + active.resumed_work.episodes_per_week, 'partizione tassi lavori');
+  assertEquals_(active.points_per_week, active.first_work.points_per_week + active.resumed_work.points_per_week, 'partizione tassi punti');
+  assertEquals_(null, dashboardV7ActiveFlow_(episodes, jobs, weeks, 3).first_work.episodes_per_week, 'copertura insufficiente distinta da zero');
+  var empty = dashboardV7ActiveFlow_([], jobs, weeks, 2);
+  assertEquals_(0, empty.points_per_week_exact, 'zero e una misura, non assenza di dato');
+  assertEquals_(0, empty.first_work.episodes_per_week, 'zero prima lavorazione');
+  assertEquals_(0, empty.resumed_work.points_per_week, 'zero rientri');
+  var now = new Date('2026-02-16T12:00:00+01:00');
+  var config = dashboardV2TestConfig_({ capacity_window_weeks: 2 });
+  var state = buildDashboardStateV2_([], [], config, now, [], []);
+  assertEquals_(config.capacity_window_weeks, state.systemFlow.recent_active_flow.window_weeks, 'finestra dal config');
+  var legacy = dashboardV3FlowState_(state.currentWork || {}, state.capacity, config);
+  assertEquals_(JSON.stringify(legacy.recent_completion_throughput), JSON.stringify(state.systemFlow.recent_completion_throughput), 'contratto consegne invariato');
+}
+
+function testDashboardV8FlowDoesNotDependOnDeliveries() {
+  var current = { wip_jobs: 4 };
+  var config = { wip_target_min_jobs: 3, wip_target_max_jobs: 6, flow_slow_ratio: 0.4,
+    flow_reference_points_per_week: 999, min_samples_capacity: 5 };
+  var reference = { suggested_active_flow_points_per_week_exact: 10, valid_window_count: 8 };
+  var active = { points_per_week_exact: 4, closed_wip_episodes: 1 };
+  assertEquals_('REGULAR', dashboardV8FlowState_(current, active, reference, config).system_flow_status,
+    'un solo passaggio misurato non nasconde il flusso; riferimento consegne ignorato; uguaglianza soglia regolare');
+  active.points_per_week_exact = 3.999;
+  assertEquals_('SLOWING', dashboardV8FlowState_(current, active, reference, config).system_flow_status, 'precisione piena sotto soglia');
+  active.points_per_week_exact = 0;
+  assertEquals_('SLOWING', dashboardV8FlowState_(current, active, reference, config).system_flow_status, 'zero uscite segnala rallentamento');
+  active.points_per_week_exact = null;
+  assertEquals_('INSUFFICIENT_DATA', dashboardV8FlowState_(current, active, reference, config).system_flow_status, 'copertura mancante distinta da zero');
+  active.points_per_week_exact = 4;
+  assertEquals_('OBSERVING', dashboardV8FlowState_(current, active, {}, config).system_flow_status, 'nessun riferimento inventato');
+  assertEquals_('HIGH_LOAD', dashboardV8FlowState_({ wip_jobs: 7 }, active, {}, config).system_flow_status, 'fascia WIP ancora operativa');
+  assertEquals_('UNDERFED', dashboardV8FlowState_({ wip_jobs: 2 }, active, {}, config).system_flow_status, 'poco WIP distinto dal ritmo');
 }
 
 function testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes() {

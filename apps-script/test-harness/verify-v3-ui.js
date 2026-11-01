@@ -42,25 +42,25 @@ function verifyV3Ui() {
     ['stato del flusso limitato alle cinque etichette approvate', ['Sottoalimentato', 'Regolare', 'Rallentato', 'Carico elevato', 'Dati insufficienti'].every(label => client.includes(label))],
     ['classificazione e parametri obsoleti assenti dai sorgenti applicativi', obsoleteFlowTokens.every(token => !applicationSources.includes(token))],
     ['dettaglio stato usa solo i fattori decisionali', client.includes('detail.wip_current') &&
-      client.includes('detail.slowing_threshold_points_per_week') && !client.includes('detail.reference_points_per_week') &&
+      client.includes('detail.slowing_threshold_points_per_week') && client.includes('detail.reference_points_per_week') &&
       !client.includes('Qualità del campione</dt>')],
     ['dettaglio ritmo esplicita finestra e doppia unità',
-      client.includes('Ritmo recente delle consegne') && client.includes('recent.window_weeks') &&
-      client.includes('recent.visits_per_week') && client.includes('recent.points_per_week') &&
+      client.includes('Flusso attivo osservato') && client.includes('recent.window_weeks') &&
+      client.includes('recent.jobs_per_week') && client.includes('deliveries.visits_per_week') && client.includes('recent.points_per_week') &&
       client.includes('settimane ISO complete') &&
       !client.includes('ultime 8 settimane') && style.includes('.v3-flow-rate-table')],
     ['WIP letto dal backend', renderer.includes('current.wip_jobs') && renderer.includes('current.wip_points')],
     ['lavoro futuro letto dal backend', renderer.includes('future.future_work_jobs') && renderer.includes('future.future_work_points')],
     ['settimane lette dal backend', renderer.includes('future.committed_weeks')],
     ['rientri aggregati sulla finestra letti dal backend', renderer.includes('rework.rework_wip_entries') && renderer.includes('rework.rework_window_weeks') && renderer.includes('rework.rework_share')],
-    ['tempi P50 e P80 letti dal backend', renderer.includes('timing.lead_time_median_days') && renderer.includes('timing.lead_time_p80_days') && markup.includes('Tempo tipico alla consegna') && markup.includes('8 pratiche su 10 entro')],
+    ['tempi P50 e P80 letti dal backend', renderer.includes('timing.lead_time_median_days') && renderer.includes('timing.lead_time_p80_days') && markup.includes('Tempo tipico alla consegna') && markup.includes('8 lavori su 10 entro')],
     ['precisione home coerente per settimane e giorni',
       renderer.includes('dashboardV3FormatHomeEstimate_(future.committed_weeks, 1)') &&
       renderer.includes("dashboardV3FormatHomeEstimate_(timing.lead_time_median_days, 0, ' giorni')") &&
       renderer.includes("dashboardV3FormatHomeEstimate_(timing.lead_time_p80_days, 0, ' giorni')") &&
       !/dashboardV3Text_\(future\.committed_weeks|dashboardV3Text_\(timing\.lead_time_(?:median|p80)_days/.test(renderer)],
     ['metodo tempi assente dalla home', !markup.includes('nearest_rank') && !markup.includes('first_operational_entry_to_next_done')],
-    ['dettaglio tempi disaggregato per taglia', client.includes("['taglia', 'Taglia'], ['mediana_giorni', 'Tempo tipico (giorni)'], ['p80_giorni', '8 pratiche su 10 entro (giorni)'], ['numero_casi', 'Casi']")],
+    ['dettaglio tempi disaggregato per taglia', client.includes("['taglia', 'Taglia'], ['mediana_giorni', 'Tempo tipico (giorni)'], ['p80_giorni', '8 lavori su 10 entro (giorni)'], ['numero_casi', 'Casi']")],
     ['metodo tempi confinato alla diagnostica', renderer.includes('timingDiagnostic.interval_method') && renderer.includes('Stima teorica')],
     ['valori null spiegati', renderer.includes('Ritmo di assorbimento del nuovo lavoro non ancora stimabile.')],
     ['grafico alimentato dalle boundary backend', client.includes('row.boundaries[unit]')],
@@ -84,7 +84,7 @@ function verifyV3Ui() {
     ['tooltip CFD legge stock e cumulative backend',
       client.includes("selected['wip_new_' + unit]") && client.includes("selected['wip_rework_' + unit]") &&
       client.includes("selected['waiting_stock_' + unit]") && client.includes("['cum_new_work_' + unit]") &&
-      client.includes('Ingressi cumulativi') && client.includes('Completamenti cumulativi')],
+      client.includes('Ingressi cumulativi') && client.includes('Consegne cumulative')],
     ['focus serie attenua solo il riempimento e Mostra tutte ripristina',
       markup.includes('data-v3-cfd-series="wipRework"') && markup.includes('id="v3-cfd-show-all"') &&
       markup.includes('Mostra tutte') && client.includes('dashboardV5FocusedSeries') &&
@@ -173,7 +173,7 @@ function verifyV3Ui() {
   if (failures.length) {
     throw new Error('Verifiche UI V3 fallite: ' + failures.join(', '));
   }
-  return checks.map(([name]) => name);
+  return checks.map(([name]) => name).concat(require('./verify-flow-card').verifyFlowCard(), require('./verify-dashboard-vocabulary').verifyDashboardVocabulary(), require('./verify-invoiced-vocabulary').verifyInvoicedVocabulary());
 }
 
 if (require.main === module) {

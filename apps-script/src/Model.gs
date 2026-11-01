@@ -764,7 +764,7 @@ function dataQuality_(observedCount, completedCount) {
     good: 'La lettura e piu rappresentativa del funzionamento recente.'
   };
   if (completedCount < 5) {
-    messages[level] += ' Servono almeno 5 lavori completati per stimare tempi e capacita.';
+    messages[level] += ' Servono almeno 5 lavori consegnati per stimare tempi e capacita.';
   }
   return {
     level: level,
@@ -781,7 +781,7 @@ function systemStatus_(load, dataQuality) {
     return {
       code: 'unknown',
       label: 'DATI INSUFFICIENTI',
-      message: 'Il sistema non mostra una misura affidabile del carico: servono piu lavori completati.'
+      message: 'Il sistema non mostra una misura affidabile del carico: servono piu lavori consegnati.'
     };
   }
   if (load < 0.70) {

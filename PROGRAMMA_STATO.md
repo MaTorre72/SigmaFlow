@@ -1,5 +1,35 @@
 # Stato SigmaFlow
-Aggiornato: 2026-09-16
+Aggiornato: 2026-11-01
+
+## Vocabolario, Fatturato e preparazione del merge (2026-11-01)
+
+Documentazione allineata ai nomi della dashboard: Tasso di consegna, rientri,
+prima lavorazione e Incarichi fatturati. Verifica documentale: 119 elementi
+tra apici inversi e 81 numeri, stesse occorrenze e nessuna differenza.
+La spunta e le date collegate usano Fatturato/fatturazione, senza cambiare
+invoiced o incarico_chiuso_ts. La card Incarichi fatturati non è nel branch:
+la revisione delle conclusioni resta locale ed esclusa. Suite isolata
+261/261 e 57/57 UI; push TEST e pull isolato: 17/17 file identici.
+Preparazione del merge nel file Claude outputs/PREPARAZIONE_MERGE_FLUSSO_ATTIVO_2026-11-01.md:
+nessuna PR aperta, nessun merge o deployment pubblico eseguito.
+
+
+## Riga del flusso attivo nello Stato del flusso (2026-10-28)
+
+Branch codex/riga-flusso-attivo: tabella con flusso attivo osservato, prima
+lavorazione, rientri e ritmo di consegna, in lavori/settimana e punti/settimana.
+Finestra backend nella didascalia; soglia accanto ai punti del flusso attivo.
+Tassi delle componenti già presenti nel lavoro locale V8, inclusi con le sole
+dipendenze dello stato esistente; nessuna formula cambiata. Escluse la revisione
+degli incarichi conclusi, i testi CFD e i relativi parametri e documenti.
+Tooltip «valori arrotondati»: possibili differenze fra somma visualizzata e totale.
+Suite eseguita con TZ=UTC: il fuso locale fa fallire due fixture legacy al cambio ora.
+Verifica sul contenuto isolato del commit: 261/261 test e 51/51 controlli UI.
+Push sul solo TEST, pull isolato: 17/17 file identici. Riproduzione locale con
+markup reale e routeAction_ a 1280 e 380 px: nessun overflow, sia con valori
+sia con copertura assente. preview_start non disponibile; controllo nel browser
+Chrome locale e schermate. Gate umano di Marco sul TEST ancora richiesto.
+
 
 ## V5 — gate umano 6F approvato sul TEST (2026-09-16)
 

@@ -478,6 +478,10 @@ function dashboardV7ActiveFlow_(episodes, jobsById, weeks, windowWeeks) {
     });
     return {
       period_start: week.period_start, period_end: week.period_end,
+      first_wip_episodes: closed.filter(function(e) { return e.wip_episode_number === 1; }).length,
+      first_wip_points: closed.filter(function(e) { return e.wip_episode_number === 1; }).reduce(function(sum, e) { return sum + jobPoints_(jobsById[e.job_id]); }, 0),
+      resumed_wip_episodes: closed.filter(function(e) { return e.wip_episode_number > 1; }).length,
+      resumed_wip_points: closed.filter(function(e) { return e.wip_episode_number > 1; }).reduce(function(sum, e) { return sum + jobPoints_(jobsById[e.job_id]); }, 0),
       closed_wip_episodes: closed.length,
       closed_wip_points: closed.reduce(function(sum, episode) {
         return sum + jobPoints_(jobsById[episode.job_id]);
@@ -487,8 +491,17 @@ function dashboardV7ActiveFlow_(episodes, jobsById, weeks, windowWeeks) {
   var recent = weekly.slice(Math.max(0, weekly.length - windowWeeks));
   var jobs = recent.reduce(function(sum, bucket) { return sum + bucket.closed_wip_episodes; }, 0);
   var points = recent.reduce(function(sum, bucket) { return sum + bucket.closed_wip_points; }, 0);
+  function component(prefix) {
+    var count = recent.reduce(function(sum, bucket) { return sum + bucket[prefix + '_wip_episodes']; }, 0);
+    var weight = recent.reduce(function(sum, bucket) { return sum + bucket[prefix + '_wip_points']; }, 0);
+    return { episodes: count, points: weight,
+      episodes_per_week: recent.length === windowWeeks ? round_(count / windowWeeks) : null,
+      points_per_week: recent.length === windowWeeks ? round_(weight / windowWeeks) : null };
+  }
   return {
     definition: 'closed_wip_episodes_in_complete_iso_weeks',
+    first_work: component('first'),
+    resumed_work: component('resumed'),
     window_weeks: windowWeeks,
     window_start: recent.length ? recent[0].period_start : null,
     window_end: recent.length ? recent[recent.length - 1].period_end : null,
@@ -499,6 +512,46 @@ function dashboardV7ActiveFlow_(episodes, jobsById, weeks, windowWeeks) {
     jobs_per_week: recent.length === windowWeeks ? round_(jobs / windowWeeks) : null,
     points_per_week: recent.length === windowWeeks ? round_(points / windowWeeks) : null,
     weekly: weekly
+  };
+}
+
+// V8: la lettura operativa riguarda solo lavorazioni WIP terminate. Il minimo
+// campionario non nasconde il ritmo corrente: zero uscite e' un dato osservato.
+// Le conclusioni degli incarichi non sono input della classificazione.
+function dashboardV8FlowState_(currentWork, active, suggestion, config) {
+  active = active || {};
+  suggestion = suggestion || {};
+  var minimum = dashboardV2OptionalNumber_(config.wip_target_min_jobs);
+  var maximum = dashboardV2OptionalNumber_(config.wip_target_max_jobs);
+  var ratio = dashboardV2OptionalNumber_(config.flow_slow_ratio);
+  var bandValid = minimum !== null && minimum >= 0 && maximum !== null && maximum >= minimum;
+  var reference = suggestion.suggested_active_flow_points_per_week_exact;
+  var referenceValid = reference !== null && reference !== undefined && reference > 0 && ratio > 0 && ratio <= 1;
+  var observed = active.points_per_week_exact;
+  var covered = observed !== null && observed !== undefined && isFinite(observed);
+  var status = 'INSUFFICIENT_DATA';
+  var message = 'Storico WIP insufficiente a coprire la finestra osservata.';
+  if (!bandValid) {
+    message = 'Fascia dei lavori attivi non configurata.';
+  } else if (currentWork.wip_jobs > maximum) {
+    status = 'HIGH_LOAD'; message = 'Lavori attivi sopra la fascia configurata.';
+  } else if (currentWork.wip_jobs < minimum) {
+    status = 'UNDERFED'; message = 'Il sistema ha poco lavoro attivo rispetto alla fascia configurata.';
+  } else if (covered && !referenceValid) {
+    status = 'OBSERVING'; message = 'Flusso attivo misurato; storico di confronto ancora insufficiente.';
+  } else if (covered && observed < reference * ratio) {
+    status = 'SLOWING'; message = 'Le lavorazioni in WIP terminano a un ritmo inferiore alla soglia del riferimento storico.';
+  } else if (covered) {
+    status = 'REGULAR'; message = 'Ritmo delle lavorazioni in WIP coerente con il riferimento storico.';
+  }
+  return {
+    system_flow_status: status, system_flow_message: message,
+    system_flow_quality: status === 'INSUFFICIENT_DATA' ? 'insufficient' : status === 'OBSERVING' ? 'partial' : 'sufficient',
+    basis: 'closed_wip_episodes', recent_active_flow: active,
+    system_flow_detail: { wip_current: currentWork.wip_jobs, wip_target_min: minimum, wip_target_max: maximum,
+      reference_source: 'median_reliable_wip_windows', reference_points_per_week: referenceValid ? round_(reference) : null,
+      reference_window_count: Number(suggestion.valid_window_count || 0),
+      slowing_threshold_points_per_week: referenceValid ? round_(reference * ratio) : null, slow_ratio: ratio }
   };
 }
 
@@ -1115,7 +1168,7 @@ function dashboardV3FlowState_(currentWork, capacity, config) {
     status = 'INSUFFICIENT_DATA';
   } else if (recentExact < calibration.delivery_reference_points_per_week * calibration.slow_ratio) {
     status = 'SLOWING';
-    message = 'Il lavoro attivo è sufficiente, ma i completamenti sono sotto il ritmo atteso.';
+    message = 'Il lavoro attivo è sufficiente, ma le consegne sono sotto il ritmo atteso.';
   } else {
     status = 'REGULAR';
     message = 'Ritmo coerente con il riferimento configurato.';
@@ -1424,6 +1477,10 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
       capacity.active_flow.points_per_week_exact = null;
       capacity.active_flow.jobs_per_week = null;
       capacity.active_flow.points_per_week = null;
+      ['first_work', 'resumed_work'].forEach(function(key) {
+        capacity.active_flow[key].episodes_per_week = null;
+        capacity.active_flow[key].points_per_week = null;
+      });
     }
   }
   var flow = dashboardV2Flow_(normalized, episodes, allJobs, visits.concat(archivedVisits || []), config, now);
@@ -1442,7 +1499,10 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   }) };
   var calibrationSuggestion = dashboardV7CalibrationSuggestion_(calibrationFlow, calibrationStocks, config);
   var history = dashboardV2History_(normalized, allJobs, flow, now, stockIndex);
-  var systemFlow = dashboardV3FlowState_(currentWork, capacity, config);
+  var systemFlow = dashboardV8FlowState_(currentWork, capacity.active_flow, calibrationSuggestion, config);
+  var legacyFlow = dashboardV3FlowState_(currentWork, capacity, config);
+  systemFlow.recent_completion_throughput = legacyFlow.recent_completion_throughput;
+  systemFlow.calibration = legacyFlow.calibration;
   var recentRework = dashboardV3RecentRework_(capacity);
   var details = dashboardV3Details_(allJobs, normalized, episodes, columnMap, now, capacity, recentRework);
   var timing = dashboardV5Timing_(normalized, allJobs);

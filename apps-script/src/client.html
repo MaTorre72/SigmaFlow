@@ -1229,8 +1229,8 @@
     incarico_ts: 'Data incarico (incarico_ts)',
     prep_ts: 'Data inizio preparazione (prep_ts)',
     start_ts: 'Data inizio lavorazione (start_ts)',
-    done_ts: 'Data completamento (done_ts)',
-    incarico_chiuso_ts: 'Chiusura incarico (incarico_chiuso_ts)'
+    done_ts: 'Data consegna (done_ts)',
+    incarico_chiuso_ts: 'Fatturazione incarico (incarico_chiuso_ts)'
   };
   var HARD_ERROR_MESSAGES_ = {
     TS_IN_FUTURO: 'La data non puo\' essere nel futuro.',
@@ -1238,7 +1238,7 @@
     REASON_OBBLIGATORIA: 'Il motivo della correzione e\' obbligatorio.',
     CAMPO_NON_CORREGGIBILE: 'Il campo selezionato non e\' correggibile da qui.',
     DATA_NON_VALIDA: 'Il nuovo valore non e\' una data valida.',
-    RIENTRO_DIRETTO_WIP_NON_CONSENTITO: 'Il rientro diretto da una colonna di attesa o da completato a WIP non e\' consentito. Registra prima lo spostamento in TO DO o in una colonna precedente.'
+    RIENTRO_DIRETTO_WIP_NON_CONSENTITO: 'Il rientro diretto da una colonna di attesa o da consegnato a WIP non e\' consentito. Registra prima lo spostamento in TO DO o in una colonna precedente.'
   };
   var SEQUENCE_WARNING_MESSAGES_ = {
     SEQUENZA_MODIFICATA: function(w) {
@@ -2356,29 +2356,62 @@
     return quality === 'sufficient' ? 'Buona' : quality === 'partial' ? 'Parziale' : 'Insufficiente';
   }
 
-  function dashboardV5RenderFlowDetail_(recent, detail, bandText) {
+  function dashboardV5RenderFlowDetail_(recent, detail, bandText, deliveries) {
+    deliveries = deliveries || {};
     var root = document.getElementById('v3-flow-detail');
     var weeks = recent.window_weeks;
     var weeksText = weeks === null || weeks === undefined
       ? 'finestra configurata' : 'ultime ' + dashboardV3Text_(weeks) + ' settimane ISO complete';
+    var explanations = dashboardV5FlowExplanations_(detail, state.columnMeta || []);
     root.innerHTML =
       '<dl class="v3-flow-current">' +
         '<dt>Lavori attivi adesso</dt><dd>' + escapeHtml(dashboardV3Text_(detail.wip_current)) + '</dd>' +
         '<dt>Fascia configurata</dt><dd>' + escapeHtml(bandText) + '</dd>' +
       '</dl>' +
       '<section class="v3-flow-throughput" aria-labelledby="v3-flow-throughput-title">' +
-        '<h3 id="v3-flow-throughput-title">Ritmo recente delle consegne</h3>' +
-        '<p>Media sulle ' + escapeHtml(weeksText) + '.</p>' +
+        '<h3 id="v3-flow-throughput-title">Flusso attivo osservato</h3>' +
         '<div class="v3-flow-rate-table-wrap"><table class="v3-flow-rate-table">' +
-          '<thead><tr><th scope="col">Lettura</th><th scope="col">Completamenti</th><th scope="col">Punti</th></tr></thead>' +
+          '<caption>Media sulle ' + escapeHtml(weeksText) + '</caption>' +
+          '<thead><tr><th scope="col">Lettura</th><th scope="col">Lavori/settimana</th><th scope="col">Punti/settimana</th></tr></thead>' +
           '<tbody>' +
-            '<tr><th scope="row">Osservato</th><td>' + escapeHtml(dashboardV3Text_(recent.visits_per_week, '/settimana')) + '</td><td>' + escapeHtml(dashboardV3Text_(recent.points_per_week, '/settimana')) + '</td></tr>' +
+            '<tr title="valori arrotondati"><th scope="row">Flusso attivo osservato</th><td>' + escapeHtml(dashboardV5FlowRateText_(recent.jobs_per_week)) + '</td><td>' + escapeHtml(dashboardV5FlowRateText_(recent.points_per_week)) + '<small class="v3-flow-threshold">Soglia di rallentamento: ' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')) + '</small></td></tr>' +
+            '<tr title="valori arrotondati"><th scope="row">Prima lavorazione</th><td>' + escapeHtml(dashboardV5FlowRateText_((recent.first_work || {}).episodes_per_week)) + '</td><td>' + escapeHtml(dashboardV5FlowRateText_((recent.first_work || {}).points_per_week)) + '</td></tr>' +
+            '<tr title="valori arrotondati"><th scope="row">Rientri</th><td>' + escapeHtml(dashboardV5FlowRateText_((recent.resumed_work || {}).episodes_per_week)) + '</td><td>' + escapeHtml(dashboardV5FlowRateText_((recent.resumed_work || {}).points_per_week)) + '</td></tr>' +
+            '<tr><th scope="row">Tasso di consegna</th><td>' + escapeHtml(dashboardV5FlowRateText_(deliveries.visits_per_week)) + '</td><td>' + escapeHtml(dashboardV5FlowRateText_(deliveries.points_per_week)) + '</td></tr>' +
           '</tbody>' +
         '</table></div>' +
+        explanations +
         '<dl class="v3-flow-evidence">' +
-          '<dt>Soglia di rallentamento</dt><dd>' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')) + '</dd>' +
+          '<dt>Riferimento WIP dallo storico</dt><dd>' + escapeHtml(dashboardV3Text_(detail.reference_points_per_week, ' punti/settimana')) + ' · ' + escapeHtml(dashboardV3Text_(detail.reference_window_count, ' finestre valide')) + '</dd>' +
         '</dl>' +
       '</section>';
+  }
+
+  function dashboardV5FlowRateText_(value) {
+    return value === null || value === undefined ? 'Dati insufficienti' : dashboardV3Text_(value);
+  }
+
+  function dashboardV5FlowExplanations_(detail, columns) {
+    var wip = columns.filter(function(column) { return column.role === 'wip'; });
+    var done = columns.filter(function(column) { return column.role === 'done'; });
+    var text = '';
+    // Il testo al singolare richiede la configurazione verificata della board.
+    if (wip.length === 1 && done.length === 1) {
+      var wipName = escapeHtml(wip[0].label);
+      var doneName = escapeHtml(done[0].label);
+      text += '<p>Ogni volta che un lavoro esce dalla colonna ' + wipName + ', verso un’attesa o verso ' + doneName +
+        ', viene registrato un passaggio. Il primo passaggio è la prima lavorazione. Ogni lavoro che ripassa nella colonna ' + wipName +
+        ', anche dopo un’attesa, è un rientro e viene conteggiato a parte. I punti di un passaggio sono quelli dell’incarico: nel periodo considerato, un incarico da 5 punti che esce dal WIP due volte (per esempio verso un’attesa e poi, dopo il rientro, verso la consegna) vale 10 punti.</p>';
+    }
+    if (detail.reference_window_count > 0 && detail.slow_ratio !== null && detail.slow_ratio !== undefined &&
+        detail.slowing_threshold_points_per_week !== null && detail.slowing_threshold_points_per_week !== undefined) {
+      text += '<p>Come riferimento si assume il ritmo tipico dell’andamento storico, calcolato come mediana di ' +
+        escapeHtml(dashboardV3Text_(detail.reference_window_count)) + ' finestre valide. Come soglia di rallentamento si assume il ' +
+        escapeHtml(detail.slow_ratio.toLocaleString('it-IT', { style: 'percent', maximumFractionDigits: 2 })) +
+        ' del riferimento: se il flusso attivo scende sotto ' + escapeHtml(dashboardV3Text_(detail.slowing_threshold_points_per_week)) +
+        ' punti/settimana, lo stato non è più «Regolare».</p>';
+    }
+    return text;
   }
 
   // Fase 4a: la precisione di presentazione della home e' intenzionalmente
@@ -2425,7 +2458,7 @@
     var timing = dashboard.timing || {};
     var labels = {
       UNDERFED: 'Sottoalimentato', REGULAR: 'Regolare', SLOWING: 'Rallentato',
-      HIGH_LOAD: 'Carico elevato', INSUFFICIENT_DATA: 'Dati insufficienti'
+      HIGH_LOAD: 'Carico elevato', INSUFFICIENT_DATA: 'Dati insufficienti', OBSERVING: 'In osservazione'
     };
     var icons = { UNDERFED: '↓', REGULAR: '✓', SLOWING: '!', HIGH_LOAD: '!', INSUFFICIENT_DATA: '?' };
     var classes = { UNDERFED: 'underfed', REGULAR: 'regular', SLOWING: 'slowing', HIGH_LOAD: 'high-load', INSUFFICIENT_DATA: 'insufficient' };
@@ -2461,17 +2494,17 @@
     document.getElementById('v3-lead-time-p80').textContent = timing.lead_time_p80_days === null || timing.lead_time_p80_days === undefined
       ? '—' : dashboardV3FormatHomeEstimate_(timing.lead_time_p80_days, 0, ' giorni');
     var timingEvidence = timing.lead_time_sample_size
-      ? dashboardV3Text_(timing.lead_time_sample_size, ' unità concluse · qualità ') + dashboardV4QualityLabel_(timing.lead_time_quality)
+      ? dashboardV3Text_(timing.lead_time_sample_size, ' consegne · qualità ') + dashboardV4QualityLabel_(timing.lead_time_quality)
       : 'Nessun intervallo completo disponibile';
     document.getElementById('v3-lead-time-median-detail').textContent = timingEvidence;
     document.getElementById('v3-lead-time-p80-detail').textContent = timingEvidence;
 
-    var recent = flow.recent_completion_throughput || {};
+    var recent = flow.recent_active_flow || {};
     var detail = flow.system_flow_detail || {};
     var bandText = detail.wip_target_min === null || detail.wip_target_max === null
       ? 'Taratura non configurata'
       : detail.wip_target_min + '–' + detail.wip_target_max + ' lavori';
-    dashboardV5RenderFlowDetail_(recent, detail, bandText);
+    dashboardV5RenderFlowDetail_(recent, detail, bandText, flow.recent_completion_throughput);
 
     var diagnostic = ((dashboard.diagnostics || {}).summary || {});
     var suggestion = ((dashboard.diagnostics || {}).calibration_suggestion || {});
@@ -2486,12 +2519,12 @@
       'Storico affidabile da': reliableDate,
       'Fascia WIP configurata': bandText,
       'Riferimento consegne': dashboardV3Text_(calibration.reference_points_per_week, ' punti/settimana') +
-        ' · ' + dashboardV3Text_(calibration.reference_completions_per_week, ' completamenti/settimana'),
+        ' · ' + dashboardV3Text_(calibration.reference_completions_per_week, ' consegne/settimana'),
       'Soglia di rallentamento': dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')
     });
     renderDl('v7-capacity-detail', {
       'Flusso attivo osservato': dashboardV3Text_(active.points_per_week, ' punti/settimana'),
-      'Ritmo di consegna': dashboardV3Text_(observed.rolling_capacity_points_per_week, ' punti/settimana'),
+      'Tasso di consegna': dashboardV3Text_(observed.rolling_capacity_points_per_week, ' punti/settimana'),
       'Rientri negli ingressi WIP': rework.rework_share === null || rework.rework_share === undefined
         ? 'Dato non ancora disponibile' : dashboardV3Text_(100 * rework.rework_share, '%')
     });
@@ -2893,7 +2926,7 @@
       var rateUnit = unit === 'jobs' ? ' lavori/settimana' : ' punti/settimana';
       var parts = [];
       if (state.dashboardV5EntryRate) { parts.push('Tasso di ingresso ' + dashboardV3Text_(Math.round(entryRate * 100) / 100, rateUnit)); }
-      if (state.dashboardV5CompletionRate) { parts.push('Tasso di completamento ' + dashboardV3Text_(Math.round(completionRate * 100) / 100, rateUnit)); }
+      if (state.dashboardV5CompletionRate) { parts.push('Tasso di consegna ' + dashboardV3Text_(Math.round(completionRate * 100) / 100, rateUnit)); }
       rateResult.hidden = false; rateResult.textContent = parts.join(' · ');
     } else { rateResult.hidden = true; rateResult.textContent = ''; }
 
@@ -2937,11 +2970,11 @@
     var selectedDate = new Date(selected.sampled_at || selected.period_end);
     var dateLabel = selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
     selection.textContent = dateLabel + ' · Già acquisito ' + dashboardV3Text_(values.future) +
-      ' · WIP nuovo ' + dashboardV3Text_(values.wipNew) + ' · WIP rework ' + dashboardV3Text_(values.wipRework) +
+      ' · Prima lavorazione ' + dashboardV3Text_(values.wipNew) + ' · Rientri ' + dashboardV3Text_(values.wipRework) +
       ' · WIP totale ' + dashboardV3Text_(values.wip) + ' · In attesa ' + dashboardV3Text_(values.waiting) +
-      ' · Completato ' + dashboardV3Text_(values.completed) + ' · Totale ' + dashboardV3Text_(values.total) +
+      ' · Consegnato ' + dashboardV3Text_(values.completed) + ' · Totale ' + dashboardV3Text_(values.total) +
       ' · Ingressi cumulativi ' + dashboardV3Text_(values.cumulativeEntries) +
-      ' · Completamenti cumulativi ' + dashboardV3Text_(values.cumulativeCompleted) +
+      ' · Consegne cumulative ' + dashboardV3Text_(values.cumulativeCompleted) +
       ' · Nuovi ingressi ' + dashboardV3Text_(selected.new_work_jobs) + ' · Rientri ' +
       dashboardV3Text_(selected.rework_wip_episodes) + ' · Consegne ' + dashboardV3Text_(selected.completed_visits);
 
@@ -2979,7 +3012,7 @@
         }
       } else {
         measureResult.innerHTML = '<strong>Tempo equivalente dal CFD</strong>' + escapeHtml(quotaLabel) +
-          ' · Completamento equivalente non ancora osservato nello storico disponibile.';
+          ' · Consegna equivalente non ancora osservata nello storico disponibile.';
       }
       ctx.fillStyle = '#2f6b9a'; ctx.beginPath(); ctx.arc(x(selectedIndex), y(measure.quota), 4, 0, Math.PI * 2); ctx.fill();
     } else { measureResult.hidden = true; }
@@ -2993,9 +3026,9 @@
     ctx.beginPath(); ctx.arc(crossX, y(boundaries.future_work_boundary), 4, 0, Math.PI * 2); ctx.fill();
 
     var tooltipLines = [dateLabel, 'Già acquisito  ' + dashboardV3Text_(values.future),
-      'WIP nuovo  ' + dashboardV3Text_(values.wipNew), 'WIP rework  ' + dashboardV3Text_(values.wipRework),
+      'Prima lavorazione  ' + dashboardV3Text_(values.wipNew), 'Rientri  ' + dashboardV3Text_(values.wipRework),
       'WIP totale  ' + dashboardV3Text_(values.wip), 'In attesa  ' + dashboardV3Text_(values.waiting),
-      'Completato  ' + dashboardV3Text_(values.completed), 'Totale  ' + dashboardV3Text_(values.total)];
+      'Consegnato  ' + dashboardV3Text_(values.completed), 'Totale  ' + dashboardV3Text_(values.total)];
     var tooltipWidth = 220;
     var tooltipHeight = 164;
     var tooltipX = crossX + 12;
@@ -3029,8 +3062,8 @@
       resumed: { title: 'Rientri nel lavoro', description: 'Lavori già iniziati che sono usciti dal lavoro attivo e sono poi rientrati.', columns: [
         ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['numero_rientro', 'Rientro n.'], ['stato_provenienza', 'Stato di provenienza'], ['data_uscita_precedente', 'Data uscita precedente'], ['data_ripresa', 'Data rientro']] },
       timing: { title: 'Tempi per taglia', description: 'Distribuzione degli intervalli completi dall’ingresso nel lavoro alla consegna.', columns: [
-        ['taglia', 'Taglia'], ['mediana_giorni', 'Tempo tipico (giorni)'], ['p80_giorni', '8 pratiche su 10 entro (giorni)'], ['numero_casi', 'Casi'], ['qualita', 'Qualità']] },
-      recent_completions: { title: 'Completamenti del ritmo recente', description: 'Righe incluse nella finestra, esportabili per la riconciliazione esterna.', columns: [
+        ['taglia', 'Taglia'], ['mediana_giorni', 'Tempo tipico (giorni)'], ['p80_giorni', '8 lavori su 10 entro (giorni)'], ['numero_casi', 'Casi'], ['qualita', 'Qualità']] },
+      recent_completions: { title: 'Consegne recenti', description: 'Righe incluse nella finestra, esportabili per la riconciliazione esterna.', columns: [
         ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['job_id', 'Job'], ['numero_visita', 'Numero visita'], ['consegna_ts', 'Consegna'], ['punti', 'Punti']] }
     };
     var definition = definitions[kind];
@@ -3084,7 +3117,7 @@
     document.getElementById('data-quality-message').textContent = quality.message || '';
     var qualityThresholds = { low: 'sotto 10', medium: '10-30', good: 'oltre 30' };
     var qualityThreshold = qualityThresholds[quality.level] || qualityThresholds.low;
-    document.getElementById('data-quality-sample').textContent = valueOrDash(quality.observed_initiatives) + ' lavori osservati (soglia ' + (quality.label || 'BASSA') + ': ' + qualityThreshold + '), ' + valueOrDash(quality.completed_samples) + ' completati utili.';
+    document.getElementById('data-quality-sample').textContent = valueOrDash(quality.observed_initiatives) + ' lavori osservati (soglia ' + (quality.label || 'BASSA') + ': ' + qualityThreshold + '), ' + valueOrDash(quality.completed_samples) + ' consegnati utili.';
     document.getElementById('quick-data-quality').textContent = quality.label || 'BASSA';
     document.getElementById('quick-data-quality').className = 'quick-quality quality-' + (quality.level || 'low');
 
@@ -3150,8 +3183,8 @@
     // R6.6, completamento: entrambe le occorrenze di "Lavori completati"
     // leggono flow.completed_initiatives, non points.completed_cards
     // (pipeline sbagliata - vedi sopra).
-    flowExtraDl['Lavori completati (periodo)'] = valueOrDash(flow.completed_initiatives);
-    flowExtraDl['Passaggi completati (periodo)'] = valueOrDash(flow.completed_passages);
+    flowExtraDl['Lavori consegnati (periodo)'] = valueOrDash(flow.completed_initiatives);
+    flowExtraDl['Passaggi consegnati (periodo)'] = valueOrDash(flow.completed_passages);
     renderDl('flow-extra-metrics', flowExtraDl);
 
     var rework = system.reworkMetrics || {};
@@ -3330,7 +3363,7 @@
     var latentBacklog = system.latentBacklogMetrics || {};
     renderDl('latent-backlog-metrics', {
       'Periodo analizzato': metricValue(latentBacklog.window_days, ' giorni'),
-      'Consegne non ancora chiuse': valueOrDash(latentBacklog.count)
+      'Consegne non ancora fatturate': valueOrDash(latentBacklog.count)
     });
 
     renderDelayProfile(system.delayProfileMetrics || {});
@@ -3686,7 +3719,7 @@
       var denom = cycleTimeFit.w0 - w;
       return denom <= 0 ? null : cycleTimeFit.a / denom;
     } : null;
-    drawWipScatter_('wip-throughput-scatter-chart', 'wip-throughput-scatter-empty', weeklyBuckets, movingAverage, throughputCurve, 'throughput_punti_settimana', 'Throughput (pt/settimana)');
+    drawWipScatter_('wip-throughput-scatter-chart', 'wip-throughput-scatter-empty', weeklyBuckets, movingAverage, throughputCurve, 'throughput_punti_settimana', 'Tasso di consegna (pt/settimana)');
     document.getElementById('wip-throughput-fit-note').textContent = wipFitNoteText_(throughputFit);
     drawWipScatter_('wip-cycle-scatter-chart', 'wip-cycle-scatter-empty', weeklyBuckets, movingAverage, cycleCurve, 'ct_medio_giorni', 'Tempo di ciclo (g)');
     document.getElementById('wip-cycle-fit-note').textContent = wipFitNoteText_(cycleTimeFit);
