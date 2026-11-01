@@ -197,15 +197,15 @@
   <div class="points-summary">
     <article><span>Punti accettati (adesso)</span><strong id="points-committed">-</strong></article>
     <article><span>Nuovi punti (ultimi 30 giorni)</span><strong id="points-added">-</strong></article>
-    <article><span>Punti completati (ultimi 30 giorni)</span><strong id="points-completed">-</strong></article>
+    <article><span>Punti consegnati (ultimi 30 giorni)</span><strong id="points-completed">-</strong></article>
   </div>
   <article class="chart-panel">
-    <div><h2>Andamento del carico</h2><p>Lavoro accettato, nuovi punti e completati</p></div>
+    <div><h2>Andamento del carico</h2><p>Lavoro accettato, nuovi punti e punti consegnati</p></div>
     <canvas id="points-timeline-chart" height="240" aria-label="Andamento punti nel tempo"></canvas>
     <div class="chart-legend">
       <span class="legend-open">Lavoro accettato - asse sinistro</span>
       <span class="legend-entered">Nuovi - asse destro</span>
-      <span class="legend-completed">Completati - asse destro</span>
+      <span class="legend-completed">Consegnati - asse destro</span>
     </div>
     <div id="points-chart-empty" class="chart-empty" hidden>Dato non ancora stimabile</div>
     <!-- R9.16/R10.2: didascalia in linguaggio semplice - "Lavoro
@@ -218,7 +218,7 @@
          il significato di "lavoro accettato" (R7, stadi 1-4) e rischiava
          di confondersi con quel nome - "Nuovi" indica il flusso in
          ingresso nel periodo, distinto dallo stock. -->
-    <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Nuovi" e "Completati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
+    <p class="panel-note">"Lavoro accettato" e' quanti punti c'erano in carico in quel momento (asse sinistro); "Nuovi" e "Consegnati" sono quanti punti sono entrati o usciti in quel mese (asse destro) - due grandezze diverse, per questo hanno una scala diversa.</p>
     <!-- R10.6 (Marco, 2026-08-28): "un fatto, un calcolo" applicato
          davvero, non spiegato con una nota - "Lavoro accettato" qui e
          la card "Punti accettati (adesso)" sono ORA lo stesso identico
@@ -229,7 +229,7 @@
          Rapida) - due finestre diverse per scelta, dichiarate
          esplicitamente nell'etichetta di Vista Rapida invece che in
          una nota separata. -->
-    <p class="panel-note">"Lavoro accettato" qui e in Vista Rapida e' sempre lo stesso numero. "Nuovi" e "Completati" qui sono invece un totale per mese solare - un numero diverso da "Nuovi punti"/"Punti completati" di Vista Rapida, che coprono gli ultimi 30 giorni (finestra diversa, per questo il totale non e' lo stesso).</p>
+    <p class="panel-note">"Lavoro accettato" qui e in Vista Rapida e' sempre lo stesso numero. "Nuovi" e "Consegnati" qui sono invece un totale per mese solare - un numero diverso da "Nuovi punti"/"Punti consegnati" di Vista Rapida, che coprono gli ultimi 30 giorni (finestra diversa, per questo il totale non e' lo stesso).</p>
   </article>
 </section>
 
@@ -271,7 +271,7 @@
         <tr><th>Pipeline commerciale (preventivi)</th><td id="flow-pipeline-cards">-</td><td id="flow-pipeline-points">-</td><td>-</td><td>-</td></tr>
         <tr><th>Lavoro accettato (attuale)</th><td id="flow-committed-cards">-</td><td id="flow-committed-points">-</td><td>-</td><td>-</td></tr>
         <tr><th>Nuovi (periodo)</th><td id="flow-added-cards">-</td><td id="flow-added-points">-</td><td id="flow-added-rate">-</td><td id="flow-added-points-rate">-</td></tr>
-        <tr><th>Completati (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
+        <tr><th>Consegnati (periodo)</th><td id="flow-completed-cards">-</td><td id="flow-completed-points">-</td><td id="flow-completed-rate">-</td><td id="flow-completed-points-rate">-</td></tr>
       </tbody>
     </table></div>
     <p class="panel-note">I passaggi settimanali includono anche le rilavorazioni, non solo il lavoro nuovo. Periodo analizzato: <span id="flow-window-days">-</span> giorni.</p>
@@ -353,7 +353,7 @@
   <article class="panel wide">
     <h2>Carico mensile</h2>
     <div class="table-scroll"><table class="monthly-load-table">
-      <thead><tr><th>Mese</th><th>Nuovi lavori</th><th>Lavori completati</th><th>Nuovi punti</th><th>Punti completati</th><th>Saldo punti</th><th>Lavoro accettato</th></tr></thead>
+      <thead><tr><th>Mese</th><th>Nuovi lavori</th><th>Lavori consegnati</th><th>Nuovi punti</th><th>Punti consegnati</th><th>Saldo punti</th><th>Lavoro accettato</th></tr></thead>
       <tbody id="monthly-load-body"></tbody>
     </table></div>
     <!-- R9.14/R10.3: "Lavoro accettato" qui e' la stessa ricostruzione
@@ -382,10 +382,10 @@
     <dl id="advanced-mg1-metrics"></dl>
     <h3>Rilavorazione</h3>
     <dl id="advanced-rework-metrics"></dl>
-    <h3>Throughput e tempo di ciclo vs Lavoro in corso (diagnostico)</h3>
+    <h3>Tasso di consegna e tempo di ciclo vs Lavoro in corso (diagnostico)</h3>
     <p class="panel-note">Confronta il lavoro in corso con la velocita' di consegna e il tempo di ciclo, settimana per settimana (ultime <span id="wip-trend-weeks-note">-</span>). I punti chiari sono le singole settimane. La linea scura e' la media mobile: e' li' che si legge la tendenza reale.</p>
-    <h4>Throughput vs Lavoro in corso</h4>
-    <canvas id="wip-throughput-scatter-chart" height="200" aria-label="Dispersione throughput settimanale rispetto al lavoro in corso medio"></canvas>
+    <h4>Tasso di consegna vs Lavoro in corso</h4>
+    <canvas id="wip-throughput-scatter-chart" height="200" aria-label="Dispersione del tasso di consegna settimanale rispetto al lavoro in corso medio"></canvas>
     <div id="wip-throughput-scatter-empty" class="chart-empty" hidden>Dato non ancora sufficiente</div>
     <p class="panel-note" id="wip-throughput-fit-note"></p>
     <h4>Tempo di ciclo vs Lavoro in corso</h4>

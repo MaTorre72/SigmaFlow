@@ -1168,7 +1168,7 @@ function dashboardV3FlowState_(currentWork, capacity, config) {
     status = 'INSUFFICIENT_DATA';
   } else if (recentExact < calibration.delivery_reference_points_per_week * calibration.slow_ratio) {
     status = 'SLOWING';
-    message = 'Il lavoro attivo è sufficiente, ma i completamenti sono sotto il ritmo atteso.';
+    message = 'Il lavoro attivo è sufficiente, ma le consegne sono sotto il ritmo atteso.';
   } else {
     status = 'REGULAR';
     message = 'Ritmo coerente con il riferimento configurato.';
