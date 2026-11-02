@@ -13,7 +13,7 @@ Spreadsheet database creato e verificato:
 - Tab verificati: `jobs`, `visite`, `config`
 - Apps Script ID: `1RFY5lPPaDGoNjAvFximVqzMnihCP5Nso1nzsq70nDkMqiqikB7N1mDtq`
 - Web App URL: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec>
-- Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@19`)
+- Deployment corrente: `AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db` (`@37`, verificato il 02/11/2026)
 - Web App PROD: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=prod>
 - Web App TEST: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db/exec?env=test>
 - Collaudo HEAD dopo `clasp push`: <https://script.google.com/a/macros/sigmapiu.it/s/AKfycbzxoi0-mZWD4rRdcQ7fmEI241507eEa6bqJqvOrugg/dev?env=test>
@@ -126,3 +126,50 @@ L'elenco dei nomi mostrato nei menu e' salvato nel foglio `config`, chiave `assi
 Per aggiungere una persona, modifica l'array nella cella `value` mantenendo virgolette e parentesi quadre, quindi ricarica la Web App.
 
 In alternativa usa `Gestisci menu` nella Board. L'interfaccia conserva l'ordine manuale e impedisce l'eliminazione di voci ancora utilizzate. La stessa gestione e' disponibile per `tags_json`.
+
+## Pubblicazione PROD sul deployment esistente
+
+La pubblicazione del codice richiede un piano e l’approvazione esplicita di
+Marco in chat. Le scritture dei dati PROD restano riservate a Marco. Il progetto
+Apps Script è condiviso: HEAD serve il collaudo TEST, mentre il deployment
+pubblico usa una versione immutabile. Nessun nuovo push deve intervenire fra
+il confronto del codice approvato e la creazione della versione.
+
+1. Dopo il merge approvato, eseguire git fetch origin e verificare il merge in
+   origin/main. Eseguire suite e UI con TZ=UTC sul codice candidato.
+2. Leggere HEAD con clasp pull in una cartella isolata sotto /tmp/sf-scratch/,
+   con una copia di .clasp.json e rootDir impostato a punto. Confrontare tutti
+   i sorgenti con origin/main, equiparando .js/.gs e i fine riga. Fermarsi a
+   ogni differenza; non eseguire clasp push dalla cartella locale di Marco.
+3. Da apps-script leggere clasp deployments e clasp versions. Leggere config
+   PROD in sola lettura e confrontare le chiavi con quelle richieste dal codice.
+4. Mostrare versione iniziale, prossima versione attesa, comandi e rollback;
+   attendere «approvo la pubblicazione». Non cambiare il deployment ID.
+5. Dopo il via, creare la versione con clasp version; controllare il numero
+   restituito. Leggerla con clasp pull --versionNumber NUMERO in cartella
+   isolata e confrontare 17/17 sorgenti con origin/main prima del deploy.
+6. Aggiornare il deployment esistente con clasp deploy --deploymentId ID
+   --versionNumber NUMERO. Rileggere clasp deployments e confermare il numero.
+7. Sul link PROD controllare badge, Stato del flusso, finestra, WIP e fascia,
+   riferimento storico e soglia; riconciliare prima lavorazione + rientri =
+   flusso attivo e confrontare le consegne con le visite. Non toccare spunte,
+   salvare schede o lanciare migrazioni. Conservare prove e tabella aggregata.
+
+Esecuzione verificata il 02/11/2026: merge PR #25, origin/main 07817f6,
+HEAD TEST e versione immutabile 37 identici sui 17 sorgenti; passaggio 36 → 37.
+I comandi seguenti vanno eseguiti dalla cartella apps-script, con accesso clasp
+valido; il numero non deve essere riutilizzato per una futura pubblicazione.
+
+```powershell
+clasp version "Dettaglio WIP e vocabolario consegne - PR 25 07817f6"
+clasp deploy --deploymentId AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db --versionNumber 37
+```
+
+Rollback disponibile dalla 37 alla 36 (non eseguito; richiede approvazione):
+
+```powershell
+clasp deploy --deploymentId AKfycbxKZMfSDbFMI7vCQ1IaQ0wQdgrwBWE_FByTgPY6_2TxFlpmf1jXBzDb1M2ndSgDY4Db --versionNumber 36
+```
+
+Il rollback riporta il codice alla versione scelta, senza ripristinare o
+modificare il database. L’indirizzo pubblico resta quello del deployment.

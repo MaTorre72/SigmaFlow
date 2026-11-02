@@ -606,7 +606,7 @@ storico (§2.1-§2.5). Restano da fare P6 e P7:
 | **P5** | `applyManualMoveEffects_`: separare il ricalcolo di `job.status`/`status_since_ts`/`incarico_chiuso_ts` (funzioni pure, dal log intero) dagli effetti su `visite`. | ✅ Completata (Bug 1/Bug 2 + P5b, commit `2c5bc49`/`2159cab`) | — |
 | **P6** | `moveJob`: `removeCardEl_` prima di `placeCardInColumn_` (nodo DOM orfano). `callApi`: tracciamento centralizzato di `pendingWrites` per ogni azione di scrittura, specchio client-side di `SF_READ_ACTIONS_`. `renderCardPathSummary_`: `Math.max` fra `status_since_ts` e l'ultimo evento del log per il segmento aperto (§2.7). Censimento allargato di tutti i punti di scrittura di `client.html` (§2.6): nessun altro bug dello stesso tipo, due punti minori documentati e lasciati fuori scope. | Da fare | — |
 | **P7** | Migrazione una tantum: ricalcolo di `status`/`status_since_ts`/`incarico_chiuso_ts` su tutti i job esistenti, riusando `recomputeCurrentStatus_`/`recomputeIncaricoChiusoTs_` (P5). 20/55 job con `status_since_ts` disallineato dal log, 2/55 con `status` (colonna) sbagliato — verificato sui dati reali (§2.7). Da eseguire su TEST poi su PROD nella stessa sessione, log conservato. | Da fare | — (log dell'esecuzione conservato per controllo a posteriori, nessuna attesa) |
-| **Q** | Non più solo riservata — design ed esecuzione in `docs/DESIGN_derivazione_visite.md`: `visite` ricostruita sempre dal log intero (nuova `syncVisiteFromLog_`, sostituisce le patch incrementali di `applyManualMoveEffects_`/`ensureOpenVisit_`/`alignOpenVisitFields_`, ritirate), stesso meccanismo per spostamento live e correzioni storiche. `migrateVisiteFromHistorySuProd()` (già esistente) rieseguita su tutti i job esistenti. | Da fare — dopo P6/P7 (procediamo passo passo, decisione di Marco) | — |
+| **Q** | Non più solo riservata — design ed esecuzione in `docs/storico/DESIGN_derivazione_visite.md`: `visite` ricostruita sempre dal log intero (nuova `syncVisiteFromLog_`, sostituisce le patch incrementali di `applyManualMoveEffects_`/`ensureOpenVisit_`/`alignOpenVisitFields_`, ritirate), stesso meccanismo per spostamento live e correzioni storiche. `migrateVisiteFromHistorySuProd()` (già esistente) rieseguita su tutti i job esistenti. | Da fare — dopo P6/P7 (procediamo passo passo, decisione di Marco) | — |
 
 ## 5. Fuori scope, per ora
 
@@ -622,7 +622,7 @@ storico (§2.1-§2.5). Restano da fare P6 e P7:
   da Marco in §2.6) — **CHIUSA (Fase Q, 2026-08-26, sessione 7)**: dopo
   l'insistenza esplicita di Marco ("basta con le patch puntuali, voglio
   una soluzione definitiva", 2026-08-26), il design scritto in un
-  documento a parte (`docs/DESIGN_derivazione_visite.md`, §6 tutte le
+  documento a parte (`docs/storico/DESIGN_derivazione_visite.md`, §6 tutte le
   caselle spuntate) è stato implementato ed eseguito, passo passo come
   deciso: prima P6/P7 collaudati e chiusi, poi Q. Le tre funzioni a
   patch sopra sono state rimosse e sostituite da un'unica ricostruzione
@@ -745,7 +745,7 @@ sessione di lavoro su TEST reale e PROD reale, log completo in
       nel pannello percorso card è risolta alla fonte
 
 **Q — fuori scope di questo documento, fase a sé, in coda** (design
-completo in `docs/DESIGN_derivazione_visite.md`, criteri di
+completo in `docs/storico/DESIGN_derivazione_visite.md`, criteri di
 accettazione lì). **Correzione (2026-08-26)**: una versione precedente
 di questa riga diceva "eseguita nella stessa giornata di lavoro di
 P6/P7, non deferita" — errore, corretto da Marco. Q resta quello che

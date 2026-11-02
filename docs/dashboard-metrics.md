@@ -194,7 +194,7 @@ duplicato su `jobs`. `workloadMetrics`/`pointsMetrics` (lavoro
 presente, punti) restano invece su `jobs`, e funzionano anche a
 `visite` vuota.
 
-Fase R/S (2026-08-27, `docs/DESIGN_R_S.md`) ha corretto due errori di
+Fase R/S (2026-08-27, `docs/storico/DESIGN_R_S.md`) ha corretto due errori di
 conteggio (rientri finestrati, popolazione della riga "Aggiunte"),
 scomposto i rientri per causa, separato l'attesa "in corso" dal trend
 mensile concluso, e aggiunto tre strumenti diagnostici (percentile 80°
