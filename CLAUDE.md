@@ -19,7 +19,8 @@ esplicita di autonomia estesa nel prompt di sessione (vedi "Autonomia
 ed esecuzione" più sotto).
 
 - Stato corrente e prossimi passi noti: `PROGRAMMA_STATO.md`
-- Cronologia completa delle fasi già chiuse: `docs/storico/PROGRAMMA_STATO_storico.md`
+- Cronologia agosto–novembre 2026: `docs/storico/PROGRAMMA_STATO_2026-08_2026-11.md`
+- Cronologia precedente: `docs/storico/PROGRAMMA_STATO_storico.md`
 
 All'inizio di ogni sessione, leggere `PROGRAMMA_STATO.md` per il
 contesto, poi seguire la richiesta di Marco. Aggiornare
@@ -76,8 +77,10 @@ stesso.
 Anche in modalità autonoma restano fermi, **sempre**, senza eccezioni:
 - Push o merge diretto su `main`/`master` — mai, in nessun caso.
   Rinforzato tecnicamente da un `deny` in `.claude/settings.local.json`.
-- Qualunque scrittura su PROD (dati o deployment) — sempre riservata a
-  un'azione eseguita da Marco stesso, mai da Claude, gate o non gate.
+- Le scritture dei dati di PROD restano riservate a Marco. La pubblicazione
+  del codice su PROD viene preparata dall’agente ed eseguita solo dopo
+  approvazione esplicita di Marco nella chat, con piano e rollback mostrati
+  prima. Il via a preparare non autorizza a pubblicare.
 - Qualunque gate umano 🔴 esplicitamente indicato in un documento di
   design — vedi runbook.
 - Azioni distruttive non recuperabili al di fuori del normale flusso
@@ -146,6 +149,8 @@ lo strumento dedicato già esiste ed è verificato funzionante.
 - Variabili, funzioni, parametri: **inglese**
 - Gestione errori: sempre esplicita — mai lasciare catch vuoti
 - Output: leggibili per utenti non tecnici quando mostrati in UI
+- Testi visibili: usare il vocabolario di `docs/dashboard-metrics.md`,
+  senza introdurre parole nuove o sinonimi non approvati.
 
 ---
 
@@ -155,12 +160,10 @@ lo strumento dedicato già esiste ed è verificato funzionante.
   unire tramite pull request. (Rinforzato tecnicamente da un `deny` su
   `git push` verso `main`/`master` in `.claude/settings.local.json`.)
 - Ambiente TEST sempre separato da PROD.
-- Nessuna scrittura su PROD (dati o deployment) senza gate umano
-  esplicito — Marco esegue lui le azioni che toccano i dati reali o il
-  deployment pubblicato. **Non tecnicamente imponibile da
-  `settings.local.json`** (non è un percorso di file o un comando di
-  sistema, è un ID di spreadsheet dentro il codice) — affidato
-  interamente al rispetto di questa regola.
+- Nessuna scrittura dei dati di PROD da parte dell’agente: righe, fatture,
+  spunte e schede restano riservate a Marco. Per pubblicare il codice su
+  PROD, l’agente presenta prima piano, versione e rollback; esegue soltanto
+  dopo l’approvazione esplicita di Marco nella chat.
 - Se un file non esiste dove atteso: documentarlo, non inventarlo.
 - **Igiene di `docs/`**: quando un documento (`DESIGN_faseX_*`, `NOTE_*`, `RICOGNIZIONE_*`,
   `VALIDAZIONE_*`, `VERIFICA_*`) viene superato da una versione successiva o chiude la fase
