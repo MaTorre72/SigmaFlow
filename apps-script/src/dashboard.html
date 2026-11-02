@@ -25,8 +25,17 @@
     <details class="v3-status-detail">
       <summary>Come è stata ottenuta questa lettura</summary>
       <div id="v3-flow-detail" class="v3-flow-detail"></div>
-      <button type="button" data-v3-detail="recent_completions">Apri consegne della finestra</button>
+      <button type="button" data-v3-detail="active_work">Apri lavorazioni della finestra</button>
     </details>
+  </article>
+
+  <article class="v3-flow-status" aria-labelledby="v8-conclusions-title">
+    <h2 id="v8-conclusions-title">Incarichi fatturati</h2>
+    <p>Un incarico è fatturato quando viene selezionata la spunta “Fatturato”.</p>
+    <strong id="v8-conclusion-estimate">Stima non ancora disponibile</strong>
+    <p id="v8-conclusion-message"></p>
+    <p id="v8-conclusion-evidence"></p>
+    <button type="button" data-v3-detail="final_conclusions">Apri incarichi fatturati della finestra</button>
   </article>
 
   <section class="v3-card-grid" aria-label="Indicatori operativi">
@@ -70,7 +79,7 @@
 
   <article class="v3-flow-chart-panel">
     <div class="v3-section-heading">
-      <div><h2>Andamento del lavoro</h2><p>Come sono cambiati nel tempo il lavoro acquisito, quello attivo, le attese e le consegne.</p></div>
+      <div><h2>Andamento del lavoro</h2><p>Come sono cambiati nel tempo il lavoro acquisito, quello attivo, le attese e le consegne. Le consegne sono passaggi in “DA INVIARE / DA FATTURARE”, non fatturazioni.</p></div>
       <div class="v3-unit-switch" role="group" aria-label="Unità del grafico">
         <button type="button" class="active" data-v3-chart-unit="jobs" aria-pressed="true">Lavori</button>
         <button type="button" data-v3-chart-unit="points" aria-pressed="false">Punti</button>

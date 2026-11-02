@@ -23,7 +23,9 @@ function verifyDashboardVocabulary() {
   assert(mainMarkup.includes('>Rientri<') && mainMarkup.includes('>Prima lavorazione<'));
   assert(mainClient.includes('Consegne cumulative') && mainClient.includes('Consegna equivalente non ancora osservata'));
   assert(mainClient.includes(' consegne · qualità '));
-  assert(client.includes(' consegne/settimana') && client.includes("'Tasso di consegna':"));
+  assert(client.includes('Tasso di consegna</th>') && client.includes("'Tasso di consegna':"));
+  assert(client.includes('dashboardV5FlowRateText_(deliveries.visits_per_week)') &&
+    client.includes('dashboardV5FlowRateText_(deliveries.points_per_week)'));
   assert(client.includes("title: 'Consegne recenti'"));
   assert(client.includes('Data consegna (done_ts)') && client.includes('da consegnato a WIP'));
   assert(markup.includes('Punti consegnati (ultimi 30 giorni)') && markup.includes('Consegnati - asse destro'));

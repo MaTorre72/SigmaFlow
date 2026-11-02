@@ -1,5 +1,16 @@
 # Stato SigmaFlow
-Aggiornato: 2026-11-01
+Aggiornato: 2026-11-02
+
+## Ripresa delle modifiche locali (2026-11-02)
+
+Ripristinate sul branch codex/ripresa-modifiche-locali le modifiche locali a
+conclusioni, CFD, parametri e design. Testi visibili allineati a rientri,
+prima lavorazione, consegne e Incarichi fatturati; spunta Fatturato invariata.
+Identificatori e calcoli non modificati dalla correzione lessicale. Il controllo
+del vocabolario verifica ora i valori della tabella Tasso di consegna anziché
+il suffisso del riferimento configurato rimosso dalle modifiche ripristinate.
+Verifica TZ=UTC: 262/262 test e 58/58 controlli UI, anche con esecuzione UI
+separata. Stash conservato; nessun push o deployment.
 
 ## Vocabolario, Fatturato e preparazione del merge (2026-11-01)
 
@@ -30,6 +41,36 @@ markup reale e routeAction_ a 1280 e 380 px: nessun overflow, sia con valori
 sia con copertura assente. preview_start non disponibile; controllo nel browser
 Chrome locale e schermate. Gate umano di Marco sul TEST ancora richiesto.
 
+
+## Revisione V8 — stato dal flusso attivo e conclusioni definitive (2026-10-05)
+
+Su richiesta di Marco, la lettura operativa viene spostata dalle consegne
+alle lavorazioni WIP terminate. Prima lavorazione e riprese sono una
+partizione degli episodi chiusi, non dei job distinti. Le rare consegne non
+governano più lo stato; zero uscite è una misura osservabile, non un dato
+mancante. Il riferimento è la mediana WIP già ricostruita dallo storico
+affidabile; il rapporto `flow_slow_ratio` resta configurato. I riferimenti
+di consegna 6 punti/0,7 completamenti non vengono convertiti o sovrascritti.
+Senza riferimento WIP positivo la lettura è «In osservazione».
+
+Marco ha precisato che «concluso» significa incarico chiuso definitivamente
+(`incarico_chiuso_ts`). La stima di regime divide il flusso WIP per i
+passaggi medi dei percorsi conclusi e interamente osservabili. Campione
+separato `min_samples_final_closures` (default 5); nessuna previsione di
+date, assunzione esplicita di mix/percorso stabile e limite del campione
+dei soli casi chiusi. Un campione di chiusure insufficiente non blocca WIP.
+
+Ricalcolo sullo snapshot live letto il 05/10, finestra 10/08–04/10:
+11 passaggi / 82 punti = 10,25 punti/settimana; prime lavorazioni 5/32,
+riprese 6/50. Riferimento WIP esatto 14,125 (15 finestre), soglia 5,65:
+stato «Regolare». Le chiusure registrate nella finestra sono 6/37;
+nessun percorso chiuso è interamente successivo al limite affidabile
+04/05/2026, quindi la stima di conclusione è indisponibile. Stock invariati
+4/41, 8/55, 11/82. Le settimane impegnate restano la distinta misura
+di assorbimento dei primi ingressi, senza riutilizzare il turnover lordo.
+
+Verifica locale: 262/262 test Apps Script e 48/48 verifiche UI.
+Pubblicazione PROD non eseguita. Verifica HEAD TEST riportata a fine sessione.
 
 ## V5 — gate umano 6F approvato sul TEST (2026-09-16)
 
