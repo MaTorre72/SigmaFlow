@@ -1958,12 +1958,11 @@ gate 6F (§28) diventa approvabile — non prima.
 
 La richiesta di Marco del 05/10/2026 supera il vincolo dei §35/40/7F che
 legava lo Stato del flusso alle sole consegne: ora lo stato usa le uscite
-dal WIP, distinte tra prima lavorazione e riprese. «Conclusione» significa
-esclusivamente incarico chiuso definitivamente, come precisato da Marco.
+dal WIP, distinte tra prima lavorazione e rientri.
 Il riferimento WIP empirico dei §36–37 entra nel confronto operativo,
 senza convertire o riscrivere la taratura di consegna esistente.
 
-Definizioni, formula condizionale di conclusione e limiti sono riportati
+Definizioni e limiti del flusso attivo sono riportati
 nella revisione del 05/10 in [dashboard-metrics.md](dashboard-metrics.md).
 Stato di implementazione e verifiche in [PROGRAMMA_STATO.md](../PROGRAMMA_STATO.md).
 Le parti restanti del presente documento mantengono il contesto storico;

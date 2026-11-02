@@ -1,11 +1,34 @@
 # Stato SigmaFlow
 Aggiornato: 2026-11-02
 
+## Rimozione della proiezione di fatturazione (2026-11-02)
+
+Decisione di Marco: nessuna card o misura dedicata agli incarichi fatturati.
+Rimossi calcolo, contratto, card, dettaglio, parametro e test della proiezione,
+con le relative parti di design e documentazione delle metriche. Restano
+spunta Fatturato, data incarico_chiuso_ts e vocabolario approvato.
+Il CFD conserva solo la precisazione testuale consegne/fatturazioni;
+nessun calcolo del grafico cambia. Una sola voce Consegne recenti.
+TZ=UTC: 261/261 test GAS e 58/58 verifiche UI, anche separatamente.
+Push e confronto isolato TEST completati: 17/17 sorgenti identici.
+Nessun deployment PROD, nessuna modifica ai dati; stash conservato.
+
+## Ruolo Consegnato e verifica TEST (2026-11-02)
+
+Il ruolo done e il riepilogo dei lavori consegnati non ancora fatturati
+usano Consegnato/consegnati, mantenendo Fatturato per la spunta. Nessun
+identificatore o calcolo modificato. Nel dettaglio esiste una sola voce
+Consegne recenti (recent_completions), senza duplicazioni.
+TZ=UTC: 262/262 test GAS e 58/58 controlli UI, anche separatamente.
+Dopo il rinnovo dell’autenticazione Google, push-and-verify.sh completato:
+17/17 file identici tra HEAD TEST e sorgenti locali (pull isolato).
+Nessun deployment PROD, nessuna modifica ai dati o push Git.
+
 ## Ripresa delle modifiche locali (2026-11-02)
 
 Ripristinate sul branch codex/ripresa-modifiche-locali le modifiche locali a
-conclusioni, CFD, parametri e design. Testi visibili allineati a rientri,
-prima lavorazione, consegne e Incarichi fatturati; spunta Fatturato invariata.
+CFD e design. Testi visibili allineati a rientri,
+prima lavorazione e consegne; spunta Fatturato invariata.
 Identificatori e calcoli non modificati dalla correzione lessicale. Il controllo
 del vocabolario verifica ora i valori della tabella Tasso di consegna anziché
 il suffisso del riferimento configurato rimosso dalle modifiche ripristinate.
@@ -42,7 +65,7 @@ sia con copertura assente. preview_start non disponibile; controllo nel browser
 Chrome locale e schermate. Gate umano di Marco sul TEST ancora richiesto.
 
 
-## Revisione V8 — stato dal flusso attivo e conclusioni definitive (2026-10-05)
+## Revisione V8 — stato dal flusso attivo (2026-10-05)
 
 Su richiesta di Marco, la lettura operativa viene spostata dalle consegne
 alle lavorazioni WIP terminate. Prima lavorazione e riprese sono una
@@ -53,19 +76,10 @@ affidabile; il rapporto `flow_slow_ratio` resta configurato. I riferimenti
 di consegna 6 punti/0,7 completamenti non vengono convertiti o sovrascritti.
 Senza riferimento WIP positivo la lettura è «In osservazione».
 
-Marco ha precisato che «concluso» significa incarico chiuso definitivamente
-(`incarico_chiuso_ts`). La stima di regime divide il flusso WIP per i
-passaggi medi dei percorsi conclusi e interamente osservabili. Campione
-separato `min_samples_final_closures` (default 5); nessuna previsione di
-date, assunzione esplicita di mix/percorso stabile e limite del campione
-dei soli casi chiusi. Un campione di chiusure insufficiente non blocca WIP.
-
 Ricalcolo sullo snapshot live letto il 05/10, finestra 10/08–04/10:
 11 passaggi / 82 punti = 10,25 punti/settimana; prime lavorazioni 5/32,
 riprese 6/50. Riferimento WIP esatto 14,125 (15 finestre), soglia 5,65:
-stato «Regolare». Le chiusure registrate nella finestra sono 6/37;
-nessun percorso chiuso è interamente successivo al limite affidabile
-04/05/2026, quindi la stima di conclusione è indisponibile. Stock invariati
+stato «Regolare». Stock invariati
 4/41, 8/55, 11/82. Le settimane impegnate restano la distinta misura
 di assorbimento dei primi ingressi, senza riutilizzare il turnover lordo.
 

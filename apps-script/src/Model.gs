@@ -855,7 +855,7 @@ function metricDescriptions_() {
     effective_load: 'Quota della capacita effettiva richiesta dal lavoro osservato.',
     ready: 'Lavori visibili e pronti, non ancora avviati.',
     in_progress: 'Lavori attualmente aperti e gestiti dal team.',
-    can_return: 'Lavori conclusi ma non ancora fatturati, ancora esposti a richieste successive.',
+    can_return: 'Lavori consegnati ma non ancora fatturati, ancora esposti a richieste successive.',
     prudent_service_days: 'Tempo medio aumentato della variabilita osservata, usato come riferimento prudenziale.'
   };
 }

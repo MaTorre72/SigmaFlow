@@ -39,7 +39,7 @@
     backlog: 'Ingresso',
     wip: 'WIP',
     stand_by: 'Stand-by',
-    done: 'Concluso',
+    done: 'Consegnato',
     neutral: 'Neutra'
   };
 
@@ -2505,12 +2505,6 @@
       ? 'Taratura non configurata'
       : detail.wip_target_min + '–' + detail.wip_target_max + ' lavori';
     dashboardV5RenderFlowDetail_(recent, detail, bandText, flow.recent_completion_throughput);
-    var conclusions = dashboard.conclusions || {};
-    document.getElementById('v8-conclusion-estimate').textContent = conclusions.estimated_jobs_per_week === null || conclusions.estimated_jobs_per_week === undefined
-      ? 'Stima non ancora disponibile' : dashboardV3Text_(conclusions.estimated_jobs_per_week, ' incarichi/settimana');
-    document.getElementById('v8-conclusion-message').textContent = conclusions.message || 'Percorsi fino alla fatturazione ancora insufficienti.';
-    document.getElementById('v8-conclusion-evidence').textContent = dashboardV3Text_(conclusions.observed_count, ' incarichi fatturati nella finestra') +
-      ' · ' + dashboardV3Text_(conclusions.sample_size, ' percorsi utilizzabili per la stima');
 
     var diagnostic = ((dashboard.diagnostics || {}).summary || {});
     var suggestion = ((dashboard.diagnostics || {}).calibration_suggestion || {});
@@ -3070,8 +3064,6 @@
         ['taglia', 'Taglia'], ['mediana_giorni', 'Tempo tipico (giorni)'], ['p80_giorni', '8 lavori su 10 entro (giorni)'], ['numero_casi', 'Casi'], ['qualita', 'Qualità']] },
       active_work: { title: 'Passaggi di lavorazione terminati', description: 'Uscite dal WIP nella finestra. Prima lavorazione e rientri si sommano al flusso attivo; non sono fatturazioni.', columns: [
         ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['tipo', 'Lavorazione'], ['passaggio', 'Passaggio n.'], ['opened_at', 'Ingresso WIP'], ['closed_at', 'Uscita WIP'], ['punti', 'Punti associati']] },
-      final_conclusions: { title: 'Incarichi fatturati', description: 'Fatturazioni registrate nella finestra, distinte dalle lavorazioni in WIP.', columns: [
-        ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['closed_at', 'Fatturazione'], ['punti', 'Punti']] },
       recent_completions: { title: 'Consegne recenti', description: 'Eventi di consegna del contratto storico; non governano lo stato del flusso.', columns: [
         ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['job_id', 'Job'], ['numero_visita', 'Numero visita'], ['consegna_ts', 'Consegna'], ['punti', 'Punti']] }
     };
@@ -3291,7 +3283,7 @@
       'Fermi per decisione interna': 'dl-subitem'
     });
     renderDl('to-invoice-metrics', {
-      'Concluso, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points)
+      'Consegnato, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points)
     });
 
     var capacity = system.capacityMetrics || {};

@@ -555,60 +555,6 @@ function dashboardV8FlowState_(currentWork, active, suggestion, config) {
   };
 }
 
-// Conversione dichiaratamente condizionale del ritmo WIP in conclusioni finali.
-// Il campione comprende soltanto incarichi chiusi con percorso WIP interamente
-// osservabile nello storico affidabile. Nessuna chiusura e' dedotta da done.
-function dashboardV8Conclusions_(jobs, normalized, episodes, active, config, now) {
-  var reliable = dashboardV7ReliableFrom_(config);
-  var byLog = indexBy_(normalized, 'job_id');
-  var sample = [], excluded = [], observed = [];
-  var since = Date.parse((active || {}).window_start), until = Date.parse((active || {}).window_end);
-  jobs.forEach(function(job) {
-    if (!job.incarico_chiuso_ts) { return; }
-    var closed = dashboardV2Instant_(job.incarico_chiuso_ts);
-    if (isNaN(closed.getTime()) || closed > now) { return; }
-    var item = byLog[job.job_id] || { logical_states: [], anomalies: [] };
-    var states = item.logical_states || [];
-    var work = episodes.filter(function(e) { return e.job_id === job.job_id; });
-    var reason = null;
-    if (states.some(function(s) { return dashboardV2Instant_(s.entered_at) > closed; })) {
-      reason = 'history_after_final_closure';
-    } else {
-      if (closed.getTime() >= since && closed.getTime() < until) {
-        observed.push({ job_id: job.job_id, cliente: job.client || '', incarico: job.title || '',
-          closed_at: closed.toISOString(), punti: jobPoints_(job) });
-      }
-      if (!reliable || isNaN(reliable.getTime())) { reason = 'reliable_history_not_configured'; }
-      else if (!states.length || dashboardV2Instant_(states[0].entered_at) < reliable) { reason = 'trajectory_before_reliable_history'; }
-      else if (states[0].role === 'wip' || states[0].role === 'stand_by' || states[0].role === 'done') { reason = 'missing_initial_trajectory'; }
-      else if (item.anomalies.some(function(a) { return ['invalid_activity_log', 'invalid_move_timestamp', 'unknown_target_column'].indexOf(a.type) !== -1; })) { reason = 'history_anomalies'; }
-      else if (!work.length || work.some(function(e) { return !e.closed_at || dashboardV2Instant_(e.closed_at) > closed; })) { reason = 'incomplete_wip_trajectory'; }
-    }
-    if (reason) { excluded.push({ job_id: job.job_id, reason: reason }); return; }
-    sample.push({ job_id: job.job_id, passages: work.length, points: jobPoints_(job) });
-  });
-  var minimum = Number(config.min_samples_final_closures);
-  var count = sample.length;
-  var totalPassages = sample.reduce(function(sum, row) { return sum + row.passages; }, 0);
-  var totalPoints = sample.reduce(function(sum, row) { return sum + row.points; }, 0);
-  var weightedPassages = sample.reduce(function(sum, row) { return sum + row.points * row.passages; }, 0);
-  var enough = isFinite(minimum) && minimum >= 1 && Math.floor(minimum) === minimum && count >= minimum;
-  var covered = active && active.jobs_per_week_exact !== null && active.jobs_per_week_exact !== undefined;
-  return {
-    definition: 'incarico_chiuso_ts_only', method: 'active_flow_divided_by_passages_per_finally_closed_job',
-    quality: enough && covered ? 'conditional' : 'insufficient', sample_size: count, minimum_sample: minimum,
-    observed_count: observed.length, observed_points: observed.reduce(function(sum, row) { return sum + row.punti; }, 0),
-    observed: observed, sample: sample, excluded: excluded,
-    mean_passages_per_job: count ? totalPassages / count : null,
-    weighted_mean_passages: totalPoints ? weightedPassages / totalPoints : null,
-    estimated_jobs_per_week: enough && covered ? round_(active.jobs_per_week_exact / (totalPassages / count)) : null,
-    estimated_points_per_week: enough && covered ? round_(active.points_per_week_exact / (weightedPassages / totalPoints)) : null,
-    message: enough && covered
-      ? 'Stima di regime: assume percorsi e mix di incarichi simili allo storico. Non prevede date di fatturazione; il campione dei soli incarichi fatturati può favorire percorsi brevi.'
-      : 'Servono più incarichi fatturati con percorso interamente osservabile nello storico affidabile.'
-  };
-}
-
 function dashboardV7ReliableFrom_(config) {
   if (!config.history_reliable_from) { return null; }
   var date = dashboardV2Instant_(config.history_reliable_from);
@@ -1559,7 +1505,6 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   var legacyFlow = dashboardV3FlowState_(currentWork, capacity, config);
   systemFlow.recent_completion_throughput = legacyFlow.recent_completion_throughput;
   systemFlow.calibration = legacyFlow.calibration;
-  var conclusions = dashboardV8Conclusions_(allJobs, normalized, episodes, capacity.active_flow, config, now);
   var recentRework = dashboardV3RecentRework_(capacity);
   var details = dashboardV3Details_(allJobs, normalized, episodes, columnMap, now, capacity, recentRework);
   details.active_work = episodes.filter(function(e) {
@@ -1571,7 +1516,6 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
       tipo: e.wip_episode_number === 1 ? 'Prima lavorazione' : 'Rientro',
       passaggio: e.wip_episode_number, opened_at: e.opened_at, closed_at: e.closed_at, punti: jobPoints_(job) };
   }).sort(function(a, b) { return dashboardV2Instant_(a.closed_at) - dashboardV2Instant_(b.closed_at); });
-  details.final_conclusions = conclusions.observed;
   var timing = dashboardV5Timing_(normalized, allJobs);
   details.timing = ['XS', 'S', 'M', 'L', 'XL'].map(function(size) {
     var row = timing.lead_time_by_size[size];
@@ -1613,7 +1557,6 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
       committed_weeks_sample_size: capacity.committed_weeks_sample_size
     },
     capacity: capacity,
-    conclusions: conclusions,
     flow: flow,
     cfd: cfd,
     history: history,

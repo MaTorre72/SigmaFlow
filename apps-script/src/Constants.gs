@@ -130,7 +130,6 @@ var SIGMAFLOW = {
     capacity_window_weeks: 8,
     history_reliable_from: '',
     min_samples_capacity: 5,
-    min_samples_final_closures: 5,
     // Taratura operativa: nessun valore implicito o autocalibrato.
     wip_target_min_jobs: '',
     wip_target_max_jobs: '',

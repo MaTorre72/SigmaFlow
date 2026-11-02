@@ -50,8 +50,10 @@ function verifyV3Ui() {
       client.includes('settimane ISO complete') &&
       !client.includes('ultime 8 settimane') && style.includes('.v3-flow-rate-table')],
     ['WIP letto dal backend', renderer.includes('current.wip_jobs') && renderer.includes('current.wip_points')],
-    ['stato e conclusioni separati', renderer.includes('flow.recent_active_flow') && renderer.includes('flow.recent_completion_throughput') &&
-      renderer.includes('conclusions.estimated_jobs_per_week') && markup.includes('data-v3-detail="active_work"') && markup.includes('data-v3-detail="final_conclusions"')],
+    ['flusso attivo e consegne senza proiezione di fatturazione',
+      renderer.includes('flow.recent_active_flow') && renderer.includes('flow.recent_completion_throughput') &&
+      markup.includes('data-v3-detail="active_work"') && !/v8-conclusion|final_conclusions/.test(markup + client) &&
+      !/dashboardV8Conclusions_|min_samples_final_closures|conclusions: conclusions/.test(applicationSources)],
     ['lavoro futuro letto dal backend', renderer.includes('future.future_work_jobs') && renderer.includes('future.future_work_points')],
     ['settimane lette dal backend', renderer.includes('future.committed_weeks')],
     ['rientri aggregati sulla finestra letti dal backend', renderer.includes('rework.rework_wip_entries') && renderer.includes('rework.rework_window_weeks') && renderer.includes('rework.rework_share')],

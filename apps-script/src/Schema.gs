@@ -361,7 +361,6 @@ function seedDefaultConfig_(sheet) {
     capacity_window_weeks: 'Settimane ISO complete concluse nella finestra di osservazione recente',
     history_reliable_from: 'Prima data dalla quale lo storico board è affidabile per taratura e capacità',
     min_samples_capacity: 'Numero minimo di visite completate per stimare la capacita osservata',
-    min_samples_final_closures: 'Minimo di incarichi definitivamente chiusi con percorso WIP osservabile per stimare il ritmo di conclusione',
     wip_target_min_jobs: 'Limite inferiore configurabile del WIP operativo in numero di lavori',
     wip_target_max_jobs: 'Limite superiore configurabile del WIP operativo in numero di lavori',
     flow_reference_points_per_week: 'Ritmo di riferimento approvato in punti completati per settimana',

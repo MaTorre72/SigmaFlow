@@ -2,11 +2,12 @@
 
 ## Glossario delle misure
 
+La dashboard distingue due misure di flusso: Flusso attivo e Tasso di consegna.
+
 - **Flusso attivo** («Flusso attivo osservato»): uscite dal ruolo WIP, anche verso attesa; lavori/settimana e punti/settimana, con la taglia del lavoro che pesa ogni passaggio; prima lavorazione e rientri sommano al totale. [Dettaglio](#flusso-attivo).
 - **Tasso di consegna**: arrivi del lavoro nell'ultima colonna della board; il nome è letto dalla configurazione, oggi «DA INVIARE / DA FATTURARE». Le unità sono lavori/settimana e punti/settimana, misura distinta dal flusso attivo. (Per chi sviluppa: «consegne tecniche», visite con consegna_ts.) [Dettaglio](#tasso-di-consegna).
-- **Incarichi fatturati**: incarichi con chiusura definitiva registrata dalla spunta «Fatturato»; non è la consegna. La spunta valorizza incarico_chiuso_ts; incarichi e punti osservati hanno una proiezione di regime separata dal conteggio. [Dettaglio](#incarichi-fatturati-e-proiezione-di-regime).
 
-Togliere la spunta «Fatturato» azzera la chiusura definitiva, quindi il conteggio segue lo stato attuale.
+La spunta «Fatturato» registra la data di fatturazione (`incarico_chiuso_ts`), senza una misura dedicata nella dashboard. Togliere la spunta azzera la data di fatturazione.
 
 ## Termine precedente → termine attuale
 
@@ -17,7 +18,6 @@ Togliere la spunta «Fatturato» azzera la chiusura definitiva, quindi il conteg
 | Riprese / WIP rework | Rientri |
 | WIP nuovo | Prima lavorazione |
 | pratiche | lavori |
-| Incarichi conclusi | Incarichi fatturati |
 | consegne tecniche | Termine di sviluppo, non usato nella dashboard |
 
 ## Nuova dashboard — dashboardState
@@ -54,18 +54,6 @@ aggiornabile, non la precedente taratura di consegna. Nessun minimo di
 consegne nasconde il ritmo WIP; zero uscite con copertura è zero. Se manca
 un riferimento positivo, la lettura è «In osservazione», se manca copertura
 temporale è «Dati insufficienti». Restano precedenti i segnali fuori fascia.
-
-### Incarichi fatturati e proiezione di regime
-
-«Incarichi fatturati» usa esclusivamente la chiusura definitiva registrata.
-La proiezione di regime è `passaggi WIP/settimana / passaggi medi per
-incarico definitivamente chiuso`; in punti usa la media ponderata delle
-molteplicità. Richiede almeno `min_samples_final_closures` percorsi completi
-nello storico affidabile (default 5). Si escludono percorsi incompleti,
-cronologie non ricostruibili e movimenti dopo la chiusura. L'eventuale
-incoerenza dei soli `from` non esclude una sequenza di `to` ricostruibile.
-È una stima condizionale di regime, sensibile al mix, ai tempi esterni e
-alla selezione dei soli casi già chiusi; non prevede date di conclusione.
 
 ### Tempi osservati
 

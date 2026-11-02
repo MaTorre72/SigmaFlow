@@ -318,7 +318,6 @@ function runAllTests() {
     testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes,
     testDashboardV8ActiveFlowComponentsAndZeroRate,
     testDashboardV8FlowDoesNotDependOnDeliveries,
-    testDashboardV8FinalClosureEstimationAndExclusions,
     testDashboardV7CalibrationUsesReliableValidWindowsAndMedian,
     testDashboardV7CalibrationUsesFullPrecisionAndIndependentJobMedian,
     testDashboardV7CalibrationIgnoresOperationalTrendDepth,
@@ -5607,39 +5606,6 @@ function testDashboardV8FlowDoesNotDependOnDeliveries() {
   assertEquals_('UNDERFED', dashboardV8FlowState_({ wip_jobs: 2 }, active, {}, config).system_flow_status, 'poco WIP distinto dal ritmo');
 }
 
-function testDashboardV8FinalClosureEstimationAndExclusions() {
-  var config = dashboardV2TestConfig_({ history_reliable_from: '2026-01-01', min_samples_final_closures: 2 });
-  var now = new Date('2026-02-16T12:00:00+01:00');
-  var first = dashboardV2PathFixture_('FINAL-A', ['backlog', 'wip', 'wait_client', 'wip', 'done'],
-    ['2026-01-02T09:00', '2026-01-03T09:00', '2026-01-04T09:00', '2026-01-05T09:00', '2026-01-06T09:00'], 8);
-  first.incarico_chiuso_ts = '2026-02-03T09:00';
-  var second = dashboardV2PathFixture_('FINAL-B', ['backlog', 'wip', 'done'],
-    ['2026-01-02T09:00', '2026-01-03T09:00', '2026-01-04T09:00'], 4);
-  second.incarico_chiuso_ts = '2026-02-05T09:00';
-  var doneOnly = Object.assign({}, second, { job_id: 'DONE-ONLY', incarico_chiuso_ts: '' });
-  var jobs = [first, second, doneOnly];
-  var norm = jobs.map(function(job) { return normalizeActivityLogForDashboard_(job, dashboardV2TestColumnMap_(), now); });
-  var episodes = dashboardV2WipEpisodes_(norm, now);
-  var active = { window_start: '2026-02-02T00:00:00+01:00', window_end: '2026-02-16T00:00:00+01:00',
-    jobs_per_week_exact: 3, points_per_week_exact: 10 };
-  var result = dashboardV8Conclusions_(jobs, norm, episodes, active, config, now);
-  assertEquals_(2, result.observed_count, 'done senza chiusura non conta come incarico concluso');
-  assertEquals_(2, result.sample_size, 'percorsi completi distinti per incarico');
-  assertEquals_(1.5, result.mean_passages_per_job, 'tre passaggi per due incarichi');
-  assertEquals_(2, result.estimated_jobs_per_week, 'flusso WIP diviso passaggi per incarico');
-  assertEquals_(6, result.estimated_points_per_week, 'conversione punti ponderata: 10 / (20/12)');
-  assertEquals_('conditional', result.quality, 'stima condizionale, non previsione temporale');
-  config.history_reliable_from = '2026-01-03';
-  result = dashboardV8Conclusions_(jobs, norm, episodes, active, config, now);
-  assertEquals_(0, result.sample_size, 'percorsi iniziati prima dello storico affidabile esclusi');
-  assertEquals_(2, result.observed_count, 'chiusure registrate restano osservabili');
-  assertEquals_(null, result.estimated_jobs_per_week, 'nessuna stima da percorsi incompleti');
-  config.history_reliable_from = '2026-01-01';
-  jobs[0].incarico_chiuso_ts = '2026-01-04T09:00';
-  result = dashboardV8Conclusions_(jobs, norm, episodes, active, config, now);
-  assertEquals_('history_after_final_closure', result.excluded[0].reason, 'riapertura dopo chiusura esclude il caso');
-}
-
 function testDashboardV7ActiveFlowCountsOnlyClosedWipEpisodes() {
   var now = new Date('2026-01-12T12:00:00+01:00');
   var events = [
@@ -6635,4 +6601,3 @@ function assertTrue_(condition, message) {
     throw new Error(message);
   }
 }
-
