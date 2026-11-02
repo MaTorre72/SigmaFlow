@@ -1954,3 +1954,16 @@ Test + commit.
 Suite completa. Riconciliazione V2. Push TEST. Collaudo umano (§45). Aggiornamento
 `PROGRAMMA_STATO.md`. Al termine di 7G, se anche la correzione della Fase 5E risulta DONE, il
 gate 6F (§28) diventa approvabile — non prima.
+# Revisione prevalente — flusso attivo, 05/10/2026
+
+La richiesta di Marco del 05/10/2026 supera il vincolo dei §35/40/7F che
+legava lo Stato del flusso alle sole consegne: ora lo stato usa le uscite
+dal WIP, distinte tra prima lavorazione e rientri.
+Il riferimento WIP empirico dei §36–37 entra nel confronto operativo,
+senza convertire o riscrivere la taratura di consegna esistente.
+
+Definizioni e limiti del flusso attivo sono riportati
+nella revisione del 05/10 in [dashboard-metrics.md](dashboard-metrics.md).
+Stato di implementazione e verifiche in [PROGRAMMA_STATO.md](../PROGRAMMA_STATO.md).
+Le parti restanti del presente documento mantengono il contesto storico;
+questa sezione prevale dove incompatibile. Nessun deploy PROD implicito.

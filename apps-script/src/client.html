@@ -39,7 +39,7 @@
     backlog: 'Ingresso',
     wip: 'WIP',
     stand_by: 'Stand-by',
-    done: 'Concluso',
+    done: 'Consegnato',
     neutral: 'Neutra'
   };
 
@@ -2518,8 +2518,7 @@
       'Finestra di osservazione': dashboardV3Text_(recent.window_weeks, ' settimane ISO complete'),
       'Storico affidabile da': reliableDate,
       'Fascia WIP configurata': bandText,
-      'Riferimento consegne': dashboardV3Text_(calibration.reference_points_per_week, ' punti/settimana') +
-        ' · ' + dashboardV3Text_(calibration.reference_completions_per_week, ' consegne/settimana'),
+      'Riferimento WIP dallo storico': dashboardV3Text_(detail.reference_points_per_week, ' punti/settimana'),
       'Soglia di rallentamento': dashboardV3Text_(detail.slowing_threshold_points_per_week, ' punti/settimana')
     });
     renderDl('v7-capacity-detail', {
@@ -3063,7 +3062,9 @@
         ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['numero_rientro', 'Rientro n.'], ['stato_provenienza', 'Stato di provenienza'], ['data_uscita_precedente', 'Data uscita precedente'], ['data_ripresa', 'Data rientro']] },
       timing: { title: 'Tempi per taglia', description: 'Distribuzione degli intervalli completi dall’ingresso nel lavoro alla consegna.', columns: [
         ['taglia', 'Taglia'], ['mediana_giorni', 'Tempo tipico (giorni)'], ['p80_giorni', '8 lavori su 10 entro (giorni)'], ['numero_casi', 'Casi'], ['qualita', 'Qualità']] },
-      recent_completions: { title: 'Consegne recenti', description: 'Righe incluse nella finestra, esportabili per la riconciliazione esterna.', columns: [
+      active_work: { title: 'Passaggi di lavorazione terminati', description: 'Uscite dal WIP nella finestra. Prima lavorazione e rientri si sommano al flusso attivo; non sono fatturazioni.', columns: [
+        ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['tipo', 'Lavorazione'], ['passaggio', 'Passaggio n.'], ['opened_at', 'Ingresso WIP'], ['closed_at', 'Uscita WIP'], ['punti', 'Punti associati']] },
+      recent_completions: { title: 'Consegne recenti', description: 'Eventi di consegna del contratto storico; non governano lo stato del flusso.', columns: [
         ['cliente', 'Cliente'], ['incarico', 'Incarico'], ['job_id', 'Job'], ['numero_visita', 'Numero visita'], ['consegna_ts', 'Consegna'], ['punti', 'Punti']] }
     };
     var definition = definitions[kind];
@@ -3282,7 +3283,7 @@
       'Fermi per decisione interna': 'dl-subitem'
     });
     renderDl('to-invoice-metrics', {
-      'Concluso, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points)
+      'Consegnato, non ancora fatturato': cardsAndPoints_(workload.can_return, workload.can_return_points)
     });
 
     var capacity = system.capacityMetrics || {};

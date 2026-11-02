@@ -17,8 +17,11 @@ function verifyInvoicedVocabulary() {
   const visible = ['board.html', 'dashboard.html', 'archivio.html', 'client.html'].map(read)
     .join('\n').replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*\/\/.*$/gm, '');
   assert(!/Incarichi conclusi/i.test(visible));
-  // «Concluso» nelle impostazioni indica il ruolo done, non la spunta.
-  assert(board.includes('<option value="done">Concluso</option>'));
+  // Il ruolo done indica la consegna; la spunta indica la fatturazione.
+  assert(board.includes('<option value="done">Consegnato</option>'));
+  assert(client.includes("done: 'Consegnato'"));
+  assert(client.includes('Consegnato, non ancora fatturato'));
+  assert(read('Model.gs').includes('Lavori consegnati ma non ancora fatturati'));
   return ['fatturato: spunta e date con identificatori invariati', 'fatturato: nessuna vecchia etichetta delle conclusioni'];
 }
 module.exports = { verifyInvoicedVocabulary };

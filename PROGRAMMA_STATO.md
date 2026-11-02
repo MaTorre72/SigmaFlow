@@ -1,5 +1,39 @@
 # Stato SigmaFlow
-Aggiornato: 2026-11-01
+Aggiornato: 2026-11-02
+
+## Rimozione della proiezione di fatturazione (2026-11-02)
+
+Decisione di Marco: nessuna card o misura dedicata agli incarichi fatturati.
+Rimossi calcolo, contratto, card, dettaglio, parametro e test della proiezione,
+con le relative parti di design e documentazione delle metriche. Restano
+spunta Fatturato, data incarico_chiuso_ts e vocabolario approvato.
+Il CFD conserva solo la precisazione testuale consegne/fatturazioni;
+nessun calcolo del grafico cambia. Una sola voce Consegne recenti.
+TZ=UTC: 261/261 test GAS e 58/58 verifiche UI, anche separatamente.
+Push e confronto isolato TEST completati: 17/17 sorgenti identici.
+Nessun deployment PROD, nessuna modifica ai dati; stash conservato.
+
+## Ruolo Consegnato e verifica TEST (2026-11-02)
+
+Il ruolo done e il riepilogo dei lavori consegnati non ancora fatturati
+usano Consegnato/consegnati, mantenendo Fatturato per la spunta. Nessun
+identificatore o calcolo modificato. Nel dettaglio esiste una sola voce
+Consegne recenti (recent_completions), senza duplicazioni.
+TZ=UTC: 262/262 test GAS e 58/58 controlli UI, anche separatamente.
+Dopo il rinnovo dell’autenticazione Google, push-and-verify.sh completato:
+17/17 file identici tra HEAD TEST e sorgenti locali (pull isolato).
+Nessun deployment PROD, nessuna modifica ai dati o push Git.
+
+## Ripresa delle modifiche locali (2026-11-02)
+
+Ripristinate sul branch codex/ripresa-modifiche-locali le modifiche locali a
+CFD e design. Testi visibili allineati a rientri,
+prima lavorazione e consegne; spunta Fatturato invariata.
+Identificatori e calcoli non modificati dalla correzione lessicale. Il controllo
+del vocabolario verifica ora i valori della tabella Tasso di consegna anziché
+il suffisso del riferimento configurato rimosso dalle modifiche ripristinate.
+Verifica TZ=UTC: 262/262 test e 58/58 controlli UI, anche con esecuzione UI
+separata. Stash conservato; nessun push o deployment.
 
 ## Vocabolario, Fatturato e preparazione del merge (2026-11-01)
 
@@ -30,6 +64,27 @@ markup reale e routeAction_ a 1280 e 380 px: nessun overflow, sia con valori
 sia con copertura assente. preview_start non disponibile; controllo nel browser
 Chrome locale e schermate. Gate umano di Marco sul TEST ancora richiesto.
 
+
+## Revisione V8 — stato dal flusso attivo (2026-10-05)
+
+Su richiesta di Marco, la lettura operativa viene spostata dalle consegne
+alle lavorazioni WIP terminate. Prima lavorazione e riprese sono una
+partizione degli episodi chiusi, non dei job distinti. Le rare consegne non
+governano più lo stato; zero uscite è una misura osservabile, non un dato
+mancante. Il riferimento è la mediana WIP già ricostruita dallo storico
+affidabile; il rapporto `flow_slow_ratio` resta configurato. I riferimenti
+di consegna 6 punti/0,7 completamenti non vengono convertiti o sovrascritti.
+Senza riferimento WIP positivo la lettura è «In osservazione».
+
+Ricalcolo sullo snapshot live letto il 05/10, finestra 10/08–04/10:
+11 passaggi / 82 punti = 10,25 punti/settimana; prime lavorazioni 5/32,
+riprese 6/50. Riferimento WIP esatto 14,125 (15 finestre), soglia 5,65:
+stato «Regolare». Stock invariati
+4/41, 8/55, 11/82. Le settimane impegnate restano la distinta misura
+di assorbimento dei primi ingressi, senza riutilizzare il turnover lordo.
+
+Verifica locale: 262/262 test Apps Script e 48/48 verifiche UI.
+Pubblicazione PROD non eseguita. Verifica HEAD TEST riportata a fine sessione.
 
 ## V5 — gate umano 6F approvato sul TEST (2026-09-16)
 

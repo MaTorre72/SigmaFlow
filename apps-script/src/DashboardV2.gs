@@ -1500,11 +1500,22 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   var calibrationSuggestion = dashboardV7CalibrationSuggestion_(calibrationFlow, calibrationStocks, config);
   var history = dashboardV2History_(normalized, allJobs, flow, now, stockIndex);
   var systemFlow = dashboardV8FlowState_(currentWork, capacity.active_flow, calibrationSuggestion, config);
+  // Il contratto delle consegne resta disponibile per i consumatori storici,
+  // ma non governa piu' lo stato operativo.
   var legacyFlow = dashboardV3FlowState_(currentWork, capacity, config);
   systemFlow.recent_completion_throughput = legacyFlow.recent_completion_throughput;
   systemFlow.calibration = legacyFlow.calibration;
   var recentRework = dashboardV3RecentRework_(capacity);
   var details = dashboardV3Details_(allJobs, normalized, episodes, columnMap, now, capacity, recentRework);
+  details.active_work = episodes.filter(function(e) {
+    var at = dashboardV2Instant_(e.closed_at).getTime();
+    return e.closed_at && capacity.active_flow && at >= Date.parse(capacity.active_flow.window_start) && at < Date.parse(capacity.active_flow.window_end);
+  }).map(function(e) {
+    var job = indexBy_(allJobs, 'job_id')[e.job_id];
+    return { job_id: e.job_id, cliente: job.client || '', incarico: job.title || '',
+      tipo: e.wip_episode_number === 1 ? 'Prima lavorazione' : 'Rientro',
+      passaggio: e.wip_episode_number, opened_at: e.opened_at, closed_at: e.closed_at, punti: jobPoints_(job) };
+  }).sort(function(a, b) { return dashboardV2Instant_(a.closed_at) - dashboardV2Instant_(b.closed_at); });
   var timing = dashboardV5Timing_(normalized, allJobs);
   details.timing = ['XS', 'S', 'M', 'L', 'XL'].map(function(size) {
     var row = timing.lead_time_by_size[size];
@@ -1531,7 +1542,7 @@ function buildDashboardStateV2_(jobs, visits, config, now, archivedJobs, archive
   flow.flow_status = systemFlow.system_flow_status;
   flow.flow_message = systemFlow.system_flow_message;
   return {
-    contract_version: 'V5-timing',
+    contract_version: 'V8-active-flow',
     generated_at: now.toISOString(),
     currentWork: currentWork,
     futureWork: {

@@ -46,10 +46,14 @@ function verifyV3Ui() {
       !client.includes('Qualità del campione</dt>')],
     ['dettaglio ritmo esplicita finestra e doppia unità',
       client.includes('Flusso attivo osservato') && client.includes('recent.window_weeks') &&
-      client.includes('recent.jobs_per_week') && client.includes('deliveries.visits_per_week') && client.includes('recent.points_per_week') &&
+      client.includes('recent.first_work') && client.includes('recent.resumed_work') && client.includes('recent.points_per_week') &&
       client.includes('settimane ISO complete') &&
       !client.includes('ultime 8 settimane') && style.includes('.v3-flow-rate-table')],
     ['WIP letto dal backend', renderer.includes('current.wip_jobs') && renderer.includes('current.wip_points')],
+    ['flusso attivo e consegne senza proiezione di fatturazione',
+      renderer.includes('flow.recent_active_flow') && renderer.includes('flow.recent_completion_throughput') &&
+      markup.includes('data-v3-detail="active_work"') && !/v8-conclusion|final_conclusions/.test(markup + client) &&
+      !/dashboardV8Conclusions_|min_samples_final_closures|conclusions: conclusions/.test(applicationSources)],
     ['lavoro futuro letto dal backend', renderer.includes('future.future_work_jobs') && renderer.includes('future.future_work_points')],
     ['settimane lette dal backend', renderer.includes('future.committed_weeks')],
     ['rientri aggregati sulla finestra letti dal backend', renderer.includes('rework.rework_wip_entries') && renderer.includes('rework.rework_window_weeks') && renderer.includes('rework.rework_share')],
@@ -141,7 +145,7 @@ function verifyV3Ui() {
     ['aggiornamento lungo segnalato in modo centrale', markup.includes('id="v3-loading-state"') && markup.includes('Il calcolo può richiedere alcuni secondi.') && client.includes('setDashboardV3Loading_(true)') && client.includes('setDashboardV3Loading_(false)')],
     ['dashboard legacy caricata solo su apertura', client.includes("legacy.addEventListener('toggle'") && client.includes("callApi('getMetrics')")],
     ['vista precedente secondaria', markup.includes('<details class="legacy-dashboard">') && markup.includes('Vista precedente — confronto')],
-    ['riferimento configurato e prova recente separati', client.includes('calibration.reference_points_per_week') &&
+    ['riferimento WIP storico e prova recente separati', client.includes('detail.reference_points_per_week') &&
       client.includes('recent.points_per_week') && !client.includes('Riferimento configurato</th>')],
     ['terminologia rientri senza etichette ripresa', markup.includes('Rientri nel lavoro') && !/Episodi di ripresa|Lavori ripresi|Ripresa numero|Data della ripresa/i.test(markup + client)],
     ['drill-down rientri con identificazione umana e provenienza', client.includes("['cliente', 'Cliente'], ['incarico', 'Incarico'], ['numero_rientro', 'Rientro n.'], ['stato_provenienza', 'Stato di provenienza'], ['data_uscita_precedente', 'Data uscita precedente'], ['data_ripresa', 'Data rientro']")],
